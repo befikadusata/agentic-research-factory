@@ -15,11 +15,11 @@ _DEFAULT_MODELS: dict[str, str] = {
     "researcher": "meta-llama/llama-3.3-70b-instruct:free",
     "lead_intel": "meta-llama/llama-3.3-70b-instruct:free",
     "query_rewriter": "groq/llama-3.1-8b-instant",
-    "analyst": "openrouter/free",
-    "writer": "openrouter/free",
-    "editor": "openrouter/free",
-    "reviewer": "openrouter/free",
-    "eval": "openrouter/free",
+    "analyst":  "meta-llama/llama-3.3-70b-instruct:free",
+    "writer":   "meta-llama/llama-3.3-70b-instruct:free",
+    "editor":   "meta-llama/llama-3.3-70b-instruct:free",
+    "reviewer": "meta-llama/llama-3.3-70b-instruct:free",
+    "eval":     "meta-llama/llama-3.3-70b-instruct:free",
 }
 
 

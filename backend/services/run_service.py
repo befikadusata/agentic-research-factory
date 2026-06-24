@@ -146,20 +146,41 @@ async def execute_run(run_id: UUID):
 
             from agents.crew import supervisor
             from tools.rag import extract_citations
-            def _step_cb(step):
-                pass
 
-            task_type = vertical_config["task_type"] if vertical_config else ("lead_intel" if run.format == "lead_intel" else "research_report")
+            loop = asyncio.get_event_loop()
+
+            def _step_cb(step):
+                data = {"step": str(step)[:300]}
+                if hasattr(step, "agent") and hasattr(step.agent, "role"):
+                    data["agent"] = step.agent.role
+                asyncio.run_coroutine_threadsafe(emit(rid, "step", data), loop)
+
+            task_type = vertical_config["task_type"] if vertical_config else "research_report"
+
+            run_start_time = datetime.now(timezone.utc)
 
             # ── RESEARCH ──
             await _set_status(run, RunStatus.researching, db)
             await emit(rid, "status", {"status": "researching"})
+            await emit(rid, "agent_start", {"stage": "research"})
             research_state = await _invoke_supervisor_with_retry(supervisor, {
-                "topic": execution_brief, "vertical": run.vertical, "task_type": task_type,
-                "context_docs": context_docs, "collection_name": collection_name, "output_format": run.format,
-                "research_output": "", "plan_output": "", "step_callback": _step_cb,
-                "user_feedback": user_feedback
+                "topic": execution_brief,
+                "vertical": run.vertical,
+                "task_type": task_type,
+                "context_docs": context_docs,
+                "collection_name": collection_name,
+                "output_format": run.format,
+                "workspace_id": str(run.workspace_id) if run.workspace_id else "",
+                "research_output": "",
+                "plan_output": "",
+                "analysis_output": "",
+                "final_output": "",
+                "review_output": "",
+                "retry_count": 0,
+                "step_callback": _step_cb,
+                "user_feedback": user_feedback,
             }, recursion_limit=15)
+            await emit(rid, "agent_end", {"stage": "research"})
 
             run.research_output = research_state.get("research_output", "")
 
@@ -174,9 +195,11 @@ async def execute_run(run_id: UUID):
             # ── ANALYSIS ──
             await _set_status(run, RunStatus.analyzing, db)
             await emit(rid, "status", {"status": "analyzing"})
+            await emit(rid, "agent_start", {"stage": "analysis"})
             analysis_state = await _invoke_supervisor_with_retry(supervisor, {
                 **research_state, "analysis_output": "", "user_feedback": user_feedback
             }, recursion_limit=15)
+            await emit(rid, "agent_end", {"stage": "analysis"})
 
             run.analysis_output = analysis_state.get("analysis_output", "")
 
@@ -186,9 +209,11 @@ async def execute_run(run_id: UUID):
             # ── WRITING ──
             await _set_status(run, RunStatus.writing, db)
             await emit(rid, "status", {"status": "writing"})
+            await emit(rid, "agent_start", {"stage": "writing"})
             final_state = await _invoke_supervisor_with_retry(supervisor, {
                 **analysis_state, "final_output": "", "user_feedback": user_feedback
             }, recursion_limit=25)
+            await emit(rid, "agent_end", {"stage": "writing"})
 
             run.final_output = final_state.get("final_output", "")
 
@@ -201,6 +226,11 @@ async def execute_run(run_id: UUID):
 
             # STAGE 3: Final Approval
             user_feedback = await _wait_for_hitl(rid, RunStatus.awaiting_final_approval, "hitl_required", run.final_output)
+
+            latency_sec = (datetime.now(timezone.utc) - run_start_time).total_seconds()
+            run.metrics = {**(run.metrics or {}), "latency_sec": latency_sec}
+            flag_modified(run, "metrics")
+            await db.commit()
 
             await _set_status(run, RunStatus.complete, db)
             await emit(rid, "complete", {"output": run.final_output[:500]})

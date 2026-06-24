@@ -69,17 +69,18 @@ def node_plan(state: ResearchState) -> dict:
 def node_research(state: ResearchState) -> dict:
     from agents.researcher import researcher_agent, research_task
     from tools.search import tavily_search_tool
-    from tools.scraper import firecrawl_tool
+    from tools.scraper import firecrawl_tool, batch_scrape_tool
     from tools.rag import RAGTool
-    
+
     # Workspace-based RAG tool
     collection = state.get("collection_name") or "default_workspace"
     custom_rag = RAGTool(collection_name=collection, vertical=state.get("vertical"))
-    
-    # Quick snapshot might skip deep scraping
+
+    # RESERVED: quick_snapshot skips deep scraping (no vertical currently maps to quick_snapshot)
     tools = [tavily_search_tool, custom_rag]
     if state["task_type"] != "quick_snapshot":
         tools.append(firecrawl_tool)
+        tools.append(batch_scrape_tool)
 
     agent = researcher_agent(tools=tools)
     
@@ -166,6 +167,7 @@ def node_edit(state: ResearchState) -> dict:
 # ── routing ──────────────────────────────────────────────────────────────────
 
 def route_after_research(state: ResearchState) -> str:
+    # RESERVED: quick_snapshot skips analysis (no vertical currently maps to quick_snapshot)
     if state["task_type"] == "quick_snapshot":
         return "write"
     return "analyse"
@@ -182,6 +184,7 @@ def route_entry(state: ResearchState) -> str:
     # Full reports now start with planning
     if state["task_type"] == "research_report":
         return "plan"
+    # RESERVED: quick_snapshot falls through to "research" (no vertical currently maps to quick_snapshot)
     return "research"
 
 
@@ -215,7 +218,7 @@ def build_graph() -> StateGraph:
     g.add_conditional_edges(
         START,
         route_entry,
-        {"lead_intel": "lead_intel", "plan": "plan", "research": "research"},
+        {"lead_intel": "lead_intel", "plan": "plan", "research": "research", "analyse": "analyse"},
     )
     
     g.add_edge("plan", "research")

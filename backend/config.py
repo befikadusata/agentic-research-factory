@@ -23,11 +23,11 @@ class Settings(BaseSettings):
     RESEARCHER_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
     LEAD_INTEL_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
     QUERY_REWRITER_MODEL: str = "groq/llama-3.1-8b-instant"
-    ANALYST_MODEL: str = "openrouter/free"
-    WRITER_MODEL: str = "openrouter/free"
-    EDITOR_MODEL: str = "openrouter/free"
-    REVIEWER_MODEL: str = "openrouter/free"
-    EVAL_MODEL: str = "openrouter/free"
+    ANALYST_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
+    WRITER_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
+    EDITOR_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
+    REVIEWER_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
+    EVAL_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
 
     # Gemini embeddings for RAG.
     EMBEDDING_MODEL: str = "gemini-embedding-2"
