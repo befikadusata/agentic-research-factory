@@ -1,14 +1,28 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 import json
+from database import get_db
+from models import Run
 from utils.redis_client import get_redis_client
+from auth import get_current_user, assert_run_access
 
 router = APIRouter()
 LOG_CHANNEL_PREFIX = "run_log:"
 
+
 @router.get("/{run_id}/stream")
-async def stream_run(run_id: UUID):
+async def stream_run(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
+):
+    run = await db.get(Run, run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    await assert_run_access(run, user_id, db)
+
     rid = str(run_id)
     redis_client = await get_redis_client()
     pubsub = redis_client.pubsub()
