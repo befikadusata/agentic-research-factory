@@ -13,7 +13,7 @@ export type RunStatus =
 export type SSEEvent =
   | { type: "status"; data: { status: RunStatus } }
   | { type: "log"; data: LogEntry }
-  | { type: "hitl_required"; data: { research_summary: string } }
+  | { type: "hitl_required"; data: { stage: string; summary: string } }
   | { type: "complete"; data: { final_output: string } }
   | { type: "error"; data: { message: string } };
 
@@ -142,6 +142,7 @@ export interface Run {
 export interface RunDetail extends Run {
   logs: LogEntry[];
   research_output: string | null;
+  analysis_output: string | null;
   final_output: string | null;
 }
 

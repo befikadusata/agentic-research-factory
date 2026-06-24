@@ -101,7 +101,7 @@ test.describe("Core Flow Smoke Tests", () => {
           id: "hitl-run",
           topic: "Competitive landscape",
           format: "report",
-          status: "awaiting_hitl",
+          status: "awaiting_research_approval",
           workspace_id: null,
           vertical: null,
           created_at: "2026-01-01T00:00:00Z",
@@ -132,9 +132,9 @@ test.describe("Core Flow Smoke Tests", () => {
     await page.goto("/runs/hitl-run");
     await expect(page.getByText(/Research Complete/i)).toBeVisible();
     await page.getByPlaceholder(/Focus more on pricing strategy/i).fill("Focus on pricing and enterprise segment.");
-    await page.getByRole("button", { name: /Approve & Continue Writing/i }).click();
+    await page.getByRole("button", { name: /Approve & Continue to Analysis/i }).click();
 
-    await expect(page.getByText(/Status:\s*Writing/i)).toBeVisible();
+    await expect(page.getByText(/Research Complete — Review Before Analysis/i)).not.toBeVisible();
     expect(approvePayload).not.toBeNull();
     expect(approvePayload?.instruction).toBe("Focus on pricing and enterprise segment.");
   });

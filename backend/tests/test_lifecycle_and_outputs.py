@@ -25,10 +25,15 @@ async def _create_run(
 
 
 @pytest.mark.asyncio
-async def test_hitl_approve_requires_ownership(client, auth_as, db_session):
+@pytest.mark.parametrize("pause_status", [
+    RunStatus.awaiting_research_approval,
+    RunStatus.awaiting_analysis_approval,
+    RunStatus.awaiting_final_approval,
+])
+async def test_hitl_approve_requires_ownership(client, auth_as, db_session, pause_status):
     owner_id = "owner@example.com"
     other_id = "other@example.com"
-    run_id = await _create_run(db_session, owner_id, RunStatus.awaiting_research_approval)
+    run_id = await _create_run(db_session, owner_id, pause_status)
 
     auth_as(other_id)
     denied = await client.post(f"/runs/{run_id}/approve", json={"instruction": "continue"})
@@ -38,6 +43,17 @@ async def test_hitl_approve_requires_ownership(client, auth_as, db_session):
     allowed = await client.post(f"/runs/{run_id}/approve", json={"instruction": "continue"})
     assert allowed.status_code == 200
     assert allowed.json()["status"] == "resumed"
+
+
+@pytest.mark.asyncio
+async def test_hitl_approve_no_instruction(client, auth_as, db_session):
+    owner_id = "owner@example.com"
+    run_id = await _create_run(db_session, owner_id, RunStatus.awaiting_analysis_approval)
+
+    auth_as(owner_id)
+    response = await client.post(f"/runs/{run_id}/approve", json={})
+    assert response.status_code == 200
+    assert response.json()["status"] == "resumed"
 
 
 @pytest.mark.asyncio

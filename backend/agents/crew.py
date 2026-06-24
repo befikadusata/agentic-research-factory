@@ -153,6 +153,8 @@ def node_write(state: ResearchState) -> dict:
     task = write_task(agent, state["topic"], state["output_format"])
     prior = state.get("analysis_output") or state.get("research_output", "")
     task.description = f"Prior work:\n{prior}\n\n" + task.description
+    if state.get("user_feedback"):
+        task.description += f"\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
     return _run_crew_node([agent], [task], state, "final_output")
 
 
@@ -176,11 +178,15 @@ def route_after_research(state: ResearchState) -> str:
 def route_entry(state: ResearchState) -> str:
     if state["task_type"] == "lead_intel":
         return "lead_intel"
-    
-    # Resume logic: If we already have research output, skip to analysis
+
+    # Resume for writing phase: analysis already done
+    if state.get("analysis_output"):
+        return "write"
+
+    # Resume for analysis phase: research already done
     if state.get("research_output"):
         return "analyse"
-        
+
     # Full reports now start with planning
     if state["task_type"] == "research_report":
         return "plan"
@@ -218,7 +224,7 @@ def build_graph() -> StateGraph:
     g.add_conditional_edges(
         START,
         route_entry,
-        {"lead_intel": "lead_intel", "plan": "plan", "research": "research", "analyse": "analyse"},
+        {"lead_intel": "lead_intel", "plan": "plan", "research": "research", "analyse": "analyse", "write": "write"},
     )
     
     g.add_edge("plan", "research")

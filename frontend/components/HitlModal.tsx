@@ -8,14 +8,45 @@ import { approveHitl } from "@/lib/api";
 
 interface Props {
   runId: string;
-  researchSummary: string;
+  stage: string;
+  stageSummary: string;
   onApproved: () => void;
 }
 
-export function HitlModal({ runId, researchSummary, onApproved }: Props) {
+const STAGE_COPY: Record<string, { title: string; description: string; cta: string; feedbackLabel: string }> = {
+  awaiting_research_approval: {
+    title: "Research Complete — Review Before Analysis",
+    description: "Review the research below, optionally redirect the focus, then approve to continue to analysis.",
+    cta: "Approve & Continue to Analysis",
+    feedbackLabel: "Optional: redirect the focus for the analysis phase",
+  },
+  awaiting_analysis_approval: {
+    title: "Analysis Complete — Review Before Writing",
+    description: "Review the analysis below, optionally redirect the focus, then approve to begin writing.",
+    cta: "Approve & Continue Writing",
+    feedbackLabel: "Optional: redirect the focus for the writing phase",
+  },
+  awaiting_final_approval: {
+    title: "Draft Complete — Review Before Publishing",
+    description: "Review the final draft below, then approve to publish.",
+    cta: "Approve & Publish",
+    feedbackLabel: "Optional: add final notes or corrections",
+  },
+};
+
+const DEFAULT_COPY = {
+  title: "Review Required",
+  description: "Review the output and approve to continue.",
+  cta: "Approve & Continue",
+  feedbackLabel: "Optional: add instructions",
+};
+
+export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
   const [instruction, setInstruction] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const copy = STAGE_COPY[stage] ?? DEFAULT_COPY;
 
   const PROMPT_TEMPLATES = [
     "Focus more on pricing strategy.",
@@ -43,18 +74,18 @@ export function HitlModal({ runId, researchSummary, onApproved }: Props) {
         <Dialog.Overlay className="fixed inset-0 bg-black/60 z-40" />
         <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl bg-zinc-900 rounded-xl shadow-2xl p-6 border border-zinc-700">
           <Dialog.Title className="text-xl font-bold mb-1">
-            ⏸ Research Complete — Review Before Writing
+            ⏸ {copy.title}
           </Dialog.Title>
           <Dialog.Description className="text-zinc-400 text-sm mb-4">
-            Review the summary below, optionally redirect the focus, then approve to continue.
+            {copy.description}
           </Dialog.Description>
 
           <div className="bg-zinc-800 rounded-lg p-4 max-h-64 overflow-y-auto text-sm mb-4 prose prose-invert prose-sm max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{researchSummary}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{stageSummary}</ReactMarkdown>
           </div>
 
           <label className="block text-sm font-medium mb-1 text-zinc-300">
-            Optional: redirect the focus for the writing phase
+            {copy.feedbackLabel}
           </label>
           <div className="flex flex-wrap gap-2 mb-2">
             {PROMPT_TEMPLATES.map((t) => (
@@ -82,7 +113,7 @@ export function HitlModal({ runId, researchSummary, onApproved }: Props) {
               disabled={loading}
               className="bg-violet-600 hover:bg-violet-700 text-white font-medium px-6 py-2 rounded-lg disabled:opacity-50"
             >
-              {loading ? "Resuming…" : "Approve & Continue Writing"}
+              {loading ? "Resuming…" : copy.cta}
             </button>
           </div>
         </Dialog.Content>

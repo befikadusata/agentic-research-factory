@@ -10,19 +10,30 @@ import type { RunDetail, LogEntry } from "@/lib/types";
 import { VERTICALS } from "@/lib/types";
 
 const STATUS_LABEL: Record<string, string> = {
-  pending:       "Pending",
-  researching:   "Researching…",
-  awaiting_hitl: "Awaiting Review",
-  writing:       "Writing…",
-  complete:      "Complete",
-  failed:        "Failed",
+  pending:                    "Pending",
+  researching:                "Researching…",
+  awaiting_hitl:              "Awaiting Review",
+  awaiting_research_approval: "Awaiting Research Review",
+  analyzing:                  "Analyzing…",
+  awaiting_analysis_approval: "Awaiting Analysis Review",
+  writing:                    "Writing…",
+  awaiting_final_approval:    "Awaiting Final Review",
+  complete:                   "Complete",
+  failed:                     "Failed",
 };
+
+const HITL_STATUSES = new Set([
+  "awaiting_research_approval",
+  "awaiting_analysis_approval",
+  "awaiting_final_approval",
+]);
 
 export default function RunPage() {
   const { id } = useParams<{ id: string }>();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [hitlSummary, setHitlSummary] = useState<string | null>(null);
+  const [hitlStage, setHitlStage] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
   
@@ -32,8 +43,13 @@ export default function RunPage() {
         setRun(r);
         setLogs(r.logs ?? []);
         setStatus(r.status);
-        if (r.status === "awaiting_hitl" && r.research_output) {
-          setHitlSummary(r.research_output.slice(0, 2000));
+        if (HITL_STATUSES.has(r.status)) {
+          setHitlStage(r.status);
+          const summary =
+            r.status === "awaiting_research_approval" ? r.research_output :
+            r.status === "awaiting_analysis_approval" ? r.analysis_output :
+            r.final_output;
+          if (summary) setHitlSummary(summary.slice(0, 2000));
         }
       })
       .catch((e) => setLoadError(e.message));
@@ -50,8 +66,9 @@ export default function RunPage() {
         } else if (parsed.type === "status") {
             setStatus(parsed.data.status);
         } else if (parsed.type === "hitl_required") {
-            setHitlSummary(parsed.data.research_summary);
-            setStatus("awaiting_hitl");
+            setHitlStage(parsed.data.stage);
+            setHitlSummary(parsed.data.summary);
+            setStatus(parsed.data.stage);
         } else if (parsed.type === "complete") {
             setStatus("complete");
             getRun(id).then(setRun);
@@ -104,13 +121,14 @@ export default function RunPage() {
 
       <AgentLog logs={logs} />
 
-      {status === "awaiting_hitl" && hitlSummary && (
+      {HITL_STATUSES.has(status) && hitlSummary && hitlStage && (
         <HitlModal
           runId={id}
-          researchSummary={hitlSummary}
+          stage={hitlStage}
+          stageSummary={hitlSummary}
           onApproved={() => {
             setHitlSummary(null);
-            setStatus("writing");
+            setHitlStage(null);
           }}
         />
       )}

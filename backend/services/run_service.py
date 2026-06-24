@@ -53,7 +53,7 @@ async def _wait_for_hitl(run_id: str, status: RunStatus, emit_event: str, summar
         run = await db.get(Run, run_id)
         if run:
             await _set_status(run, status, db)
-            await emit(run_id, emit_event, {"research_summary": summary[:2000]})
+            await emit(run_id, emit_event, {"stage": status.value, "summary": summary[:2000]})
 
     redis_client = await get_redis_client()
     signal_key = f"{HITL_SIGNAL_KEY}{run_id}"
@@ -248,6 +248,6 @@ async def execute_run(run_id: UUID):
 async def approve_hitl(run_id: str, instruction: str | None = None):
     redis_client = await get_redis_client()
     if instruction:
-        await redis_client.set(f"{HITL_INSTRUCTION_KEY}{run_id}", instruction)
+        await redis_client.set(f"{HITL_INSTRUCTION_KEY}{run_id}", instruction, ex=7200)
     # Set the signal key
-    await redis_client.set(f"{HITL_SIGNAL_KEY}{run_id}", "approved")
+    await redis_client.set(f"{HITL_SIGNAL_KEY}{run_id}", "approved", ex=7200)
