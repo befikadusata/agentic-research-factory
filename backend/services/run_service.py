@@ -93,23 +93,59 @@ async def execute_run(run_id: UUID):
             run = await db.get(Run, run_id)
             if not run: return
 
-            collection_name = f"run_{rid.replace('-', '_')}"
+            # ── Resolve collection name ──
+            if run.workspace_id:
+                collection_name = f"workspace_{run.workspace_id}"
+            else:
+                collection_name = f"run_{rid.replace('-', '_')}"
+
+            # ── Wait for referenced documents to be ingested ──
             context_docs = ""
             if run.doc_paths:
-                from services.pdf_service import parse_pdfs
-                from tools.rag import ingest_documents
-                chunks = await parse_pdfs(run.doc_paths)
-                if chunks:
-                    ingest_documents(chunks, collection_name=collection_name)
-                    context_docs = f"Documents ingested into collection: {collection_name}."
+                from models import Document, DocumentStatus
+                from sqlalchemy import select as sa_select
+                from uuid import UUID as _UUID
+
+                doc_ids = [_UUID(d) for d in run.doc_paths if d]
+                POLL_INTERVAL = 5
+                POLL_TIMEOUT = 300
+                elapsed = 0
+
+                while elapsed < POLL_TIMEOUT:
+                    result = await db.execute(
+                        sa_select(Document).where(Document.id.in_(doc_ids))
+                    )
+                    docs = result.scalars().all()
+
+                    failed = [d for d in docs if d.status == DocumentStatus.failed]
+                    if failed:
+                        names = ", ".join(d.filename for d in failed)
+                        run.error_message = f"Document ingestion failed for: {names}"
+                        await _set_status(run, RunStatus.failed, db)
+                        await emit(rid, "error", {"message": run.error_message})
+                        return
+
+                    pending = [d for d in docs if d.status == DocumentStatus.pending]
+                    if not pending:
+                        context_docs = f"Documents ingested into collection: {collection_name}."
+                        break
+
+                    await emit(rid, "status", {"status": "waiting_for_documents", "pending": len(pending)})
+                    await asyncio.sleep(POLL_INTERVAL)
+                    elapsed += POLL_INTERVAL
+                    # Expire cached objects so next iteration re-fetches from DB
+                    await db.execute(sa_select(Document).where(Document.id.in_(doc_ids)))
+                else:
+                    run.error_message = "Timed out waiting for document ingestion"
+                    await _set_status(run, RunStatus.failed, db)
+                    await emit(rid, "error", {"message": run.error_message})
+                    return
 
             vertical_config = get_vertical(run.vertical)
             execution_brief = build_execution_brief(run.topic, run.vertical, run.vertical_inputs or {})
 
             from agents.crew import supervisor
             def _step_cb(step):
-                # Note: this callback is tricky in distributed environments.
-                # Simplification: Log to DB or use emit here if safe.
                 pass
 
             task_type = vertical_config["task_type"] if vertical_config else ("lead_intel" if run.format == "lead_intel" else "research_report")
@@ -123,9 +159,9 @@ async def execute_run(run_id: UUID):
                 "research_output": "", "plan_output": "", "step_callback": _step_cb,
                 "user_feedback": user_feedback
             }, recursion_limit=15)
-            
+
             run.research_output = research_state.get("research_output", "")
-            
+
             # STAGE 1: Research Approval
             user_feedback = await _wait_for_hitl(rid, RunStatus.awaiting_research_approval, "hitl_required", run.research_output)
 
@@ -135,9 +171,9 @@ async def execute_run(run_id: UUID):
             analysis_state = await _invoke_supervisor_with_retry(supervisor, {
                 **research_state, "analysis_output": "", "user_feedback": user_feedback
             }, recursion_limit=15)
-            
+
             run.analysis_output = analysis_state.get("analysis_output", "")
-            
+
             # STAGE 2: Analysis Approval
             user_feedback = await _wait_for_hitl(rid, RunStatus.awaiting_analysis_approval, "hitl_required", run.analysis_output)
 
@@ -147,9 +183,9 @@ async def execute_run(run_id: UUID):
             final_state = await _invoke_supervisor_with_retry(supervisor, {
                 **analysis_state, "final_output": "", "user_feedback": user_feedback
             }, recursion_limit=25)
-            
+
             run.final_output = final_state.get("final_output", "")
-            
+
             # STAGE 3: Final Approval
             user_feedback = await _wait_for_hitl(rid, RunStatus.awaiting_final_approval, "hitl_required", run.final_output)
 

@@ -48,21 +48,23 @@ async def test_list_runs_status_filter(client, auth_as, db_session):
 
 @pytest.mark.asyncio
 async def test_list_runs_pagination(client, auth_as, db_session):
-    uid = "page-user@example.com"
+    import uuid as _uuid
+    uid = f"page-user-{_uuid.uuid4()}@example.com"
     auth_as(uid)
-    r1 = await _make_run(db_session, uid, RunStatus.complete)
-    r2 = await _make_run(db_session, uid, RunStatus.complete)
-    r3 = await _make_run(db_session, uid, RunStatus.complete)
+    await _make_run(db_session, uid, RunStatus.complete)
+    await _make_run(db_session, uid, RunStatus.complete)
+    await _make_run(db_session, uid, RunStatus.complete)
 
     # limit=1 returns one result
     resp = await client.get("/runs?limit=1&offset=0")
     assert resp.status_code == 200
     assert len(resp.json()) == 1
 
-    # offset skips records
+    # offset skips records — exactly 3 rows exist for this uid
     resp_all = await client.get("/runs?limit=10&offset=0")
     resp_offset = await client.get("/runs?limit=10&offset=1")
-    assert len(resp_offset.json()) == len(resp_all.json()) - 1
+    assert len(resp_all.json()) == 3
+    assert len(resp_offset.json()) == 2
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,18 @@ from datetime import datetime, timezone
 from database import Base
 
 
+class DocumentStatus(str, enum.Enum):
+    pending = "pending"
+    ready   = "ready"
+    failed  = "failed"
+
+
+class DocumentStatus(str, enum.Enum):
+    pending = "pending"
+    ready   = "ready"
+    failed  = "failed"
+
+
 class RunStatus(str, enum.Enum):
     pending                    = "pending"
     researching                = "researching"
@@ -46,6 +58,21 @@ class RunCost(Base):
     output_tokens = Column(Integer, nullable=False)
     total_cost = Column(Float, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id    = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False, index=True)
+    uploaded_by     = Column(String(255), nullable=False)
+    filename        = Column(String(255), nullable=False)
+    file_path       = Column(String(512), nullable=False)
+    status          = Column(SAEnum(DocumentStatus), default=DocumentStatus.pending, nullable=False)
+    chunk_count     = Column(Integer, nullable=True)
+    error_message   = Column(Text, nullable=True)
+    file_size_bytes = Column(Integer, nullable=False)
+    created_at      = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 
 class Run(Base):
     __tablename__ = "runs"
