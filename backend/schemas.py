@@ -54,3 +54,4 @@ class RunDetailResponse(RunResponse):
     analysis_output: Optional[str]
     final_output: Optional[str]
     error_message: Optional[str]
+    citations: list[dict] = Field(default_factory=list)

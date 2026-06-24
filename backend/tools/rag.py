@@ -1,9 +1,11 @@
 from crewai.tools import BaseTool
 import uuid
+import re
 import httpx
+from typing import Optional
 from config import settings
 from logger import logger
-from services.query_rewriter import rewrite_query
+from services.query_rewriter import generate_sub_queries
 import vecs
 
 # ---------------------------------------------------------------------------
@@ -79,13 +81,13 @@ class RAGTool(BaseTool):
         "Input: a query string. Returns matching excerpts from the user's uploaded files with metadata."
     )
     collection_name: str = "default_workspace"
+    vertical: Optional[str] = None
 
-    def _run(self, query: str, vertical_filter: str = None) -> str:
-        logger.info("rag_search_start", query=query, collection=self.collection_name, vertical=vertical_filter)
+    def _run(self, query: str) -> str:
+        logger.info("rag_search_start", query=query, collection=self.collection_name, vertical=self.vertical)
         try:
-            # Rewrite query before embedding
-            rewritten_query = rewrite_query(query)
-            logger.info("rag_query_rewritten", original=query, rewritten=rewritten_query)
+            sub_queries = generate_sub_queries(query)
+            logger.info("rag_sub_queries", count=len(sub_queries), queries=sub_queries)
 
             vx = _get_client()
             collection = vx.get_or_create_collection(
@@ -93,33 +95,40 @@ class RAGTool(BaseTool):
                 dimension=settings.EMBEDDING_DIMENSION,
             )
 
-            query_vec = _embed([rewritten_query])[0]
+            query_vecs = _embed(sub_queries)
 
-            # Prepare filter
-            q_filter = {"vertical": {"$eq": vertical_filter}} if vertical_filter else None
+            q_filter = {"vertical": {"$eq": self.vertical}} if self.vertical else None
 
-            # Perform Hybrid Search: Retrieve larger pool (20) for re-ranking
-            results = collection.query(
-                data=query_vec, 
-                limit=20, 
-                include_metadata=True, 
-                include_value=False,
-                query_filter=q_filter,
-                search_params={"bm25_query": query}
-            )
+            # Fan-out: one vecs query per sub-query, dedup by chunk ID
+            seen_ids: set = set()
+            merged: list = []
+            for sq, vec in zip(sub_queries, query_vecs):
+                candidates = collection.query(
+                    data=vec,
+                    limit=10,
+                    include_metadata=True,
+                    include_value=False,
+                    query_filter=q_filter,
+                    search_params={"bm25_query": sq},
+                )
+                for res in candidates:
+                    chunk_id = res[0]
+                    if chunk_id not in seen_ids:
+                        seen_ids.add(chunk_id)
+                        merged.append(res)
 
-            if not results:
+            if not merged:
                 return "No relevant documents found."
-            # Re-rank results
+
+            # Re-rank merged deduplicated pool against original query
             reranker = _reranker()
-            pairs = [(query, res[2].get("text", "")) for res in results]
+            pairs = [(query, res[2].get("text", "")) for res in merged]
             scores = reranker.predict(pairs)
 
-            # Sort by score descending and take top 5
             scored_results = sorted(
-                zip(results, scores), key=lambda x: x[1], reverse=True
+                zip(merged, scores), key=lambda x: x[1], reverse=True
             )
-            top_results = [res[0] for res, score in scored_results[:5]]
+            top_results = [res for res, _ in scored_results[:5]]
 
             output = []
             for res in top_results:
@@ -128,7 +137,7 @@ class RAGTool(BaseTool):
                 source = metadata.get("source", "Unknown Source")
                 page = metadata.get("page", "N/A")
                 output.append(f"SOURCE: {source} (Page: {page})\n---\n{text}")
-            
+
             return "\n\n================\n\n".join(output)
         except Exception as e:
             logger.warning("rag_search_failed", error=str(e))
@@ -170,3 +179,16 @@ def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", 
 
 
 # rag_tool = RAGTool() # Removed to force instantiation with specific collection_name
+
+
+def extract_citations(text: str) -> list[dict]:
+    """Parse 'SOURCE: <file> (Page: <N>)' lines into a deduped list."""
+    pattern = re.compile(r"SOURCE:\s*(.+?)\s*\(Page:\s*(.+?)\)")
+    seen: set = set()
+    citations = []
+    for m in pattern.finditer(text):
+        key = (m.group(1).strip(), m.group(2).strip())
+        if key not in seen:
+            seen.add(key)
+            citations.append({"source": key[0], "page": key[1]})
+    return citations

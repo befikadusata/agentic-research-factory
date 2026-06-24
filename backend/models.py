@@ -68,6 +68,7 @@ class Document(Base):
     filename        = Column(String(255), nullable=False)
     file_path       = Column(String(512), nullable=False)
     status          = Column(SAEnum(DocumentStatus), default=DocumentStatus.pending, nullable=False)
+    vertical        = Column(String, nullable=True)
     chunk_count     = Column(Integer, nullable=True)
     error_message   = Column(Text, nullable=True)
     file_size_bytes = Column(Integer, nullable=False)

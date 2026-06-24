@@ -145,6 +145,7 @@ async def execute_run(run_id: UUID):
             execution_brief = build_execution_brief(run.topic, run.vertical, run.vertical_inputs or {})
 
             from agents.crew import supervisor
+            from tools.rag import extract_citations
             def _step_cb(step):
                 pass
 
@@ -161,6 +162,11 @@ async def execute_run(run_id: UUID):
             }, recursion_limit=15)
 
             run.research_output = research_state.get("research_output", "")
+
+            # Persist citations from research output
+            citations = extract_citations(run.research_output or "")
+            run.metrics = {**(run.metrics or {}), "citations": citations}
+            flag_modified(run, "metrics")
 
             # STAGE 1: Research Approval
             user_feedback = await _wait_for_hitl(rid, RunStatus.awaiting_research_approval, "hitl_required", run.research_output)
@@ -185,6 +191,13 @@ async def execute_run(run_id: UUID):
             }, recursion_limit=25)
 
             run.final_output = final_state.get("final_output", "")
+
+            # Merge final output citations (dedup by source+page)
+            final_citations = extract_citations(run.final_output or "")
+            existing = (run.metrics or {}).get("citations", [])
+            merged = {(c["source"], c["page"]): c for c in existing + final_citations}
+            run.metrics = {**(run.metrics or {}), "citations": list(merged.values())}
+            flag_modified(run, "metrics")
 
             # STAGE 3: Final Approval
             user_feedback = await _wait_for_hitl(rid, RunStatus.awaiting_final_approval, "hitl_required", run.final_output)

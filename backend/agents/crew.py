@@ -74,7 +74,7 @@ def node_research(state: ResearchState) -> dict:
     
     # Workspace-based RAG tool
     collection = state.get("collection_name") or "default_workspace"
-    custom_rag = RAGTool(collection_name=collection)
+    custom_rag = RAGTool(collection_name=collection, vertical=state.get("vertical"))
     
     # Quick snapshot might skip deep scraping
     tools = [tavily_search_tool, custom_rag]

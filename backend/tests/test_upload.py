@@ -66,13 +66,14 @@ async def test_upload_creates_document_record(client, mock_user, db_session):
     with patch("celery_app.ingest_doc_task") as mock_task:
         mock_task.delay = MagicMock()
         response = await client.post(
-            f"/upload?workspace_id={ws.id}",
+            f"/upload?workspace_id={ws.id}&vertical=lead_intel",
             files=_pdf_file(),
         )
 
     assert response.status_code == 201
     data = response.json()
     assert data["status"] == "pending"
+    assert data["vertical"] == "lead_intel"
     assert "doc_id" in data
 
     from uuid import UUID
@@ -80,6 +81,25 @@ async def test_upload_creates_document_record(client, mock_user, db_session):
     assert doc is not None
     assert doc.status == DocumentStatus.pending
     assert doc.workspace_id == ws.id
+    assert doc.vertical == "lead_intel"
+
+
+@pytest.mark.asyncio
+async def test_upload_vertical_optional(client, mock_user, db_session):
+    ws = await _make_workspace(db_session, mock_user)
+
+    with patch("celery_app.ingest_doc_task") as mock_task:
+        mock_task.delay = MagicMock()
+        response = await client.post(
+            f"/upload?workspace_id={ws.id}",
+            files=_pdf_file(),
+        )
+
+    assert response.status_code == 201
+    data = response.json()
+    from uuid import UUID
+    doc = await db_session.get(Document, UUID(data["doc_id"]))
+    assert doc.vertical is None
 
 
 # ── GET /upload/{doc_id} ──────────────────────────────────────────────────────
@@ -227,7 +247,51 @@ async def test_ingest_doc_sets_ready(db_session):
     await db_session.refresh(doc)
     assert doc.status == DocumentStatus.ready
     assert doc.chunk_count == 3
-    mock_ingest.assert_called_once()
+    mock_ingest.assert_called_once_with(
+        mock_chunks,
+        collection_name=f"workspace_{ws.id}",
+        vertical=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ingest_doc_passes_vertical(db_session):
+    ws = Workspace(name="ingest-ws-v", owner_id="user3")
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    doc = Document(
+        workspace_id=ws.id,
+        uploaded_by="user3",
+        filename="lead.pdf",
+        file_path="/tmp/lead.pdf",
+        file_size_bytes=200,
+        vertical="lead_intel",
+    )
+    db_session.add(doc)
+    await db_session.commit()
+    await db_session.refresh(doc)
+
+    mock_chunks = [{"text": "chunk", "metadata": {"source": "lead.pdf", "page": None}}]
+
+    with patch("services.ingest_service.AsyncSessionLocal") as mock_session_cls, \
+         patch("services.ingest_service.parse_pdf", new_callable=AsyncMock, return_value=mock_chunks), \
+         patch("services.ingest_service.ingest_documents") as mock_ingest:
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=db_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_session_cls.return_value = mock_ctx
+
+        from services.ingest_service import ingest_doc
+        await ingest_doc(doc.id)
+
+    mock_ingest.assert_called_once_with(
+        mock_chunks,
+        collection_name=f"workspace_{ws.id}",
+        vertical="lead_intel",
+    )
 
 
 @pytest.mark.asyncio

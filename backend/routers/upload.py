@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID, uuid4
+from typing import Optional
 import os
 from database import get_db
 from models import Document, DocumentStatus, WorkspaceMember
@@ -18,6 +19,7 @@ MAX_SIZE_MB = 20
 async def upload_file(
     file: UploadFile = File(...),
     workspace_id: UUID = Query(...),
+    vertical: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
@@ -42,6 +44,7 @@ async def upload_file(
         filename=file.filename,
         file_path=path,
         file_size_bytes=len(content),
+        vertical=vertical,
     )
     db.add(doc)
     await db.commit()
@@ -49,7 +52,7 @@ async def upload_file(
     from celery_app import ingest_doc_task
     ingest_doc_task.delay(str(doc_id))
 
-    return {"doc_id": str(doc_id), "filename": file.filename, "status": "pending"}
+    return {"doc_id": str(doc_id), "filename": file.filename, "status": "pending", "vertical": vertical}
 
 
 @router.get("/{doc_id}")
@@ -68,6 +71,7 @@ async def get_doc_status(
         "doc_id": str(doc.id),
         "filename": doc.filename,
         "status": doc.status,
+        "vertical": doc.vertical,
         "chunk_count": doc.chunk_count,
         "error_message": doc.error_message,
     }

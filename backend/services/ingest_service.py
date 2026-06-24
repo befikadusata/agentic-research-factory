@@ -14,7 +14,7 @@ async def ingest_doc(doc_id: UUID) -> None:
         try:
             chunks = await parse_pdf(doc.file_path)
             if chunks:
-                ingest_documents(chunks, collection_name=f"workspace_{doc.workspace_id}")
+                ingest_documents(chunks, collection_name=f"workspace_{doc.workspace_id}", vertical=doc.vertical)
             doc.status = DocumentStatus.ready
             doc.chunk_count = len(chunks)
             logger.info("ingest_complete", doc_id=str(doc_id), chunks=len(chunks))

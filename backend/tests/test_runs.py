@@ -116,3 +116,38 @@ async def test_emit_persists_to_db(db_session, auth_as, client):
     assert len(data["logs"]) == 1
     assert data["logs"][0]["type"] == "status"
 
+
+@pytest.mark.asyncio
+async def test_run_detail_citations_populated(client, auth_as, db_session):
+    uid = "citations-user@example.com"
+    auth_as(uid)
+
+    run = Run(
+        user_id=uid,
+        topic="Citations test",
+        format="report",
+        status=RunStatus.complete,
+        doc_paths=[],
+        metrics={"citations": [{"source": "a.pdf", "page": "1"}, {"source": "b.pdf", "page": "5"}]},
+    )
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(run)
+
+    resp = await client.get(f"/runs/{run.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "citations" in data
+    assert data["citations"] == [{"source": "a.pdf", "page": "1"}, {"source": "b.pdf", "page": "5"}]
+
+
+@pytest.mark.asyncio
+async def test_run_detail_citations_empty_when_no_metrics(client, auth_as, db_session):
+    uid = "no-citations-user@example.com"
+    auth_as(uid)
+    run = await _make_run(db_session, uid)
+
+    resp = await client.get(f"/runs/{run.id}")
+    assert resp.status_code == 200
+    assert resp.json()["citations"] == []
+

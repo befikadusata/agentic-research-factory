@@ -94,6 +94,21 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Users can trace claims back to source material.
   - Docs from one workspace do not leak into another.
 
+## Sprint 4b: Multi-Query Fan-Out Retrieval
+
+- Goal: improve RAG recall for complex research topics where a single rewritten query misses relevant angles.
+- Scope:
+  - Extend `query_rewriter.py` to produce 2–3 sub-queries from a single input.
+  - `RAGTool._run` fetches candidates for each sub-query, merges the pools, deduplicates by chunk ID, then re-ranks the combined set with the cross-encoder.
+  - Keep total latency increase under 2× single-query baseline.
+- Key files:
+  - [backend/services/query_rewriter.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/services/query_rewriter.py)
+  - [backend/tools/rag.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/tools/rag.py)
+- Done when:
+  - A multi-faceted query returns chunks from distinct angles.
+  - Merge and dedup logic is covered by unit tests.
+  - Latency regression test confirms < 2× overhead vs. single-query path.
+
 ## Sprint 5: Agent Orchestration
 
 - Goal: make the multi-agent pipeline behave deterministically enough to support product workflows.

@@ -75,4 +75,7 @@ async def get_run(
                 raise HTTPException(404, "Run not found")
         else:
             raise HTTPException(404, "Run not found")
-    return run
+    return RunDetailResponse(
+        **{k: v for k, v in run.__dict__.items() if not k.startswith("_")},
+        citations=(run.metrics or {}).get("citations", []),
+    )
