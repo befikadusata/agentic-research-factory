@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator # NEW
 from database import init_db
 from routers import runs, stream, hitl, upload, outputs, workspaces, analytics
-from config import settings
+from config import settings, validate_config
 
 import uuid
 from logger import logger, request_id_var
@@ -12,8 +12,7 @@ from fastapi import Request
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Database initialization is now handled by Alembic migrations
-    # await init_db()
+    validate_config(settings)
     yield
 
 app = FastAPI(title="Agentic Research Factory", lifespan=lifespan)

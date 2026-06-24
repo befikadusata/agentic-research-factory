@@ -1,5 +1,5 @@
 from crewai import Agent, Task
-from config import settings
+from services.llm_router import get_model
 
 FORMAT_INSTRUCTIONS = {
     "report": """
@@ -45,7 +45,7 @@ def writer_agent() -> Agent:
             "while retaining depth. You treat every citation as a badge of authority."
         ),
         tools=[],
-        llm=settings.LLM_MODEL,
+        llm=get_model("writer"),
         verbose=True,
         max_iter=3,
     )

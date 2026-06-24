@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import "../globals.css";
-import { SessionProvider } from "../providers";
+import "./globals.css";
+import { SessionProvider } from "./providers";
 import { LayoutGrid, Plus, History } from "lucide-react";
 
 export const metadata: Metadata = {

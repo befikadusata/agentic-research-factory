@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 from database import AsyncSessionLocal
 from models import Run, RunStatus
 from logger import logger
@@ -20,9 +21,20 @@ HITL_SIGNAL_KEY = "run_hitl_signal:"
 HITL_INSTRUCTION_KEY = "run_hitl_instr:"
 
 async def emit(run_id: str, event_type: str, data: dict):
+    entry = {"type": event_type, "data": data, "ts": datetime.now(timezone.utc).isoformat()}
+    try:
+        async with AsyncSessionLocal() as db:
+            run = await db.get(Run, UUID(run_id))
+            if run is not None:
+                logs = list(run.logs or [])
+                logs.append(entry)
+                run.logs = logs
+                flag_modified(run, "logs")
+                await db.commit()
+    except Exception:
+        pass  # DB persistence is best-effort; Redis publish is authoritative for live streaming
     redis_client = await get_redis_client()
-    event = {"type": event_type, "data": data}
-    await redis_client.publish(f"{LOG_CHANNEL_PREFIX}{run_id}", json.dumps(event))
+    await redis_client.publish(f"{LOG_CHANNEL_PREFIX}{run_id}", json.dumps({"type": event_type, "data": data}))
 
 async def _set_status(run: Run, status: RunStatus, db: AsyncSession):
     run.status = status
@@ -147,7 +159,9 @@ async def execute_run(run_id: UUID):
     except Exception as e:
         async with AsyncSessionLocal() as db:
             run = await db.get(Run, run_id)
-            if run: await _set_status(run, RunStatus.failed, db)
+            if run:
+                run.error_message = str(e)[:500]
+                await _set_status(run, RunStatus.failed, db)
         error_msg = str(e)
         await emit(rid, "error", {"message": f"Run failed: {error_msg[:200]}"})
         raise

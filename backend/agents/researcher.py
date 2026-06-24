@@ -1,8 +1,8 @@
 from crewai import Agent, Task
 from tools.search import tavily_search_tool
 from tools.scraper import firecrawl_tool, batch_scrape_tool
-from config import settings
 from configs.prompt_loader import get_prompt
+from services.llm_router import get_model
 
 def researcher_agent(tools: list = None) -> Agent:
     if tools is None:
@@ -15,7 +15,7 @@ def researcher_agent(tools: list = None) -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=tools,
-        llm=settings.LLM_MODEL,
+        llm=get_model("researcher"),
         verbose=True,
         max_iter=10,
     )

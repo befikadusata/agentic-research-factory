@@ -35,7 +35,7 @@ export async function createRun(payload: {
 
 export async function getRuns(): Promise<Run[]> {
   const cached = cache.get("runs");
-  if (cached && cached.expires > Date.now()) return cached.data;
+  if (cached && cached.expires > Date.now()) return cached.data as Run[];
 
   const headers = await authHeaders();
   const res = await fetch(`${BASE}/runs`, { headers });

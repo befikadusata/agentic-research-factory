@@ -45,9 +45,21 @@
 
 | Variable | Value |
 |----------|-------|
+| `ENVIRONMENT` | `production` |
 | `DATABASE_URL` | `postgresql+asyncpg://user:pass@host:5432/dbname` |
-| `LLM_MODEL` | `gpt-4o` |
-| `LLM_API_KEY` | Your OpenAI API key |
+| `LLM_MODEL` | Optional legacy override for every agent |
+| `GROQ_API_KEY` | Your Groq API key |
+| `OPENROUTER_API_KEY` | Your OpenRouter API key |
+| `GEMINI_API_KEY` | Your Google AI Studio key |
+| `STRATEGIST_MODEL` | `groq/llama-3.1-8b-instant` |
+| `RESEARCHER_MODEL` | `meta-llama/llama-3.3-70b-instruct:free` |
+| `ANALYST_MODEL` | `openrouter/free` |
+| `WRITER_MODEL` | `openrouter/free` |
+| `EDITOR_MODEL` | `openrouter/free` |
+| `REVIEWER_MODEL` | `openrouter/free` |
+| `QUERY_REWRITER_MODEL` | `groq/llama-3.1-8b-instant` |
+| `EVAL_MODEL` | `openrouter/free` |
+| `EMBEDDING_MODEL` | `gemini-embedding-2` |
 | `TAVILY_API_KEY` | Your Tavily API key |
 | `FIRECRAWL_API_KEY` | Your Firecrawl API key |
 | `LLAMA_CLOUD_API_KEY` | Your LlamaParse API key |
@@ -56,6 +68,8 @@
 | `FRONTEND_URL` | `https://your-app.vercel.app` |
 
 5. Deploy. Verify `GET /health` returns `{"status": "ok"}`.
+
+> **Note:** Setting `ENVIRONMENT=production` enables fail-fast startup. The backend will refuse to start if `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, or `LLAMA_CLOUD_API_KEY` are missing, logging an explicit error listing the absent keys.
 
 ---
 
@@ -103,7 +117,9 @@ Ensure `FRONTEND_URL` in the backend matches the exact Vercel domain. The backen
 |--------|----------------|-------|
 | `BACKEND_JWT_SECRET` | Invalidates all active sessions | Update in both backend + frontend env vars, redeploy both |
 | `NEXTAUTH_SECRET` | Invalidates all NextAuth sessions | Update in both, redeploy both |
-| `LLM_API_KEY` | Interrupts active runs | Update backend env var, redeploy backend |
+| `GROQ_API_KEY` | Interrupts Groq-backed agents | Update backend env var, redeploy backend |
+| `OPENROUTER_API_KEY` | Interrupts OpenRouter-backed agents | Update backend env var, redeploy backend |
+| `GEMINI_API_KEY` | Interrupts Gemini embeddings | Update backend env var, redeploy backend |
 | `TAVILY_API_KEY` | Search degradation until updated | Update backend, redeploy |
 | `FIRECRAWL_API_KEY` | Scraping degradation until updated | Update backend, redeploy |
 

@@ -1,5 +1,5 @@
 from crewai import Agent, Task
-from config import settings
+from services.llm_router import get_model
 
 def strategist_agent() -> Agent:
     return Agent(
@@ -12,7 +12,7 @@ def strategist_agent() -> Agent:
             "You think three steps ahead, anticipating the analysis and writing needs from the very start."
         ),
         tools=[],
-        llm=settings.LLM_MODEL,
+        llm=get_model("strategist"),
         verbose=True,
     )
 

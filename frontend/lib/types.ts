@@ -1,6 +1,7 @@
 export type RunStatus =
   | "pending"
   | "researching"
+  | "awaiting_hitl"
   | "awaiting_research_approval"
   | "analyzing"
   | "awaiting_analysis_approval"
@@ -8,6 +9,13 @@ export type RunStatus =
   | "awaiting_final_approval"
   | "complete"
   | "failed";
+
+export type SSEEvent =
+  | { type: "status"; data: { status: RunStatus } }
+  | { type: "log"; data: LogEntry }
+  | { type: "hitl_required"; data: { research_summary: string } }
+  | { type: "complete"; data: { final_output: string } }
+  | { type: "error"; data: { message: string } };
 
 export type OutputFormat = "report" | "linkedin" | "summary";
 
@@ -156,6 +164,7 @@ export const PIPELINE = [
 export const RUN_STATUS_MAP: Record<RunStatus, number> = {
   pending:                    0,
   researching:                1,
+  awaiting_hitl:              2,
   awaiting_research_approval: 2,
   analyzing:                  3,
   awaiting_analysis_approval: 4,
@@ -168,6 +177,7 @@ export const RUN_STATUS_MAP: Record<RunStatus, number> = {
 export const STATUS_COLORS: Record<RunStatus, string> = {
   pending:                    "bg-status-pending-bg text-status-pending-text",
   researching:                "bg-status-researching-bg text-status-researching-text",
+  awaiting_hitl:              "bg-status-awaiting_hitl-bg text-status-awaiting_hitl-text",
   awaiting_research_approval: "bg-status-awaiting_hitl-bg text-status-awaiting_hitl-text",
   analyzing:                  "bg-status-researching-bg text-status-researching-text",
   awaiting_analysis_approval: "bg-status-awaiting_hitl-bg text-status-awaiting_hitl-text",

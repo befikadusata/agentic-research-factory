@@ -63,6 +63,7 @@ class Run(Base):
     analysis_output = Column(Text)
     final_output    = Column(Text)
     logs            = Column(JSON, default=list)
+    error_message   = Column(Text, nullable=True)
     metrics         = Column(JSON, default=dict)  # { latency_ms, eval_scores, citation_count }
     costs           = relationship("RunCost", backref="run")
     created_at      = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

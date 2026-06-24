@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 from database import get_db
 from schemas import CreateRunRequest, RunResponse, RunDetailResponse
-from models import Run, WorkspaceMember
+from models import Run, WorkspaceMember, RunStatus
 from celery_app import execute_run_task # NEW
 from routers.upload import UPLOAD_DIR
 from auth import get_current_user
@@ -40,24 +40,24 @@ async def create_run(
 @router.get("", response_model=list[RunResponse])
 async def list_runs(
     workspace_id: Optional[UUID] = Query(default=None),
+    status: Optional[RunStatus] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
     if workspace_id:
-        # Verify membership
         member = await db.get(WorkspaceMember, (workspace_id, user_id))
         if not member:
             raise HTTPException(403, "Not a member of this workspace")
-        result = await db.execute(
-            select(Run)
-            .where(Run.workspace_id == workspace_id)
-            .order_by(Run.created_at.desc())
-            .limit(10)
-        )
+        q = select(Run).where(Run.workspace_id == workspace_id)
     else:
-        result = await db.execute(
-            select(Run).where(Run.user_id == user_id).order_by(Run.created_at.desc()).limit(10)
-        )
+        q = select(Run).where(Run.user_id == user_id)
+
+    if status is not None:
+        q = q.where(Run.status == status)
+
+    result = await db.execute(q.order_by(Run.created_at.desc()).limit(limit).offset(offset))
     return result.scalars().all()
 
 

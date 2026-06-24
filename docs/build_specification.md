@@ -129,9 +129,22 @@ agent-research-factory/
 ```env
 # LLM
 LLM_PROVIDER=openai-compatible
-LLM_MODEL=gpt-4.1-mini
-LLM_API_KEY=your-llm-api-key
+LLM_MODEL=
+LLM_API_KEY=
 LLM_BASE_URL=
+GROQ_API_KEY=your-groq-key
+OPENROUTER_API_KEY=your-openrouter-key
+GEMINI_API_KEY=your-gemini-key
+STRATEGIST_MODEL=groq/llama-3.1-8b-instant
+RESEARCHER_MODEL=meta-llama/llama-3.3-70b-instruct:free
+LEAD_INTEL_MODEL=meta-llama/llama-3.3-70b-instruct:free
+QUERY_REWRITER_MODEL=groq/llama-3.1-8b-instant
+ANALYST_MODEL=openrouter/free
+WRITER_MODEL=openrouter/free
+EDITOR_MODEL=openrouter/free
+REVIEWER_MODEL=openrouter/free
+EVAL_MODEL=openrouter/free
+EMBEDDING_MODEL=gemini-embedding-2
 
 # Search & Scraping
 TAVILY_API_KEY=tvly-...
@@ -344,7 +357,7 @@ class RunDetailResponse(RunResponse):
 ## 5. Agents — CrewAI
 
 ### Agent Design Rules
-- Every agent uses `settings.LLM_MODEL` so model/provider can be swapped without code changes.
+- In routed mode, each agent resolves its own model from config so providers can be split by stage without code changes.
 - Every agent has `verbose=True` so step output is capturable for SSE streaming.
 - Tasks use `async_execution=False` — sequential, not parallel (V1).
 - The crew runs in `Process.sequential` mode.
@@ -1979,7 +1992,7 @@ Run through this checklist before recording your Loom demo.
 - Protected run routes enforce ownership checks so users can only read/approve/download their own runs.
 
 ### Model Abstraction
-- LLM access stays provider-agnostic through config (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, optional `LLM_BASE_URL`).
+- LLM access stays provider-agnostic through config (`LLM_MODEL` for legacy single-provider mode, or per-agent provider keys/models for routed mode).
 - Agent/task orchestration remains unchanged while model/provider is swapped by environment only.
 
 ### Run Lifecycle

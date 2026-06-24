@@ -1,5 +1,5 @@
 from crewai import Agent, Task
-from config import settings
+from services.llm_router import get_model
 
 def reviewer_agent() -> Agent:
     return Agent(
@@ -12,7 +12,7 @@ def reviewer_agent() -> Agent:
             "is grounded in the provided research summary. You are the final gatekeeper of quality."
         ),
         tools=[],
-        llm=settings.LLM_MODEL,
+        llm=get_model("reviewer"),
         verbose=True,
     )
 

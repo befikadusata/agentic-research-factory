@@ -1,5 +1,6 @@
 from crewai.tools import BaseTool
 import uuid
+import httpx
 from config import settings
 from logger import logger
 from services.query_rewriter import rewrite_query
@@ -34,7 +35,39 @@ def _reranker():
         _reranker_model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return _reranker_model
 
+def _gemini_embed(text: str) -> list[float]:
+    if not settings.GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.EMBEDDING_MODEL}:embedContent"
+    payload = {
+        "content": {"parts": [{"text": text}]},
+        "outputDimensionality": settings.EMBEDDING_DIMENSION,
+    }
+    response = httpx.post(
+        url,
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": settings.GEMINI_API_KEY,
+        },
+        json=payload,
+        timeout=60,
+    )
+    response.raise_for_status()
+    data = response.json()
+    embedding = data.get("embedding", {})
+    values = embedding.get("values")
+    if not values:
+        raise RuntimeError("Gemini embedding response did not include values")
+    return values
+
 def _embed(texts: list[str]) -> list[list[float]]:
+    if settings.GEMINI_API_KEY:
+        try:
+            return [_gemini_embed(text) for text in texts]
+        except Exception as e:
+            logger.warning("gemini_embedding_failed", error=str(e))
+
     model = _embedder()
     return model.encode(texts).tolist()
 
@@ -57,7 +90,7 @@ class RAGTool(BaseTool):
             vx = _get_client()
             collection = vx.get_or_create_collection(
                 name=self.collection_name,
-                dimension=384,
+                dimension=settings.EMBEDDING_DIMENSION,
             )
 
             query_vec = _embed([rewritten_query])[0]
@@ -109,7 +142,7 @@ def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", 
     # Create collection and explicitly enable BM25
     collection = vx.get_or_create_collection(
         name=collection_name, 
-        dimension=384,
+        dimension=settings.EMBEDDING_DIMENSION,
     )
     # Enable BM25 index
     try:

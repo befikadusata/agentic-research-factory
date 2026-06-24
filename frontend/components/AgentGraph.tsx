@@ -24,7 +24,7 @@ const EDGES: Edge[] = PIPELINE.slice(0, -1).map((n, i) => ({
 }));
 
 function nodeStateFromStatus(status: RunStatus, nodeId: string): NodeState {
-  const order = PIPELINE.map(n => n.id);
+  const order = PIPELINE.map(n => n.id) as string[];
   const idx = order.indexOf(nodeId);
   const activeIdx = RUN_STATUS_MAP[status] ?? 0;
   if (status === "failed") return idx <= activeIdx ? "error" : "idle";

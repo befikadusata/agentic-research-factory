@@ -10,128 +10,174 @@ An AI-powered market research automation platform with **Human-in-the-Loop (HITL
 
 * **Dynamic Agent Routing**: Uses a **LangGraph Supervisor** to choreograph specialized CrewAI agents (`Strategist`, `Researcher`, `Analyst`, `Reviewer`, `Writer`, `Editor`) tailored to the selected task profile.
 * **Vertical Research Playbooks**: Native playbooks designed for specific domains:
-  - 🎯 **B2B Sales Lead Intel**: Extracts detailed target profile dossier logs, target buyer criteria, and hook hooks.
-  - 📊 **Marketing Competitor Briefs**: Conducts feature audits, pricing analysis, and positioning gaps.
-  - 🚀 **Founder Strategy Briefs**: Investigates market segments, ARR validation playbooks, and competitor categories.
-* **High-Precision Hybrid RAG**: Ingests uploaded PDFs using **LlamaParse**, splits text recursively, indexes document vectors alongside keyword counts in **PostgreSQL** (`pgvector`), expands query semantics, and re-ranks candidate chunks using an **MS-MARCO Cross-Encoder**.
-* **Interactive Human-in-the-Loop Checkpoints**: Pauses the agent run at critical stages (e.g. after compiling research) and streams draft summaries. Users can write corrective feedback prompts directly into the running agent graph before it moves to synthesis.
-* **Real-time Console Streaming**: Pipes active agent logs, reasoning paths, and status transitions directly to the Next.js UI using **Redis Pub/Sub** and **Server-Sent Events (SSE)**.
-* **Resource Isolation & Multi-tenancy**: Features tenant workspaces and role-based permissions (`viewer`, `operator`, `admin`).
-* **Cost Auditing**: Logs token usage metrics and financial costs per agent invocation to monitor compute overhead.
+  - 🎯 **B2B Sales Lead Intel**: Target profile dossiers, buyer criteria, and outreach hooks.
+  - 📊 **Marketing Competitor Briefs**: Feature audits, pricing analysis, and positioning gaps.
+  - 🚀 **Founder Strategy Briefs**: Market segments, ARR validation, and competitor categories.
+* **High-Precision Hybrid RAG**: Ingests uploaded PDFs using **LlamaParse**, indexes vectors + keyword counts in **PostgreSQL** (`pgvector`), and re-ranks chunks using an **MS-MARCO Cross-Encoder**.
+* **Interactive HITL Checkpoints**: Pauses the agent run at critical stages, streams a draft summary, and lets users inject corrective instructions before synthesis continues.
+* **Real-time Console Streaming**: Pipes agent logs and status transitions to the Next.js UI via **Redis Pub/Sub** and **Server-Sent Events (SSE)**.
+* **Multi-tenancy**: Tenant workspaces with role-based permissions (`viewer`, `operator`, `admin`).
+* **Cost Auditing**: Logs token usage and cost per agent invocation.
 
 ---
 
 ## 🛠 Technology Stack
 
-### Backend API (`/backend`)
-* **Framework**: FastAPI (async event loops) + Python 3.11
+### Backend (`/backend`)
+* **Framework**: FastAPI + Python 3.11
 * **Agent Framework**: LangGraph (supervisor routing) + CrewAI
-* **Database**: PostgreSQL (`pgvector` integration) + SQLAlchemy (asyncpg) + Alembic Migrations
-* **Real-time / Caching**: Redis (Pub/Sub signaling & task state management)
-* **Background Worker**: Celery (task queue orchestration)
-* **Ingestion & Processing**: LlamaParse (PDF-to-markdown) + LangChain text splitters + SentenceTransformers
-* **PDF Exporter**: WeasyPrint (HTML-to-PDF formatting engine)
+* **Database**: PostgreSQL (`pgvector`) + SQLAlchemy (asyncpg) + Alembic
+* **Real-time / Caching**: Redis (Pub/Sub + task state)
+* **Background Worker**: Celery
+* **Ingestion**: LlamaParse + LangChain text splitters + SentenceTransformers
+* **PDF Export**: WeasyPrint
 
-### Frontend Dashboard (`/frontend`)
+### Frontend (`/frontend`)
 * **Framework**: Next.js 15 (App Router) + React 19
-* **Authentication**: NextAuth.js (Google OAuth configuration)
-* **Styling**: Tailwind CSS (dark mode theme)
+* **Auth**: NextAuth.js (Google OAuth)
+* **Styling**: Tailwind CSS
 
 ---
 
-## 📁 Documentation Map
+## ⚡ Quick Start (Docker)
 
-We maintain detailed system guides under the [docs/](file:///home/befikadusata/Devs/2026/agentic-research-factory/docs) directory:
+The fastest way to get a running stack. All services — Next.js, FastAPI, PostgreSQL, Redis, Celery, and pgvector — start with one command. Volumes are mounted for hot-reload: the backend runs with `--reload` and the frontend runs `next dev`.
 
-| Document | Purpose |
-| :--- | :--- |
-| 📊 **[Architecture Spec](file:///home/befikadusata/Devs/2026/agentic-research-factory/docs/architecture.md)** | Deep dive into LangGraph supervisor logic, RAG retrieval flow, and database models. |
-| 📦 **[Deployment Guide](file:///home/befikadusata/Devs/2026/agentic-research-factory/docs/deployment.md)** | Complete environment setup instructions for Railway/Render, Vercel, and Neon database deployments. |
-| 🛡 **[Reliability Guide](file:///home/befikadusata/Devs/2026/agentic-research-factory/docs/reliability.md)** | Graceful degradation policies, tenacity retry mappings, and api error fallback rules. |
-| ⚡ **[RAG Optimizations](file:///home/befikadusata/Devs/2026/agentic-research-factory/docs/optimizations.md)** | Explanation of recursive character text splitters, dual indexing, query expansion, and cross-encoder re-ranking. |
-| 🧪 **[Evaluation Set](file:///home/befikadusata/Devs/2026/agentic-research-factory/docs/evaluation/eval_set.md)** | Benchmark set containing 20 standardized topics to evaluate agent accuracy, depth, and citation metrics. |
-| 📈 **[Evaluation Results](file:///home/befikadusata/Devs/2026/agentic-research-factory/docs/evaluation/eval_results.md)** | Template tracker for benchmark run latencies and model judgment scorecard metrics. |
-| 📋 **[Demo Readiness Checklist](file:///home/befikadusata/Devs/2026/agentic-research-factory/docs/checklists/demo_readiness.md)** | Step-by-step checklist to verify features locally and in staging before product release. |
-| 💼 **[Portfolio Folder](file:///home/befikadusata/Devs/2026/agentic-research-factory/docs/portfolio)** | Client-facing case studies, freelancing portfolio write-ups, FAQs, and Loom script details. |
+**1. Configure the backend environment:**
+```bash
+cp backend/.env.example backend/.env
+```
+Open `backend/.env` and fill in your API keys. The minimum set to run the full feature suite:
+
+| Key | Where to get it |
+| :-- | :-- |
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) |
+| `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
+| `TAVILY_API_KEY` | [tavily.com](https://tavily.com) |
+| `FIRECRAWL_API_KEY` | [firecrawl.dev](https://www.firecrawl.dev) |
+| `LLAMA_CLOUD_API_KEY` | [cloud.llamaindex.ai](https://cloud.llamaindex.ai) |
+| `BACKEND_JWT_SECRET` | `openssl rand -hex 32` |
+| `NEXTAUTH_SECRET` | `openssl rand -hex 32` |
+
+> Keys marked optional in dev (`TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, `LLAMA_CLOUD_API_KEY`) can be left blank — the server boots with a warning and those features are disabled at call time.
+
+**2. Configure the frontend environment (Docker):**
+
+Open `docker-compose.yml` and replace the placeholder values in the `frontend.environment` block:
+```
+NEXTAUTH_SECRET     → same value as backend NEXTAUTH_SECRET
+GOOGLE_CLIENT_ID    → from Google Cloud Console
+GOOGLE_CLIENT_SECRET → from Google Cloud Console
+```
+
+**3. Start all services:**
+```bash
+docker compose up --build
+```
+
+Migrations run automatically via the `migrate` init container before the backend starts.
 
 ---
 
-## ⚡ Quick Start
+## 🌐 Accessing the App
 
-### Method A: Docker Compose (All-in-One Setup)
-The quickest way to run the entire infrastructure stack (Next.js, FastAPI, PostgreSQL, Redis, Celery, and pgvector):
-
-1. **Clone & Configure**:
-   ```bash
-   cp backend/.env.example backend/.env
-   # Edit backend/.env to include your LLM, Tavily, and Firecrawl API keys.
-   ```
-2. **Start Services**:
-   ```bash
-   docker compose up --build
-   ```
-3. **Access Application**:
-   * Frontend: `http://localhost:3000`
-   * Backend Swagger API: `http://localhost:8000/docs`
-   * Redis Broker: `http://localhost:6379`
-
----
-
-### Method B: Manual Local Development
-
-#### 1. Database (PostgreSQL + Redis)
-Ensure you have running instances of PostgreSQL (with `pgvector` enabled) and a Redis server locally.
-
-#### 2. Backend Setup
-1. Navigate to the backend directory and synchronize dependencies:
-   ```bash
-   cd backend
-   uv sync
-   ```
-2. Create and fill in environment variables:
-   ```bash
-   cp .env.example .env
-   # Fill in DATABASE_URL, LLM_API_KEY, TAVILY_API_KEY, FIRECRAWL_API_KEY, and LLAMA_CLOUD_API_KEY.
-   ```
-3. Apply database migrations:
-   ```bash
-   uv run alembic upgrade head
-   ```
-4. Boot the FastAPI server:
-   ```bash
-   uv run uvicorn main:app --reload
-   ```
-
-#### 3. Frontend Setup
-1. Navigate to the frontend directory:
-   ```bash
-   cd ../frontend
-   npm install
-   ```
-2. Configure environmental settings:
-   ```bash
-   cp .env.local.example .env.local
-   # Ensure NEXT_PUBLIC_BACKEND_URL points to your running FastAPI backend (default: http://localhost:8000)
-   ```
-3. Start the Next.js development server:
-   ```bash
-   npm run dev
-   ```
+| Service | URL |
+| :-- | :-- |
+| Frontend | http://localhost:3000 |
+| Backend API docs | http://localhost:8000/docs |
+| Health check | http://localhost:8000/health |
 
 ---
 
 ## 🧪 Running Tests
 
-### Backend Unit & Integration Tests
-The backend test suite covers authentication routes, verticals validation, Redis signaling, and SSE streaming log loops.
 ```bash
+# Outside Docker
 cd backend
 uv run pytest -v
+
+# Or inside Docker
+docker compose run --rm backend uv run pytest -v
 ```
 
-### Frontend End-to-End Tests
-Playwright config files are provided to run automated flows:
+Frontend e2e tests:
 ```bash
 cd frontend
 npx playwright test
 ```
+
+---
+
+## 💻 Local Development
+
+For contributors who want to run services directly on the host (faster iteration, easier debugging):
+
+### Prerequisites
+- PostgreSQL with `pgvector` extension
+- Redis
+- Python 3.11+ with [uv](https://docs.astral.sh/uv/)
+- Node.js 20+
+
+### Backend
+```bash
+cd backend
+cp .env.example .env         # fill in your keys
+uv sync
+uv run alembic upgrade head
+uv run uvicorn main:app --reload
+```
+
+### Frontend
+```bash
+cd frontend
+cp .env.local.example .env.local   # fill in NEXTAUTH vars and GOOGLE OAuth
+npm install --legacy-peer-deps
+npm run dev
+```
+
+---
+
+## 🔑 Environment Variables
+
+### Backend (`backend/.env`)
+
+| Variable | Required in dev | Required in prod | Notes |
+| :-- | :--: | :--: | :-- |
+| `ENVIRONMENT` | — | — | `development` or `production` (default: `development`) |
+| `DATABASE_URL` | ✓ | ✓ | `postgresql+asyncpg://...` |
+| `REDIS_URL` | ✓ | ✓ | default: `redis://localhost:6379/0` |
+| `BACKEND_JWT_SECRET` | ✓ | ✓ | `openssl rand -hex 32` |
+| `NEXTAUTH_SECRET` | ✓ | ✓ | must match frontend |
+| `GROQ_API_KEY` | ✓ | ✓ | Strategist + query rewriter |
+| `OPENROUTER_API_KEY` | ✓ | ✓ | Analyst / Writer / Editor |
+| `GEMINI_API_KEY` | ✓ | ✓ | Embeddings |
+| `TAVILY_API_KEY` | optional | ✓ | Web search; warns if missing in dev |
+| `FIRECRAWL_API_KEY` | optional | ✓ | Web scraping; warns if missing in dev |
+| `LLAMA_CLOUD_API_KEY` | optional | ✓ | PDF parsing; warns if missing in dev |
+
+In `production` mode, missing optional keys cause a hard startup failure with an explicit error message.
+
+### Frontend (`frontend/.env.local`)
+
+| Variable | Notes |
+| :-- | :-- |
+| `NEXTAUTH_URL` | Full URL of the frontend (e.g. `http://localhost:3000`) |
+| `NEXTAUTH_SECRET` | Must match backend `NEXTAUTH_SECRET` |
+| `GOOGLE_CLIENT_ID` | Google OAuth app |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth app |
+| `NEXT_PUBLIC_BACKEND_URL` | Backend base URL (e.g. `http://localhost:8000`) |
+
+---
+
+## 📁 Documentation
+
+| Document | Purpose |
+| :-- | :-- |
+| 📊 **[Architecture Spec](docs/architecture.md)** | LangGraph supervisor logic, RAG retrieval flow, database models |
+| 📦 **[Deployment Guide](docs/deployment.md)** | Railway, Render, Vercel, and Neon deployment instructions |
+| 🛡 **[Reliability Guide](docs/reliability.md)** | Graceful degradation, retry mappings, error fallback rules |
+| ⚡ **[RAG Optimizations](docs/optimizations.md)** | Text splitting, dual indexing, query expansion, cross-encoder re-ranking |
+| 🧪 **[Evaluation Set](docs/evaluation/eval_set.md)** | 20 standardized benchmark topics |
+| 📈 **[Evaluation Results](docs/evaluation/eval_results.md)** | Benchmark latency and scorecard tracker |
+| 📋 **[Demo Readiness Checklist](docs/checklists/demo_readiness.md)** | Pre-release verification checklist |

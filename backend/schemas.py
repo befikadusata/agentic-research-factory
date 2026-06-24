@@ -48,6 +48,9 @@ class RunResponse(BaseModel):
     }
 
 class RunDetailResponse(RunResponse):
+    updated_at: datetime
     logs: list[dict]
     research_output: Optional[str]
+    analysis_output: Optional[str]
     final_output: Optional[str]
+    error_message: Optional[str]

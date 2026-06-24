@@ -1,7 +1,7 @@
 from crewai import Agent, Task
 from tools.search import tavily_search_tool
 from tools.scraper import firecrawl_tool
-from config import settings
+from services.llm_router import get_model
 
 
 def lead_intel_agent() -> Agent:
@@ -14,7 +14,7 @@ def lead_intel_agent() -> Agent:
             "You are precise, cite every source, and never fabricate names or titles."
         ),
         tools=[tavily_search_tool, firecrawl_tool],
-        llm=settings.LLM_MODEL,
+        llm=get_model("lead_intel"),
         verbose=True,
         max_iter=10,
     )

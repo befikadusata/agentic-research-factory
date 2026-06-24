@@ -1,6 +1,6 @@
 import json
 from litellm import acompletion
-from config import settings
+from services.llm_router import get_completion_settings
 
 
 async def evaluate_output(content: str, research: str, topic: str) -> dict:
@@ -25,10 +25,11 @@ Content to Evaluate:
 Respond ONLY with valid JSON:
 {{"accuracy": 85, "relevance": 90, "completeness": 78, "writing_quality": 88, "overall": 85, "issues": ["list any critical issues"]}}"""
 
+    llm = get_completion_settings("eval")
     response = await acompletion(
-        model=settings.LLM_MODEL,
-        api_key=settings.LLM_API_KEY,
-        base_url=settings.LLM_BASE_URL or None,
+        model=llm.model,
+        api_key=llm.api_key,
+        base_url=llm.base_url,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=500,
     )

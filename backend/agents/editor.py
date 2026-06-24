@@ -1,5 +1,5 @@
 from crewai import Agent, Task
-from config import settings
+from services.llm_router import get_model
 
 def editor_agent() -> Agent:
     return Agent(
@@ -13,7 +13,7 @@ def editor_agent() -> Agent:
             "but missing from the draft, you find the right place for it."
         ),
         tools=[],
-        llm=settings.LLM_MODEL,
+        llm=get_model("editor"),
         verbose=True,
         max_iter=3,
     )
