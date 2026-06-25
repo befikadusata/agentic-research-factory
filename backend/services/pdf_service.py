@@ -1,4 +1,5 @@
 import asyncio
+import html as html_lib
 import os
 import markdown
 import weasyprint
@@ -6,12 +7,31 @@ from config import settings
 from logger import logger
 
 
-async def markdown_to_pdf(md_content: str, output_path: str) -> str:
+async def markdown_to_pdf(
+    md_content: str,
+    output_path: str,
+    *,
+    title: str = "",
+    generated_at: str = "",
+) -> str:
     """Convert markdown string to PDF file. Returns the output path."""
-    html = markdown.markdown(md_content, extensions=["tables", "fenced_code"])
+    body_html = markdown.markdown(md_content, extensions=["tables", "fenced_code"])
+    header_html = ""
+    if title or generated_at:
+        escaped_title = html_lib.escape(title)
+        header_html = (
+            f'<div class="report-header">'
+            f'<h1 class="report-title">{escaped_title}</h1>'
+            f'<p class="report-date">Generated: {html_lib.escape(generated_at)}</p>'
+            f"</div><hr>"
+        )
     styled_html = f"""<html><head><style>
       body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto;
               line-height: 1.6; color: #333; }}
+      .report-header {{ margin-bottom: 24px; }}
+      .report-title {{ font-size: 1.6em; color: #1a1a2e; margin: 0 0 4px; border: none; padding: 0; }}
+      .report-date {{ font-size: 0.85em; color: #777; margin: 0; }}
+      hr {{ border: none; border-top: 2px solid #534AB7; margin: 16px 0 24px; }}
       h1 {{ color: #1a1a2e; border-bottom: 2px solid #534AB7; padding-bottom: 8px; }}
       h2 {{ color: #333; border-bottom: 1px solid #ddd; padding-bottom: 4px; }}
       table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
@@ -19,7 +39,9 @@ async def markdown_to_pdf(md_content: str, output_path: str) -> str:
       td {{ border: 1px solid #ddd; padding: 8px 12px; }}
       blockquote {{ border-left: 4px solid #534AB7; margin: 0; padding-left: 16px; color: #555; }}
       code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }}
-    </style></head><body>{html}</body></html>"""
+      pre {{ white-space: pre-wrap; overflow-wrap: break-word; font-size: 0.85em;
+             background: #f4f4f4; padding: 12px; border-radius: 4px; }}
+    </style></head><body>{header_html}{body_html}</body></html>"""
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, lambda: weasyprint.HTML(string=styled_html).write_pdf(output_path))
     return output_path

@@ -1,4 +1,5 @@
 import pytest
+import unittest.mock
 from uuid import uuid4
 
 from models import Run, RunStatus
@@ -81,4 +82,51 @@ async def test_outputs_enforce_ownership(client, auth_as, db_session):
     allowed_md = await client.get(f"/runs/{run_id}/output/md")
     assert allowed_md.status_code == 200
     assert "# Final report" in allowed_md.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fmt", ["md", "pdf"])
+async def test_output_unavailable_on_non_complete_run(client, auth_as, db_session, fmt):
+    owner_id = "owner@example.com"
+    run_id = await _create_run(db_session, owner_id, RunStatus.researching)
+
+    auth_as(owner_id)
+    resp = await client.get(f"/runs/{run_id}/output/{fmt}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fmt", ["md", "pdf"])
+async def test_output_none_content_returns_404(client, auth_as, db_session, fmt):
+    owner_id = "owner@example.com"
+    run_id = await _create_run(db_session, owner_id, RunStatus.complete, final_output=None)
+
+    auth_as(owner_id)
+    resp = await client.get(f"/runs/{run_id}/output/{fmt}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pdf_download_returns_pdf_content_type(client, auth_as, db_session):
+    owner_id = "owner@example.com"
+    run_id = await _create_run(
+        db_session, owner_id, RunStatus.complete, final_output="# Report\n\nContent here."
+    )
+
+    auth_as(owner_id)
+
+    def _fake_write_pdf(path):
+        with open(path, "wb") as f:
+            f.write(b"%PDF-1.4 fake")
+
+    mock_html_instance = unittest.mock.MagicMock()
+    mock_html_instance.write_pdf.side_effect = _fake_write_pdf
+
+    with unittest.mock.patch(
+        "services.pdf_service.weasyprint.HTML", return_value=mock_html_instance
+    ):
+        resp = await client.get(f"/runs/{run_id}/output/pdf")
+
+    assert resp.status_code == 200
+    assert "application/pdf" in resp.headers["content-type"]
 

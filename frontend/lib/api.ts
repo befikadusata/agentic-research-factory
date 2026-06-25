@@ -73,6 +73,20 @@ export async function uploadFile(file: File): Promise<{ doc_id: string }> {
   return res.json();
 }
 
-export function getOutputUrl(runId: string, format: "pdf" | "md"): string {
-  return `${BASE}/runs/${runId}/output/${format}`;
+export async function downloadOutput(
+  runId: string,
+  format: "pdf" | "md",
+): Promise<void> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/runs/${runId}/output/${format}`, { headers });
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `report_${runId}.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

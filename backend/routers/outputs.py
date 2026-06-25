@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
+from datetime import timezone
 from database import get_db
 from models import Run, RunStatus
 from services.pdf_service import markdown_to_pdf
@@ -21,10 +22,16 @@ async def download_pdf(
     run = await db.get(Run, run_id)
     if not run or run.status != RunStatus.complete:
         raise HTTPException(404, "Output not available")
+    if not run.final_output:
+        raise HTTPException(404, "Output not available")
     await assert_run_access(run, user_id, db)
+    ts = run.updated_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    generated_at = ts.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
         path = f.name
-    await markdown_to_pdf(run.final_output, path)
+    await markdown_to_pdf(run.final_output, path, title=run.topic, generated_at=generated_at)
     return FileResponse(
         path,
         filename=f"report_{run_id}.pdf",
@@ -41,6 +48,8 @@ async def download_md(
 ):
     run = await db.get(Run, run_id)
     if not run or run.status != RunStatus.complete:
+        raise HTTPException(404, "Output not available")
+    if not run.final_output:
         raise HTTPException(404, "Output not available")
     await assert_run_access(run, user_id, db)
     return PlainTextResponse(

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { getRun, getOutputUrl } from "@/lib/api";
+import { getRun } from "@/lib/api";
 import { AgentLog } from "@/components/AgentLog";
 import { HitlModal } from "@/components/HitlModal";
 import { OutputPanel } from "@/components/OutputPanel";
@@ -42,7 +42,7 @@ export default function RunPage() {
       .then((r) => {
         setRun(r);
         setLogs(r.logs ?? []);
-        setStatus(r.status);
+        setStatus((prev) => (prev === "loading" ? r.status : prev));
         if (HITL_STATUSES.has(r.status)) {
           setHitlStage(r.status);
           const summary =
@@ -134,11 +134,7 @@ export default function RunPage() {
       )}
 
       {status === "complete" && run.final_output && (
-        <OutputPanel
-          content={run.final_output}
-          pdfUrl={getOutputUrl(id, "pdf")}
-          mdUrl={getOutputUrl(id, "md")}
-        />
+        <OutputPanel content={run.final_output} runId={id} />
       )}
 
       {status === "failed" && (
