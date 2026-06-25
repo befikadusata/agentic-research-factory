@@ -54,6 +54,8 @@ jobs:
       - name: Run migrations
         env:
           DATABASE_URL: "postgresql+asyncpg://user:password@localhost:5432/research_factory_test"
+          BACKEND_JWT_SECRET: "test-secret"
+          NEXTAUTH_SECRET: "test-secret"
         run: uv run alembic upgrade head
 
       - name: Run tests
@@ -124,6 +126,9 @@ jobs:
         # All backend calls are mocked via Playwright route intercepts — no backend service needed.
         env:
           NEXT_PUBLIC_BACKEND_URL: "http://localhost:8000"
+          NEXTAUTH_URL: "http://localhost:3000"
+          NEXTAUTH_SECRET: "test-secret-at-least-32-chars-long-for-e2e"
+          BACKEND_JWT_SECRET: "test-secret"
         run: npx playwright test
 
       - name: Upload test results
