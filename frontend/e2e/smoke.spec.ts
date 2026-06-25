@@ -252,7 +252,7 @@ test.describe("Core Flow Smoke Tests", () => {
     await page.goto("/runs/complete-run");
     await expect(page.getByRole("heading", { name: "Output" })).toBeVisible();
     await expect(page.getByText("Final Brief")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Download PDF" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Download MD" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Download MD" })).toBeVisible();
   });
 });
