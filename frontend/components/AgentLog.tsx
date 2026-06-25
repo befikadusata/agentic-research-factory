@@ -10,12 +10,24 @@ const AGENT_COLORS: Record<string, string> = {
   "Editor & Fact-Checker":     "text-purple-400",
 };
 
+function formatTs(ts: string): string {
+  try {
+    return new Date(ts).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
 export function AgentLog({ logs }: { logs: LogEntry[] }) {
   const [filter, setFilter] = useState<"all" | "error">("all");
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const filteredLogs = filter === "all" 
-    ? logs 
+  const filteredLogs = filter === "all"
+    ? logs
     : logs.filter(l => l.message.toLowerCase().includes("error") || l.agent.toLowerCase().includes("error"));
 
   useEffect(() => {
@@ -34,6 +46,9 @@ export function AgentLog({ logs }: { logs: LogEntry[] }) {
         )}
         {filteredLogs.map((log, i) => (
           <div key={i} className="mb-2">
+            <span className="text-zinc-600 text-[10px] mr-2 select-none tabular-nums">
+              {formatTs(log.ts)}
+            </span>
             <span className={`font-bold ${AGENT_COLORS[log.agent] ?? "text-zinc-300"}`}>
               [{log.agent}]
             </span>{" "}

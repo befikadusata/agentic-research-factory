@@ -122,9 +122,9 @@ test.describe("Core Flow Smoke Tests", () => {
 
     await expect(page).toHaveURL(/\/runs\/run-123$/);
     expect(createPayload).not.toBeNull();
-    expect(createPayload?.vertical).toBe("marketing_competitor_briefs");
-    expect(createPayload?.topic).toBe("How does Notion position itself?");
-    expect(createPayload?.vertical_inputs).toEqual({
+    expect(createPayload!.vertical).toBe("marketing_competitor_briefs");
+    expect(createPayload!.topic).toBe("How does Notion position itself?");
+    expect(createPayload!.vertical_inputs).toEqual({
       competitor_name: "Notion",
       our_product: "AcmeDocs",
     });
@@ -185,7 +185,7 @@ test.describe("Core Flow Smoke Tests", () => {
 
     await expect(page.getByText("Research Complete — Review Before Analysis")).not.toBeVisible();
     expect(approvePayload).not.toBeNull();
-    expect(approvePayload?.instruction).toBe("Focus on pricing and enterprise segment.");
+    expect(approvePayload!.instruction).toBe("Focus on pricing and enterprise segment.");
   });
 
   test("renders output panel when stream sends complete event", async ({ page }) => {

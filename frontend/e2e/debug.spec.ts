@@ -5,7 +5,7 @@ import crypto from "crypto";
 
 const TEST_AUTH_SECRET = "test-secret-at-least-32-chars-long-for-e2e";
 
-async function createSessionCookie(page) {
+async function createSessionCookie(page: import("@playwright/test").Page) {
   const encryptionSecret = await hkdf("sha256", TEST_AUTH_SECRET, "", "NextAuth.js Generated Encryption Key", 32);
   const token = await new EncryptJWT({
     sub: "test-user-id", name: "Test User", email: "test@example.com", picture: null,

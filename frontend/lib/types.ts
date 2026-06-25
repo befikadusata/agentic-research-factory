@@ -144,6 +144,7 @@ export interface RunDetail extends Run {
   research_output: string | null;
   analysis_output: string | null;
   final_output: string | null;
+  error_message?: string | null;
 }
 
 export interface LogEntry {

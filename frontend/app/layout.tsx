@@ -3,6 +3,7 @@ import Link from "next/link";
 import "./globals.css";
 import { SessionProvider } from "./providers";
 import { LayoutGrid, Plus, History } from "lucide-react";
+import { SidebarUser } from "@/components/SidebarUser";
 
 export const metadata: Metadata = {
   title: "Agentic Research Factory",
@@ -15,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="bg-zinc-950 text-zinc-100 min-h-screen flex">
         <SessionProvider>
           {/* Sidebar */}
-          <aside className="w-64 border-r border-zinc-800 p-6 flex flex-col gap-6">
+          <aside className="w-64 border-r border-zinc-800 p-6 flex flex-col gap-6 min-h-screen">
             <Link href="/" className="font-bold text-primary-500 text-xl flex items-center gap-2">
               <LayoutGrid size={24} />
               Research Factory
@@ -33,6 +34,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 History
               </Link>
             </nav>
+            <div className="mt-auto">
+              <SidebarUser />
+            </div>
           </aside>
           
           {/* Main content */}

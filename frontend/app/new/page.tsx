@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { createRun } from "@/lib/api";
 import { FormatSelector } from "@/components/FormatSelector";
 import { FileUpload } from "@/components/FileUpload";
@@ -10,20 +11,28 @@ import { VERTICALS, type Vertical, type OutputFormat } from "@/lib/types";
 
 export default function NewRunPage() {
   const router = useRouter();
+  const { data: session, status: authStatus } = useSession();
   const [vertical, setVertical] = useState<Vertical | null>(null);
   const [verticalInputs, setVerticalInputs] = useState<Record<string, string>>({});
   const [topic, setTopic] = useState("");
   const [format, setFormat] = useState<OutputFormat>("report");
   const [docIds, setDocIds] = useState<string[]>([]);
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (authStatus === "unauthenticated") router.push("/");
+  }, [authStatus, router]);
+
+  if (authStatus === "loading") return <p className="text-zinc-500 p-8">Loading…</p>;
+  if (!session) return null;
 
   const verticalDef = VERTICALS.find((v) => v.key === vertical) ?? null;
 
   function handleVerticalChange(v: Vertical) {
     setVertical(v);
     setVerticalInputs({});
+    setDocIds([]);
     const def = VERTICALS.find((vd) => vd.key === v);
     if (def) setFormat(def.defaultFormat);
   }
@@ -67,9 +76,12 @@ export default function NewRunPage() {
     }
   }
 
-  function handleUploaded(docId: string, filename: string) {
-    setDocIds((prev) => [...prev, docId]);
-    setUploadedFiles((prev) => [...prev, filename]);
+  function handleUploaded(docId: string) {
+    setDocIds([docId]);
+  }
+
+  function handleRemoved() {
+    setDocIds([]);
   }
 
   return (
@@ -89,7 +101,7 @@ export default function NewRunPage() {
           {vertical && (
             <button
               type="button"
-              onClick={() => { setVertical(null); setVerticalInputs({}); }}
+              onClick={() => { setVertical(null); setVerticalInputs({}); setFormat("report"); setDocIds([]); }}
               className="mt-3 text-xs text-primary-500 hover:text-primary-400 font-medium"
             >
               Clear playbook and use general research
@@ -166,14 +178,11 @@ export default function NewRunPage() {
           <label className="block text-sm font-semibold text-zinc-300 mb-3">
             Upload Reference PDF <span className="text-zinc-500 font-normal">(optional)</span>
           </label>
-          <FileUpload onUploaded={handleUploaded} />
-          {uploadedFiles.length > 0 && (
-            <ul className="mt-3 space-y-1">
-              {uploadedFiles.map((f, i) => (
-                <li key={i} className="text-cta text-sm font-medium">✓ {f}</li>
-              ))}
-            </ul>
-          )}
+          <FileUpload
+            key={vertical ?? "general"}
+            onUploaded={handleUploaded}
+            onRemoved={handleRemoved}
+          />
         </div>
 
         {error && <p className="text-red-400 text-sm bg-red-900/20 p-3 rounded-md">{error}</p>}

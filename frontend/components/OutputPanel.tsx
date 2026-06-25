@@ -13,11 +13,15 @@ interface Props {
 
 export function OutputPanel({ content, runId }: Props) {
   const [downloading, setDownloading] = useState<"pdf" | "md" | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   async function handleDownload(format: "pdf" | "md") {
     setDownloading(format);
+    setDownloadError(null);
     try {
       await downloadOutput(runId, format);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : "Download failed. Please try again.");
     } finally {
       setDownloading(null);
     }
@@ -41,8 +45,17 @@ export function OutputPanel({ content, runId }: Props) {
           />
         </div>
       </div>
+      {downloadError && (
+        <p className="text-red-400 text-sm px-4 py-2 bg-red-950/20 border-b border-red-900/30">
+          {downloadError}
+        </p>
+      )}
       <div className="p-6 prose prose-invert max-w-none overflow-y-auto max-h-[60vh]">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        {content?.trim() ? (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        ) : (
+          <p className="text-zinc-500 italic not-prose">Output content is unavailable.</p>
+        )}
       </div>
     </div>
   );

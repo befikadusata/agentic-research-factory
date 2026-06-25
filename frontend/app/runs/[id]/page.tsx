@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { getRun } from "@/lib/api";
 import { AgentLog } from "@/components/AgentLog";
+import { AgentGraph } from "@/components/AgentGraph";
 import { HitlModal } from "@/components/HitlModal";
 import { OutputPanel } from "@/components/OutputPanel";
-import type { RunDetail, LogEntry } from "@/lib/types";
+import type { RunDetail, LogEntry, RunStatus } from "@/lib/types";
 import { VERTICALS } from "@/lib/types";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -34,15 +35,17 @@ export default function RunPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [hitlSummary, setHitlSummary] = useState<string | null>(null);
   const [hitlStage, setHitlStage] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>("loading");
+  const [status, setStatus] = useState<RunStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [resuming, setResuming] = useState(false);
+
   useEffect(() => {
     getRun(id)
       .then((r) => {
         setRun(r);
         setLogs(r.logs ?? []);
-        setStatus((prev) => (prev === "loading" ? r.status : prev));
+        setStatus((prev) => (prev === null ? r.status : prev));
         if (HITL_STATUSES.has(r.status)) {
           setHitlStage(r.status);
           const summary =
@@ -65,10 +68,11 @@ export default function RunPage() {
             setLogs((prev) => [...prev, parsed.data]);
         } else if (parsed.type === "status") {
             setStatus(parsed.data.status);
+            setResuming(false);
         } else if (parsed.type === "hitl_required") {
             setHitlStage(parsed.data.stage);
             setHitlSummary(parsed.data.summary);
-            setStatus(parsed.data.stage);
+            setStatus(parsed.data.stage as RunStatus);
         } else if (parsed.type === "complete") {
             setStatus("complete");
             getRun(id).then(setRun);
@@ -76,7 +80,10 @@ export default function RunPage() {
             setStatus("failed");
         }
     };
-    es.onerror = () => es.close();
+    es.onerror = () => {
+      setStreamError("Live update stream disconnected. Refresh the page to reconnect.");
+      es.close();
+    };
     return () => es.close();
   }, [id]);
 
@@ -92,7 +99,7 @@ export default function RunPage() {
             {run.format} Run
           </span>
           <span className="text-sm font-semibold text-primary-500 bg-primary-900/20 border border-primary-900/50 px-3 py-1 rounded-sm">
-            {STATUS_LABEL[status] ?? status}
+            {status === null ? "…" : (STATUS_LABEL[status] ?? status)}
           </span>
           {run.vertical && (() => {
             const vDef = VERTICALS.find((v) => v.key === run.vertical);
@@ -119,9 +126,23 @@ export default function RunPage() {
         )}
       </div>
 
+      {streamError && (
+        <div className="flex items-center justify-between gap-2 text-amber-400 text-sm bg-amber-950/20 border border-amber-900/40 rounded-lg px-4 py-3">
+          <span>⚠ {streamError}</span>
+          <button
+            onClick={() => setStreamError(null)}
+            className="text-amber-600 hover:text-amber-400 text-xs underline flex-shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {status !== null && <AgentGraph status={status} />}
+
       <AgentLog logs={logs} />
 
-      {HITL_STATUSES.has(status) && hitlSummary && hitlStage && (
+      {status !== null && HITL_STATUSES.has(status) && hitlSummary && hitlStage && (
         <HitlModal
           runId={id}
           stage={hitlStage}
@@ -129,8 +150,16 @@ export default function RunPage() {
           onApproved={() => {
             setHitlSummary(null);
             setHitlStage(null);
+            setResuming(true);
           }}
         />
+      )}
+
+      {resuming && (
+        <div className="flex items-center gap-3 text-violet-400 text-sm bg-violet-950/20 border border-violet-900/40 rounded-lg px-4 py-3">
+          <span className="inline-block animate-spin">⟳</span>
+          Pipeline resuming, waiting for the next stage to begin…
+        </div>
       )}
 
       {status === "complete" && run.final_output && (
@@ -139,7 +168,10 @@ export default function RunPage() {
 
       {status === "failed" && (
         <div className="border border-red-900 bg-red-950/20 rounded-lg p-5 text-red-400 font-medium">
-          This run failed. Please check the agent logs above for details or contact support.
+          This run failed. Check the agent logs above for details.
+          {run.error_message && (
+            <p className="mt-2 text-sm font-normal opacity-80">{run.error_message}</p>
+          )}
         </div>
       )}
     </div>

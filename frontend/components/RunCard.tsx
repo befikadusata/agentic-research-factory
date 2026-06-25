@@ -1,8 +1,10 @@
-import { STATUS_COLORS } from "@/lib/types";
+import { STATUS_COLORS, VERTICALS } from "@/lib/types";
 import type { Run } from "@/lib/types";
 import Link from "next/link";
 
 export function RunCard({ run }: { run: Run }) {
+  const vDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) : null;
+
   return (
     <Link
       href={`/runs/${run.id}`}
@@ -14,13 +16,20 @@ export function RunCard({ run }: { run: Run }) {
           <p className="text-zinc-400 text-sm mt-1 capitalize">{run.format} Run</p>
         </div>
         <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-sm whitespace-nowrap ${STATUS_COLORS[run.status] ?? "bg-zinc-800 text-zinc-300"}`}>
-          {run.status.replace("_", " ")}
+          {run.status.replaceAll("_", " ")}
         </span>
       </div>
       <div className="flex items-center justify-between mt-4">
-        <p className="text-zinc-500 text-xs">
-          {new Date(run.created_at).toLocaleDateString()}
-        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-zinc-500 text-xs">
+            {new Date(run.created_at).toLocaleDateString()}
+          </p>
+          {vDef && (
+            <span className="text-[10px] font-semibold text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-sm">
+              {vDef.icon} {vDef.displayName}
+            </span>
+          )}
+        </div>
         {run.status === "failed" && (
           <p className="text-red-400 text-xs italic">
             Check failed run details
