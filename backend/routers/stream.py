@@ -1,3 +1,6 @@
+import asyncio
+import time
+
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +14,8 @@ from auth import get_current_user, assert_run_access
 router = APIRouter()
 
 TERMINAL_STATUSES = {RunStatus.complete, RunStatus.failed}
+HEARTBEAT_INTERVAL = 30    # seconds between keep-alive pings
+MAX_STREAM_DURATION = 3600  # close after 1 hour regardless of run state
 
 
 @router.get("/{run_id}/stream")
@@ -30,8 +35,9 @@ async def stream_run(
     await pubsub.subscribe(f"{LOG_CHANNEL_PREFIX}{rid}")
 
     async def event_generator():
+        deadline = time.monotonic() + MAX_STREAM_DURATION
         try:
-            # Fix 5: re-fetch status AFTER subscribe to close the TOCTOU gap.
+            # Re-fetch status AFTER subscribe to close the TOCTOU gap.
             # If the run already finished before we subscribed, no future publish
             # will arrive — yield a synthetic terminal event and close immediately.
             async with AsyncSessionLocal() as fresh_db:
@@ -41,7 +47,17 @@ async def stream_run(
                 yield {"data": json.dumps({"type": evt_type, "data": {}})}
                 return
 
-            async for message in pubsub.listen():
+            while time.monotonic() < deadline:
+                # Block up to HEARTBEAT_INTERVAL waiting for a message.
+                # Returns None on timeout; redis.asyncio handles the wait internally.
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=HEARTBEAT_INTERVAL,
+                )
+                if message is None:
+                    yield {"data": "heartbeat"}
+                    continue
+
                 if message["type"] == "message":
                     event = json.loads(message["data"])
                     yield {"data": json.dumps(event)}

@@ -1,8 +1,15 @@
 # Evaluation Results
 
-> **Date**: _[fill after benchmark]_
-> **Model**: _[e.g. gpt-4o]_
-> **Environment**: _[local / staging / production]_
+> **Status**: Pending first production run with live API keys.
+>
+> **How to populate**: Run the benchmark suite against a live environment:
+> ```bash
+> cd backend
+> uv run pytest tests/test_benchmark.py -v -s
+> ```
+> Then copy the output metrics into the tables below.
+>
+> **Minimum quality bar**: `eval_scores.overall >= 70` (enforced by the benchmark test).
 
 ---
 

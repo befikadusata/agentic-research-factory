@@ -33,7 +33,7 @@ The Agentic Research Factory is designed to degrade gracefully when external dep
 |----------|-----------------|-----------|
 | **Page blocked (403/captcha)** | 3 retries, then fallback | SSE log: "⚠️ Page scraping unavailable for {url}" — analysis uses search snippet data |
 | **Rate limited** | 3 retries with backoff | Same fallback message |
-| **Timeout (slow page)** | Retries, then fallback | Same; output notes reduced source depth |
+| **Timeout (slow page)** | Per-URL 60s timeout via `asyncio.wait_for`; returns error string for that URL | Same; output notes reduced source depth |
 
 ### LLM / Agent Failures
 
@@ -61,7 +61,7 @@ The Agentic Research Factory is designed to degrade gracefully when external dep
 
 ## Retry Configuration
 
-All retries use `tenacity` with exponential backoff:
+All retries use `tenacity` with exponential backoff. Retry attempts are logged at `WARNING` level via `before_sleep_log`.
 
 ```
 stop:  after 3 attempts
@@ -73,6 +73,22 @@ This means:
 - Attempt 2: after ~2s
 - Attempt 3: after ~4s
 - Total max wait: ~6s before fallback
+
+## Timeout Configuration
+
+| Boundary | Timeout | Behaviour on expiry |
+|----------|---------|---------------------|
+| LLM supervisor stage | 300s per stage | Stage fails; `tenacity` retries up to 3× |
+| HITL wait | 30 min | Run marked `failed`; SSE error event emitted |
+| Document ingestion poll | 300s | Run marked `failed`; error message written |
+| PDF parse (Docling) | 120s | Falls through to LlamaParse fallback |
+| Eval LLM call | 60s | Eval skipped; run still completes |
+| Batch scrape per-URL | 60s | URL returns error string; other URLs unaffected |
+| SSE keep-alive heartbeat | 30s between messages | `data: heartbeat` sent to keep connection alive |
+| SSE max stream duration | 3600s | Generator closes; client reconnects if needed |
+| Celery task soft limit | 600s | `SoftTimeLimitExceeded` raised; task can clean up |
+| Celery task hard limit | 660s | `SIGKILL`; worker process restarted |
+| Health check DB/Redis probe | 2s each | `/health` returns 503 with failed dependency name |
 
 ---
 

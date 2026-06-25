@@ -1,15 +1,15 @@
-from fastapi import FastAPI
+import asyncio
+import uuid
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from prometheus_fastapi_instrumentator import Instrumentator # NEW
+from prometheus_fastapi_instrumentator import Instrumentator
 from database import init_db
 from routers import runs, stream, hitl, upload, outputs, workspaces, analytics, verticals
 from config import settings, validate_config
 from utils.redis_client import init_redis_pool, close_redis_pool
-
-import uuid
 from logger import logger, request_id_var
-from fastapi import Request
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -53,4 +53,28 @@ app.include_router(verticals.router,   tags=["verticals"])
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    from fastapi.responses import JSONResponse
+    from sqlalchemy import text
+    from database import AsyncSessionLocal
+    from utils.redis_client import get_redis_client
+
+    checks = {}
+    status_code = 200
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=2)
+        checks["db"] = "ok"
+    except Exception:
+        checks["db"] = "error"
+        status_code = 503
+
+    try:
+        redis = await asyncio.wait_for(get_redis_client(), timeout=2)
+        await asyncio.wait_for(redis.ping(), timeout=2)
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "error"
+        status_code = 503
+
+    return JSONResponse({"status": "ok" if status_code == 200 else "degraded", **checks}, status_code=status_code)

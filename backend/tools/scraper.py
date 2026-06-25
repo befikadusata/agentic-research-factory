@@ -62,13 +62,16 @@ class BatchScrapeTool(BaseTool):
 
         try:
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, 
-                lambda: self.app.scrape_url(url, params={"formats": ["markdown"], "onlyMainContent": True})
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: self.app.scrape_url(url, params={"formats": ["markdown"], "onlyMainContent": True}),
+                ),
+                timeout=60,
             )
             tool_cache.set("scrape_webpage", url, result)
             return {"url": url, "content": result.get("markdown", "")[:6000]}
-        except Exception as e:
+        except (Exception, asyncio.TimeoutError) as e:
             logger.warning("firecrawl_batch_scrape_failed", url=url, error=str(e))
             return {"url": url, "content": f"Error: {str(e)}"}
 

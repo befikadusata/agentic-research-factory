@@ -93,7 +93,7 @@ Migrations run automatically via the `migrate` init container before the backend
 ## 🧪 Running Tests
 
 ```bash
-# Outside Docker
+# Backend — unit + integration (requires local Postgres and Redis)
 cd backend
 uv run pytest -v
 
@@ -101,11 +101,31 @@ uv run pytest -v
 docker compose run --rm backend uv run pytest -v
 ```
 
-Frontend e2e tests:
+Frontend e2e (all backend calls are mocked via Playwright route intercepts):
 ```bash
 cd frontend
 npx playwright test
 ```
+
+**Backend coverage** (117 tests across 14 files):
+
+| Area | Test file |
+| :-- | :-- |
+| Auth (401 paths, JWT decode success/failure) | `test_auth.py`, `test_auth_success.py` |
+| Run lifecycle, status transitions, outputs | `test_runs.py`, `test_lifecycle_and_outputs.py` |
+| HITL approve, cross-user access control | `test_lifecycle_and_outputs.py`, `test_access_control.py` |
+| PDF upload, ingestion pipeline | `test_upload.py` |
+| RAG tool (vertical filtering, multi-query fanout) | `test_rag.py` |
+| Workspace CRUD + member management | `test_workspaces.py` |
+| SSE streaming (terminal short-circuit, pubsub flow) | `test_streaming.py` |
+| Analytics and cost endpoints | `test_analytics.py` |
+| Eval service + cost tracker | `test_eval_and_cost.py` |
+| Tavily / Firecrawl / batch scrape tools | `test_tools.py` |
+| Vertical routing + required input validation | `test_verticals.py` |
+| Redis pub/sub signalling | `test_redis_signaling.py` |
+| Query rewriter, citation extraction | `test_retrieval.py` |
+| LLM router | `test_llm_router.py` |
+| End-to-end benchmark smoke (4 runs) | `test_benchmark.py` |
 
 ---
 

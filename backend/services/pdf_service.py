@@ -92,10 +92,13 @@ async def parse_pdf(path: str) -> list[dict]:
     """Parse a single PDF. Docling primary, LlamaParse fallback."""
     loop = asyncio.get_event_loop()
     try:
-        chunks = await loop.run_in_executor(None, _parse_with_docling, path)
+        chunks = await asyncio.wait_for(
+            loop.run_in_executor(None, _parse_with_docling, path),
+            timeout=120,
+        )
         if chunks:
             return chunks
-    except Exception as e:
+    except (Exception, asyncio.TimeoutError) as e:
         logger.warning("docling_parse_failed", path=path, error=str(e))
 
     if settings.LLAMA_CLOUD_API_KEY:

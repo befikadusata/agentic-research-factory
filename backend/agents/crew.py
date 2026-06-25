@@ -38,10 +38,11 @@ from utils.langfuse_utils import get_langfuse
 
 def _run_crew_node(agents_list, tasks_list, state: ResearchState, result_key: str) -> dict:
     lf = get_langfuse()
+    trace = span = None
     if lf:
         trace = lf.trace(name=f"crew_node_{result_key}", user_id="system")
         span = trace.span(name="run_crew")
-    
+
     cb = state.get("step_callback")
     crew = Crew(
         agents=agents_list,
@@ -50,12 +51,25 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, result_key: st
         verbose=True,
         step_callback=cb,
     )
-    result = crew.kickoff()
-    
-    if lf:
-        span.end()
-        trace.update(output=str(result))
 
+    logger.info("crew_node_start", node=result_key)
+    exc = None
+    try:
+        result = crew.kickoff()
+    except Exception as e:
+        exc = e
+        logger.exception("crew_node_failed", node=result_key)
+        raise
+    finally:
+        if lf and span:
+            if exc is not None:
+                span.end(status_message="ERROR")
+            else:
+                span.end()
+        if lf and trace and exc is None:
+            trace.update(output=str(result))
+
+    logger.info("crew_node_complete", node=result_key)
     usage = result.token_usage
     return {
         result_key: str(result),

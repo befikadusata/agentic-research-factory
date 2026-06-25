@@ -23,6 +23,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
@@ -50,6 +59,7 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: "postgresql+asyncpg://user:password@localhost:5432/research_factory_test"
+          REDIS_URL: "redis://localhost:6379"
           LLM_MODEL: "gpt-4o"
           LLM_API_KEY: "mock"
           TAVILY_API_KEY: "mock"
@@ -111,6 +121,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Playwright e2e tests
+        # All backend calls are mocked via Playwright route intercepts — no backend service needed.
         env:
           NEXT_PUBLIC_BACKEND_URL: "http://localhost:8000"
         run: npx playwright test

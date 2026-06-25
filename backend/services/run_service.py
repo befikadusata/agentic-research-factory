@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from uuid import UUID
@@ -8,7 +9,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from database import AsyncSessionLocal
 from models import Run, RunStatus
 from logger import logger
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from configs.verticals import build_execution_brief, get_vertical
 from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_SIGNAL_KEY, HITL_INSTRUCTION_KEY
 from utils.cost_tracker import log_cost
@@ -54,7 +55,11 @@ async def _set_status(run: Run, status: RunStatus, db: AsyncSession):
     db.add(run)
     await db.commit()
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
 async def _invoke_supervisor_with_retry(supervisor, state: dict, recursion_limit: int = 25):
     config = {"recursion_limit": recursion_limit}
     call = asyncio.to_thread(supervisor.invoke, state, config)
@@ -92,7 +97,8 @@ async def _wait_for_hitl(run_id: str, status: RunStatus, emit_event: str, summar
 
 async def execute_run(run_id: UUID):
     rid = str(run_id)
-    logger.info("starting_run", run_id=rid)
+    log = logger.bind(run_id=rid)
+    log.info("starting_run")
 
     # Fix 6: capture running loop here (async context), before any to_thread calls
     loop = asyncio.get_running_loop()
@@ -228,7 +234,7 @@ async def execute_run(run_id: UUID):
                     content=final_output, research=final_output, topic=topic,
                 )
             except Exception as e:
-                logger.warning("eval_failed", run_id=rid, error=str(e))
+                log.warning("eval_failed", error=str(e))
                 eval_scores = {}
 
             async with AsyncSessionLocal() as db:
@@ -324,7 +330,7 @@ async def execute_run(run_id: UUID):
                 content=final_output, research=research_output, topic=topic,
             )
         except Exception as e:
-            logger.warning("eval_failed", run_id=rid, error=str(e))
+            log.warning("eval_failed", error=str(e))
             eval_scores = {}
 
         # Merge final-output citations (dedup by source+page)
@@ -357,6 +363,7 @@ async def execute_run(run_id: UUID):
         await emit(rid, "complete", {"final_output": final_output[:500]})
 
     except Exception as e:
+        log.exception("run_failed")
         async with AsyncSessionLocal() as db:
             run_obj = await db.get(Run, run_id)
             if run_obj:

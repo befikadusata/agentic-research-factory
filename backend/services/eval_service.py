@@ -32,6 +32,7 @@ Respond ONLY with valid JSON:
         base_url=llm.base_url,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=500,
+        timeout=60,
     )
     raw = response.choices[0].message.content.strip()
     # Strip markdown code fences if present

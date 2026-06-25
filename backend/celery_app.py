@@ -13,6 +13,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    task_soft_time_limit=600,   # SIGTERM after 10 min; task can clean up
+    task_time_limit=660,         # SIGKILL after 11 min if still running
     task_routes={
         "execute_run_task": {"queue": "default"},
         "ingest_doc_task":  {"queue": "default"},

@@ -27,7 +27,7 @@ async def create_workspace(
 ):
     ws = Workspace(name=body.name, owner_id=user_id)
     db.add(ws)
-    # Owner is also a member with admin role
+    await db.flush()  # ensure ws.id is populated before referencing it in WorkspaceMember
     db.add(WorkspaceMember(workspace_id=ws.id, user_id=user_id, role="admin"))
     await db.commit()
     await db.refresh(ws)
