@@ -90,6 +90,8 @@ export default function RunPage() {
   if (loadError) return <p className="text-red-400 p-8">{loadError}</p>;
   if (!run) return <p className="text-zinc-500 p-8">Loading run…</p>;
 
+  const verticalDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) ?? null : null;
+
   return (
     <div className="space-y-8">
       <div className="pb-6 border-b border-zinc-800">
@@ -101,23 +103,22 @@ export default function RunPage() {
           <span className="text-sm font-semibold text-primary-500 bg-primary-900/20 border border-primary-900/50 px-3 py-1 rounded-sm">
             {status === null ? "…" : (STATUS_LABEL[status] ?? status)}
           </span>
-          {run.vertical && (() => {
-            const vDef = VERTICALS.find((v) => v.key === run.vertical);
-            return vDef ? (
-              <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-sm">
-                {vDef.displayName}
-              </span>
-            ) : null;
-          })()}
+          {verticalDef && (
+            <span className={`text-xs font-bold uppercase tracking-wider border px-3 py-1.5 rounded-sm ${verticalDef.accentClass}`}>
+              {verticalDef.icon} {verticalDef.displayName}
+            </span>
+          )}
         </div>
-        
+
         {run.vertical_inputs && Object.keys(run.vertical_inputs).length > 0 && (
           <div className="mt-6 p-5 bg-zinc-900 border border-zinc-800 rounded-lg">
             <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Submitted Context</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {Object.entries(run.vertical_inputs).map(([k, v]) => (
                 <div key={k}>
-                  <dt className="text-xs text-zinc-500 capitalize font-medium">{k.replace(/_/g, ' ')}</dt>
+                  <dt className="text-xs text-zinc-500 font-medium">
+                    {verticalDef?.inputSchema[k]?.label ?? k.replace(/_/g, " ")}
+                  </dt>
                   <dd className="text-sm text-zinc-200 mt-0.5 break-words font-medium">{String(v)}</dd>
                 </div>
               ))}

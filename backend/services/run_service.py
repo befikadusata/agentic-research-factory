@@ -171,15 +171,8 @@ async def execute_run(run_id: UUID):
 
         task_type      = vertical_config["task_type"] if vertical_config else "research_report"
         run_start_time = datetime.now(timezone.utc)
-        user_feedback  = ""
 
-        # ── RESEARCH ─────────────────────────────────────────────────────────
-        async with AsyncSessionLocal() as db:
-            run_obj = await db.get(Run, run_id)
-            await _set_status(run_obj, RunStatus.researching, db)
-        await emit(rid, "status", {"status": "researching"})
-        await emit(rid, "agent_start", {"stage": "research"})
-        research_state = await _invoke_supervisor_with_retry(supervisor, {
+        initial_state = {
             "topic":           execution_brief,
             "vertical":        vertical,
             "task_type":       task_type,
@@ -194,8 +187,50 @@ async def execute_run(run_id: UUID):
             "review_output":   "",
             "retry_count":     0,
             "step_callback":   _step_cb,
-            "user_feedback":   user_feedback,
-        }, recursion_limit=15)
+            "user_feedback":   "",
+        }
+
+        if task_type == "lead_intel":
+            # ── LEAD INTEL: single pass, one HITL checkpoint ─────────────────
+            async with AsyncSessionLocal() as db:
+                run_obj = await db.get(Run, run_id)
+                await _set_status(run_obj, RunStatus.researching, db)
+            await emit(rid, "status", {"status": "researching"})
+            await emit(rid, "agent_start", {"stage": "research"})
+
+            final_state = await _invoke_supervisor_with_retry(supervisor, initial_state, recursion_limit=15)
+            await emit(rid, "agent_end", {"stage": "research"})
+
+            final_output    = final_state.get("final_output", "")
+            final_citations = extract_citations(final_output or "")
+            async with AsyncSessionLocal() as db:
+                run_obj = await db.get(Run, run_id)
+                run_obj.final_output = final_output
+                run_obj.metrics = {**(run_obj.metrics or {}), "citations": final_citations}
+                flag_modified(run_obj, "metrics")
+                await db.commit()
+
+            await _wait_for_hitl(rid, RunStatus.awaiting_final_approval, "hitl_required", final_output)
+
+            latency_sec = (datetime.now(timezone.utc) - run_start_time).total_seconds()
+            async with AsyncSessionLocal() as db:
+                run_obj = await db.get(Run, run_id)
+                run_obj.metrics = {**(run_obj.metrics or {}), "latency_sec": latency_sec}
+                flag_modified(run_obj, "metrics")
+                await _set_status(run_obj, RunStatus.complete, db)
+            await emit(rid, "complete", {"final_output": final_output[:500]})
+            return
+
+        # ── RESEARCH REPORT: 3-stage HITL ────────────────────────────────────
+        user_feedback = ""
+
+        # ── RESEARCH ─────────────────────────────────────────────────────────
+        async with AsyncSessionLocal() as db:
+            run_obj = await db.get(Run, run_id)
+            await _set_status(run_obj, RunStatus.researching, db)
+        await emit(rid, "status", {"status": "researching"})
+        await emit(rid, "agent_start", {"stage": "research"})
+        research_state = await _invoke_supervisor_with_retry(supervisor, initial_state, recursion_limit=15)
         await emit(rid, "agent_end", {"stage": "research"})
 
         research_output = research_state.get("research_output", "")
@@ -270,7 +305,6 @@ async def execute_run(run_id: UUID):
             flag_modified(run_obj, "metrics")
             await _set_status(run_obj, RunStatus.complete, db)
 
-        # Fix 9: key was "output", now "final_output" to match SSEEvent type
         await emit(rid, "complete", {"final_output": final_output[:500]})
 
     except Exception as e:

@@ -25,7 +25,7 @@ export function RunCard({ run }: { run: Run }) {
             {new Date(run.created_at).toLocaleDateString()}
           </p>
           {vDef && (
-            <span className="text-[10px] font-semibold text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-sm">
+            <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-sm ${vDef.accentClass}`}>
               {vDef.icon} {vDef.displayName}
             </span>
           )}

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator # NEW
 from database import init_db
-from routers import runs, stream, hitl, upload, outputs, workspaces, analytics
+from routers import runs, stream, hitl, upload, outputs, workspaces, analytics, verticals
 from config import settings, validate_config
 from utils.redis_client import init_redis_pool, close_redis_pool
 
@@ -49,6 +49,7 @@ app.include_router(upload.router,      prefix="/upload",      tags=["upload"])
 app.include_router(outputs.router,     prefix="/runs",        tags=["outputs"])
 app.include_router(workspaces.router,  prefix="/workspaces",  tags=["workspaces"])
 app.include_router(analytics.router,   prefix="/analytics",   tags=["analytics"])
+app.include_router(verticals.router,   tags=["verticals"])
 
 @app.get("/health")
 async def health():

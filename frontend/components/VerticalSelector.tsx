@@ -1,6 +1,7 @@
 "use client";
 
-import { VERTICALS, type VerticalDefinition, type Vertical } from "@/lib/types";
+import { useVerticals } from "@/lib/useVerticals";
+import type { VerticalDefinition, Vertical } from "@/lib/types";
 import { clsx } from "clsx";
 
 interface Props {
@@ -9,9 +10,10 @@ interface Props {
 }
 
 export function VerticalSelector({ value, onChange }: Props) {
+  const verticals = useVerticals();
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      {VERTICALS.map((v: VerticalDefinition) => {
+      {verticals.map((v: VerticalDefinition) => {
         const selected = value === v.key;
         return (
           <button

@@ -39,6 +39,7 @@ export interface VerticalDefinition {
   icon: string;
   inputSchema: Record<string, VerticalFieldSchema>;
   defaultFormat: OutputFormat;
+  accentClass: string;
 }
 
 export const VERTICALS: VerticalDefinition[] = [
@@ -49,6 +50,7 @@ export const VERTICALS: VerticalDefinition[] = [
       "Build a prospect dossier — company overview, decision makers, funding, tech stack, and fit score.",
     icon: "🎯",
     defaultFormat: "report",
+    accentClass: "text-violet-400 bg-violet-950/40 border-violet-900/60",
     inputSchema: {
       company_url: {
         label: "Company URL",
@@ -77,6 +79,7 @@ export const VERTICALS: VerticalDefinition[] = [
       "Analyze a competitor's positioning, content strategy, pricing, and differentiation gaps.",
     icon: "📊",
     defaultFormat: "report",
+    accentClass: "text-blue-400 bg-blue-950/40 border-blue-900/60",
     inputSchema: {
       competitor_name: {
         label: "Competitor Name",
@@ -105,6 +108,7 @@ export const VERTICALS: VerticalDefinition[] = [
       "Get a strategic landscape analysis — market sizing, competition, timing, and entry points.",
     icon: "🚀",
     defaultFormat: "summary",
+    accentClass: "text-emerald-400 bg-emerald-950/40 border-emerald-900/60",
     inputSchema: {
       market_segment: {
         label: "Market Segment",

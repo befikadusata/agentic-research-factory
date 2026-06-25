@@ -7,11 +7,13 @@ import { createRun } from "@/lib/api";
 import { FormatSelector } from "@/components/FormatSelector";
 import { FileUpload } from "@/components/FileUpload";
 import { VerticalSelector } from "@/components/VerticalSelector";
-import { VERTICALS, type Vertical, type OutputFormat } from "@/lib/types";
+import { useVerticals } from "@/lib/useVerticals";
+import type { Vertical, OutputFormat } from "@/lib/types";
 
 export default function NewRunPage() {
   const router = useRouter();
   const { data: session, status: authStatus } = useSession();
+  const verticals = useVerticals();
   const [vertical, setVertical] = useState<Vertical | null>(null);
   const [verticalInputs, setVerticalInputs] = useState<Record<string, string>>({});
   const [topic, setTopic] = useState("");
@@ -27,13 +29,13 @@ export default function NewRunPage() {
   if (authStatus === "loading") return <p className="text-zinc-500 p-8">Loading…</p>;
   if (!session) return null;
 
-  const verticalDef = VERTICALS.find((v) => v.key === vertical) ?? null;
+  const verticalDef = verticals.find((v) => v.key === vertical) ?? null;
 
   function handleVerticalChange(v: Vertical) {
     setVertical(v);
     setVerticalInputs({});
     setDocIds([]);
-    const def = VERTICALS.find((vd) => vd.key === v);
+    const def = verticals.find((vd) => vd.key === v);
     if (def) setFormat(def.defaultFormat);
   }
 
