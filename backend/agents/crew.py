@@ -6,7 +6,8 @@ task_type routing:
   "quick_snapshot"   → Researcher (no Firecrawl) → Writer → Editor  (skip Analyst)
   "lead_intel"       → LeadIntel agent only
 """
-from typing import TypedDict, Literal, Callable, Optional, List
+import operator
+from typing import TypedDict, Literal, Callable, Optional, List, Annotated
 from langgraph.graph import StateGraph, START, END
 from configs.verticals import get_vertical
 from logger import logger
@@ -24,9 +25,10 @@ class ResearchState(TypedDict):
     analysis_output: str
     final_output: str
     review_output: str
-    user_feedback: Optional[str]  # NEW
+    user_feedback: Optional[str]
     retry_count: int
     step_callback: Optional[Callable]
+    token_usages: Annotated[list, operator.add]
 
 
 # ── node helpers ────────────────────────────────────────────────────────────
@@ -53,8 +55,16 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, result_key: st
     if lf:
         span.end()
         trace.update(output=str(result))
-    
-    return {result_key: str(result)}
+
+    usage = result.token_usage
+    return {
+        result_key: str(result),
+        "token_usages": [{
+            "agent_name":        result_key,
+            "prompt_tokens":     (usage.prompt_tokens     if usage else 0),
+            "completion_tokens": (usage.completion_tokens if usage else 0),
+        }],
+    }
 
 
 # ── nodes ────────────────────────────────────────────────────────────────────

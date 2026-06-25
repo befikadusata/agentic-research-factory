@@ -47,6 +47,18 @@ class RunResponse(BaseModel):
         "from_attributes": True
     }
 
+class RunCostResponse(BaseModel):
+    id: UUID
+    run_id: UUID
+    agent_name: str
+    input_tokens: int
+    output_tokens: int
+    total_cost: float
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class RunDetailResponse(RunResponse):
     updated_at: datetime
     logs: list[dict]
@@ -55,3 +67,5 @@ class RunDetailResponse(RunResponse):
     final_output: Optional[str]
     error_message: Optional[str]
     citations: list[dict] = Field(default_factory=list)
+    metrics: dict = Field(default_factory=dict)
+    costs: list[RunCostResponse] = Field(default_factory=list)

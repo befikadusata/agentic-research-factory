@@ -11,6 +11,8 @@ from logger import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 from configs.verticals import build_execution_brief, get_vertical
 from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_SIGNAL_KEY, HITL_INSTRUCTION_KEY
+from utils.cost_tracker import log_cost
+from services.eval_service import evaluate_output
 
 LLM_STAGE_TIMEOUT_SEC = 300
 
@@ -30,6 +32,21 @@ async def emit(run_id: str, event_type: str, data: dict):
         pass  # DB persistence is best-effort; Redis publish is authoritative for live streaming
     redis_client = await get_redis_client()
     await redis_client.publish(f"{LOG_CHANNEL_PREFIX}{run_id}", json.dumps({"type": event_type, "data": data}))
+
+async def _log_token_usages(run_id: str, token_usages: list):
+    for usage in token_usages:
+        try:
+            async with AsyncSessionLocal() as db:
+                await log_cost(
+                    db, run_id,
+                    usage["agent_name"],
+                    usage.get("prompt_tokens", 0),
+                    usage.get("completion_tokens", 0),
+                    0.0,
+                )
+        except Exception:
+            pass
+
 
 async def _set_status(run: Run, status: RunStatus, db: AsyncSession):
     run.status = status
@@ -188,6 +205,7 @@ async def execute_run(run_id: UUID):
             "retry_count":     0,
             "step_callback":   _step_cb,
             "user_feedback":   "",
+            "token_usages":    [],
         }
 
         if task_type == "lead_intel":
@@ -200,13 +218,27 @@ async def execute_run(run_id: UUID):
 
             final_state = await _invoke_supervisor_with_retry(supervisor, initial_state, recursion_limit=15)
             await emit(rid, "agent_end", {"stage": "research"})
+            await _log_token_usages(rid, final_state.get("token_usages", []))
 
             final_output    = final_state.get("final_output", "")
             final_citations = extract_citations(final_output or "")
+
+            try:
+                eval_scores = await evaluate_output(
+                    content=final_output, research=final_output, topic=topic,
+                )
+            except Exception as e:
+                logger.warning("eval_failed", run_id=rid, error=str(e))
+                eval_scores = {}
+
             async with AsyncSessionLocal() as db:
                 run_obj = await db.get(Run, run_id)
                 run_obj.final_output = final_output
-                run_obj.metrics = {**(run_obj.metrics or {}), "citations": final_citations}
+                run_obj.metrics = {
+                    **(run_obj.metrics or {}),
+                    "citations": final_citations,
+                    "eval_scores": eval_scores,
+                }
                 flag_modified(run_obj, "metrics")
                 await db.commit()
 
@@ -232,6 +264,7 @@ async def execute_run(run_id: UUID):
         await emit(rid, "agent_start", {"stage": "research"})
         research_state = await _invoke_supervisor_with_retry(supervisor, initial_state, recursion_limit=15)
         await emit(rid, "agent_end", {"stage": "research"})
+        await _log_token_usages(rid, research_state.get("token_usages", []))
 
         research_output = research_state.get("research_output", "")
         citations       = extract_citations(research_output or "")
@@ -254,9 +287,11 @@ async def execute_run(run_id: UUID):
         await emit(rid, "status", {"status": "analyzing"})
         await emit(rid, "agent_start", {"stage": "analysis"})
         analysis_state = await _invoke_supervisor_with_retry(supervisor, {
-            **research_state, "analysis_output": "", "user_feedback": user_feedback
+            **research_state, "analysis_output": "", "user_feedback": user_feedback,
+            "token_usages": [],
         }, recursion_limit=15)
         await emit(rid, "agent_end", {"stage": "analysis"})
+        await _log_token_usages(rid, analysis_state.get("token_usages", []))
 
         analysis_output = analysis_state.get("analysis_output", "")
         async with AsyncSessionLocal() as db:
@@ -276,11 +311,21 @@ async def execute_run(run_id: UUID):
         await emit(rid, "status", {"status": "writing"})
         await emit(rid, "agent_start", {"stage": "writing"})
         final_state = await _invoke_supervisor_with_retry(supervisor, {
-            **analysis_state, "final_output": "", "user_feedback": user_feedback
+            **analysis_state, "final_output": "", "user_feedback": user_feedback,
+            "token_usages": [],
         }, recursion_limit=25)
         await emit(rid, "agent_end", {"stage": "writing"})
+        await _log_token_usages(rid, final_state.get("token_usages", []))
 
         final_output = final_state.get("final_output", "")
+
+        try:
+            eval_scores = await evaluate_output(
+                content=final_output, research=research_output, topic=topic,
+            )
+        except Exception as e:
+            logger.warning("eval_failed", run_id=rid, error=str(e))
+            eval_scores = {}
 
         # Merge final-output citations (dedup by source+page)
         final_citations = extract_citations(final_output or "")
@@ -289,7 +334,11 @@ async def execute_run(run_id: UUID):
             run_obj.final_output = final_output
             existing = (run_obj.metrics or {}).get("citations", [])
             merged   = {(c["source"], c["page"]): c for c in existing + final_citations}
-            run_obj.metrics = {**(run_obj.metrics or {}), "citations": list(merged.values())}
+            run_obj.metrics = {
+                **(run_obj.metrics or {}),
+                "citations": list(merged.values()),
+                "eval_scores": eval_scores,
+            }
             flag_modified(run_obj, "metrics")
             await db.commit()
 

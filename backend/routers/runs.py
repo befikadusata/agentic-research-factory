@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import Optional
 from database import get_db
 from schemas import CreateRunRequest, RunResponse, RunDetailResponse
 from models import Run, WorkspaceMember, RunStatus
-from celery_app import execute_run_task # NEW
+from celery_app import execute_run_task
 from auth import get_current_user
 
 router = APIRouter()
@@ -64,7 +65,10 @@ async def get_run(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    run = await db.get(Run, run_id)
+    result = await db.execute(
+        select(Run).where(Run.id == run_id).options(selectinload(Run.costs))
+    )
+    run = result.scalar_one_or_none()
     if not run:
         raise HTTPException(404, "Run not found")
     # Allow access if owner OR workspace member
