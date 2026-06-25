@@ -84,7 +84,7 @@ services:
     environment:
       # Copy values from frontend/.env.local.example
       - NEXTAUTH_URL=http://localhost:3000
-      - NEXTAUTH_SECRET=replace-with-secret
+      - NEXTAUTH_SECRET=test-secret-at-least-32-chars-long-for-e2e
       - GOOGLE_CLIENT_ID=replace-with-google-client-id
       - GOOGLE_CLIENT_SECRET=replace-with-google-client-secret
       - NEXT_PUBLIC_BACKEND_URL=http://backend:8000
