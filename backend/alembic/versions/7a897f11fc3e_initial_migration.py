@@ -40,8 +40,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('workspace_id', 'user_id'),
     )
 
-    # Initial enum — awaiting_* / analyzing values are added in bb27d181d2df → b0eb3249c97e
-    op.execute("CREATE TYPE runstatus AS ENUM ('pending', 'researching', 'writing', 'complete', 'failed')")
+    # awaiting_* / analyzing values are added later in b0eb3249c97e
+    _runstatus = sa.Enum(
+        'pending', 'researching', 'writing', 'complete', 'failed',
+        name='runstatus',
+    )
 
     op.create_table(
         'runs',
@@ -50,7 +53,7 @@ def upgrade() -> None:
         sa.Column('workspace_id', UUID(as_uuid=True), nullable=True),
         sa.Column('topic', sa.Text(), nullable=False),
         sa.Column('format', sa.String(), nullable=False),
-        sa.Column('status', sa.Enum(name='runstatus', create_type=False), nullable=False),
+        sa.Column('status', _runstatus, nullable=False),
         sa.Column('vertical', sa.String(), nullable=True),
         sa.Column('vertical_inputs', sa.JSON(), nullable=True),
         sa.Column('doc_paths', sa.JSON(), nullable=True),
@@ -73,7 +76,7 @@ def downgrade() -> None:
     op.drop_index('ix_runs_workspace_id', table_name='runs')
     op.drop_index('ix_runs_user_id', table_name='runs')
     op.drop_table('runs')
-    op.execute("DROP TYPE runstatus")
+    sa.Enum(name='runstatus').drop(op.get_bind(), checkfirst=False)
     op.drop_table('workspace_members')
     op.drop_index('ix_workspaces_owner_id', table_name='workspaces')
     op.drop_table('workspaces')
