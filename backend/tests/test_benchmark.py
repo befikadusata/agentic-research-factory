@@ -15,7 +15,7 @@ BENCHMARK_SUBSET = [
 ]
 
 @pytest.mark.asyncio
-async def test_benchmark_smoke():
+async def test_benchmark_smoke(redis_pool):
     async with AsyncSessionLocal() as db:
         # Create a workspace
         ws = Workspace(name="test_ws", owner_id="test_user")

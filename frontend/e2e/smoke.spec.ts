@@ -169,7 +169,7 @@ test.describe("Core Flow Smoke Tests", () => {
       await route.fulfill({
         status: 200,
         headers: { "content-type": "text/event-stream" },
-        body: 'data: {"type":"complete","data":{"output":"# Final Brief\\n\\nDone."}}\n\n',
+        body: 'data: {"type":"complete","data":{"final_output":"# Final Brief\\n\\nDone."}}\n\n',
       });
     });
 

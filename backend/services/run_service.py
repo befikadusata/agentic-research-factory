@@ -10,15 +10,10 @@ from models import Run, RunStatus
 from logger import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 from configs.verticals import build_execution_brief, get_vertical
-from utils.redis_client import get_redis_client
+from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_SIGNAL_KEY, HITL_INSTRUCTION_KEY
 
 LLM_STAGE_TIMEOUT_SEC = 300
 
-# Pub/Sub channel prefix for SSE logs
-LOG_CHANNEL_PREFIX = "run_log:"
-# Key prefix for HITL signals and instructions
-HITL_SIGNAL_KEY = "run_hitl_signal:"
-HITL_INSTRUCTION_KEY = "run_hitl_instr:"
 
 async def emit(run_id: str, event_type: str, data: dict):
     entry = {"type": event_type, "data": data, "ts": datetime.now(timezone.utc).isoformat()}
@@ -50,18 +45,16 @@ async def _invoke_supervisor_with_retry(supervisor, state: dict, recursion_limit
 
 async def _wait_for_hitl(run_id: str, status: RunStatus, emit_event: str, summary: str):
     async with AsyncSessionLocal() as db:
-        run = await db.get(Run, run_id)
+        run = await db.get(Run, UUID(run_id))  # Fix 2: explicit UUID cast (was plain string)
         if run:
             await _set_status(run, status, db)
             await emit(run_id, emit_event, {"stage": status.value, "summary": summary[:2000]})
 
     redis_client = await get_redis_client()
     signal_key = f"{HITL_SIGNAL_KEY}{run_id}"
-    
+
     try:
-        # Poll/Wait for signal (using blpop or key existence)
-        # Using a simple key-based approach for now
-        for _ in range(360): # 30 mins (360 * 5s)
+        for _ in range(360):  # 30 mins (360 * 5s)
             if await redis_client.exists(signal_key):
                 break
             await asyncio.sleep(5)
@@ -69,178 +62,223 @@ async def _wait_for_hitl(run_id: str, status: RunStatus, emit_event: str, summar
             raise asyncio.TimeoutError
     except asyncio.TimeoutError:
         async with AsyncSessionLocal() as db:
-            run = await db.get(Run, run_id)
+            run = await db.get(Run, UUID(run_id))  # Fix 2: explicit UUID cast
             if run:
                 await _set_status(run, RunStatus.failed, db)
         await emit(run_id, "error", {"message": f"HITL stage {status} timed out after 30 minutes."})
         raise asyncio.TimeoutError
-    
-    # Retrieve instructions
+
     instruction = await redis_client.get(f"{HITL_INSTRUCTION_KEY}{run_id}")
-    # Cleanup
     await redis_client.delete(signal_key)
     await redis_client.delete(f"{HITL_INSTRUCTION_KEY}{run_id}")
-    
     return instruction or ""
 
 async def execute_run(run_id: UUID):
     rid = str(run_id)
     logger.info("starting_run", run_id=rid)
-    user_feedback = ""
+
+    # Fix 6: capture running loop here (async context), before any to_thread calls
+    loop = asyncio.get_running_loop()
 
     try:
+        # ── Read initial run config (short-lived session) ──────────────────────
+        # Fix 3: no longer hold session across the entire run
         async with AsyncSessionLocal() as db:
             run = await db.get(Run, run_id)
-            if not run: return
+            if not run:
+                return
+            workspace_id    = run.workspace_id
+            doc_paths       = list(run.doc_paths or [])
+            vertical        = run.vertical
+            vertical_inputs = dict(run.vertical_inputs or {})
+            topic           = run.topic
+            run_format      = run.format
 
-            # ── Resolve collection name ──
-            if run.workspace_id:
-                collection_name = f"workspace_{run.workspace_id}"
-            else:
-                collection_name = f"run_{rid.replace('-', '_')}"
+        collection_name = (
+            f"workspace_{workspace_id}" if workspace_id
+            else f"run_{rid.replace('-', '_')}"
+        )
 
-            # ── Wait for referenced documents to be ingested ──
-            context_docs = ""
-            if run.doc_paths:
-                from models import Document, DocumentStatus
-                from sqlalchemy import select as sa_select
-                from uuid import UUID as _UUID
+        # ── Wait for referenced documents to be ingested ───────────────────────
+        context_docs = ""
+        if doc_paths:
+            from models import Document, DocumentStatus
+            from sqlalchemy import select as sa_select
 
-                doc_ids = [_UUID(d) for d in run.doc_paths if d]
-                POLL_INTERVAL = 5
-                POLL_TIMEOUT = 300
-                elapsed = 0
+            doc_ids = [UUID(d) for d in doc_paths if d]
+            POLL_INTERVAL = 5
+            POLL_TIMEOUT  = 300
+            elapsed = 0
 
-                while elapsed < POLL_TIMEOUT:
+            while elapsed < POLL_TIMEOUT:
+                # Fix 1: fresh session each iteration — kills the SQLAlchemy identity-map
+                # caching that previously prevented status updates from being seen
+                async with AsyncSessionLocal() as db:
                     result = await db.execute(
                         sa_select(Document).where(Document.id.in_(doc_ids))
                     )
-                    docs = result.scalars().all()
-
-                    failed = [d for d in docs if d.status == DocumentStatus.failed]
-                    if failed:
-                        names = ", ".join(d.filename for d in failed)
-                        run.error_message = f"Document ingestion failed for: {names}"
-                        await _set_status(run, RunStatus.failed, db)
-                        await emit(rid, "error", {"message": run.error_message})
-                        return
-
+                    docs    = result.scalars().all()
+                    failed  = [d for d in docs if d.status == DocumentStatus.failed]
                     pending = [d for d in docs if d.status == DocumentStatus.pending]
-                    if not pending:
-                        context_docs = f"Documents ingested into collection: {collection_name}."
-                        break
 
-                    await emit(rid, "status", {"status": "waiting_for_documents", "pending": len(pending)})
-                    await asyncio.sleep(POLL_INTERVAL)
-                    elapsed += POLL_INTERVAL
-                    # Expire cached objects so next iteration re-fetches from DB
-                    await db.execute(sa_select(Document).where(Document.id.in_(doc_ids)))
-                else:
-                    run.error_message = "Timed out waiting for document ingestion"
-                    await _set_status(run, RunStatus.failed, db)
-                    await emit(rid, "error", {"message": run.error_message})
+                if failed:
+                    names     = ", ".join(d.filename for d in failed)
+                    error_msg = f"Document ingestion failed for: {names}"
+                    async with AsyncSessionLocal() as db:
+                        run_obj = await db.get(Run, run_id)
+                        if run_obj:
+                            run_obj.error_message = error_msg
+                            await _set_status(run_obj, RunStatus.failed, db)
+                    await emit(rid, "error", {"message": error_msg})
                     return
 
-            vertical_config = get_vertical(run.vertical)
-            execution_brief = build_execution_brief(run.topic, run.vertical, run.vertical_inputs or {})
+                if not pending:
+                    context_docs = f"Documents ingested into collection: {collection_name}."
+                    break
 
-            from agents.crew import supervisor
-            from tools.rag import extract_citations
+                await emit(rid, "status", {"status": "waiting_for_documents", "pending": len(pending)})
+                await asyncio.sleep(POLL_INTERVAL)
+                elapsed += POLL_INTERVAL
+            else:
+                error_msg = "Timed out waiting for document ingestion"
+                async with AsyncSessionLocal() as db:
+                    run_obj = await db.get(Run, run_id)
+                    if run_obj:
+                        run_obj.error_message = error_msg
+                        await _set_status(run_obj, RunStatus.failed, db)
+                await emit(rid, "error", {"message": error_msg})
+                return
 
-            loop = asyncio.get_event_loop()
+        vertical_config  = get_vertical(vertical)
+        execution_brief  = build_execution_brief(topic, vertical, vertical_inputs)
 
-            def _step_cb(step):
-                data = {"step": str(step)[:300]}
-                if hasattr(step, "agent") and hasattr(step.agent, "role"):
-                    data["agent"] = step.agent.role
-                asyncio.run_coroutine_threadsafe(emit(rid, "step", data), loop)
+        from agents.crew import supervisor
+        from tools.rag import extract_citations
 
-            task_type = vertical_config["task_type"] if vertical_config else "research_report"
+        # Fix 4+6: emit "log" type with {agent, message, ts} so AgentLog populates
+        def _step_cb(step):
+            agent_role = (
+                step.agent.role
+                if hasattr(step, "agent") and hasattr(step.agent, "role")
+                else "system"
+            )
+            data = {
+                "agent":   agent_role,
+                "message": str(step)[:300],
+                "ts":      datetime.now(timezone.utc).isoformat(),
+            }
+            asyncio.run_coroutine_threadsafe(emit(rid, "log", data), loop)
 
-            run_start_time = datetime.now(timezone.utc)
+        task_type      = vertical_config["task_type"] if vertical_config else "research_report"
+        run_start_time = datetime.now(timezone.utc)
+        user_feedback  = ""
 
-            # ── RESEARCH ──
-            await _set_status(run, RunStatus.researching, db)
-            await emit(rid, "status", {"status": "researching"})
-            await emit(rid, "agent_start", {"stage": "research"})
-            research_state = await _invoke_supervisor_with_retry(supervisor, {
-                "topic": execution_brief,
-                "vertical": run.vertical,
-                "task_type": task_type,
-                "context_docs": context_docs,
-                "collection_name": collection_name,
-                "output_format": run.format,
-                "workspace_id": str(run.workspace_id) if run.workspace_id else "",
-                "research_output": "",
-                "plan_output": "",
-                "analysis_output": "",
-                "final_output": "",
-                "review_output": "",
-                "retry_count": 0,
-                "step_callback": _step_cb,
-                "user_feedback": user_feedback,
-            }, recursion_limit=15)
-            await emit(rid, "agent_end", {"stage": "research"})
+        # ── RESEARCH ─────────────────────────────────────────────────────────
+        async with AsyncSessionLocal() as db:
+            run_obj = await db.get(Run, run_id)
+            await _set_status(run_obj, RunStatus.researching, db)
+        await emit(rid, "status", {"status": "researching"})
+        await emit(rid, "agent_start", {"stage": "research"})
+        research_state = await _invoke_supervisor_with_retry(supervisor, {
+            "topic":           execution_brief,
+            "vertical":        vertical,
+            "task_type":       task_type,
+            "context_docs":    context_docs,
+            "collection_name": collection_name,
+            "output_format":   run_format,
+            "workspace_id":    str(workspace_id) if workspace_id else "",
+            "research_output": "",
+            "plan_output":     "",
+            "analysis_output": "",
+            "final_output":    "",
+            "review_output":   "",
+            "retry_count":     0,
+            "step_callback":   _step_cb,
+            "user_feedback":   user_feedback,
+        }, recursion_limit=15)
+        await emit(rid, "agent_end", {"stage": "research"})
 
-            run.research_output = research_state.get("research_output", "")
-
-            # Persist citations from research output
-            citations = extract_citations(run.research_output or "")
-            run.metrics = {**(run.metrics or {}), "citations": citations}
-            flag_modified(run, "metrics")
-
-            # STAGE 1: Research Approval
-            user_feedback = await _wait_for_hitl(rid, RunStatus.awaiting_research_approval, "hitl_required", run.research_output)
-
-            # ── ANALYSIS ──
-            await _set_status(run, RunStatus.analyzing, db)
-            await emit(rid, "status", {"status": "analyzing"})
-            await emit(rid, "agent_start", {"stage": "analysis"})
-            analysis_state = await _invoke_supervisor_with_retry(supervisor, {
-                **research_state, "analysis_output": "", "user_feedback": user_feedback
-            }, recursion_limit=15)
-            await emit(rid, "agent_end", {"stage": "analysis"})
-
-            run.analysis_output = analysis_state.get("analysis_output", "")
-
-            # STAGE 2: Analysis Approval
-            user_feedback = await _wait_for_hitl(rid, RunStatus.awaiting_analysis_approval, "hitl_required", run.analysis_output)
-
-            # ── WRITING ──
-            await _set_status(run, RunStatus.writing, db)
-            await emit(rid, "status", {"status": "writing"})
-            await emit(rid, "agent_start", {"stage": "writing"})
-            final_state = await _invoke_supervisor_with_retry(supervisor, {
-                **analysis_state, "final_output": "", "user_feedback": user_feedback
-            }, recursion_limit=25)
-            await emit(rid, "agent_end", {"stage": "writing"})
-
-            run.final_output = final_state.get("final_output", "")
-
-            # Merge final output citations (dedup by source+page)
-            final_citations = extract_citations(run.final_output or "")
-            existing = (run.metrics or {}).get("citations", [])
-            merged = {(c["source"], c["page"]): c for c in existing + final_citations}
-            run.metrics = {**(run.metrics or {}), "citations": list(merged.values())}
-            flag_modified(run, "metrics")
-
-            # STAGE 3: Final Approval
-            user_feedback = await _wait_for_hitl(rid, RunStatus.awaiting_final_approval, "hitl_required", run.final_output)
-
-            latency_sec = (datetime.now(timezone.utc) - run_start_time).total_seconds()
-            run.metrics = {**(run.metrics or {}), "latency_sec": latency_sec}
-            flag_modified(run, "metrics")
+        research_output = research_state.get("research_output", "")
+        citations       = extract_citations(research_output or "")
+        async with AsyncSessionLocal() as db:
+            run_obj = await db.get(Run, run_id)
+            run_obj.research_output = research_output
+            run_obj.metrics = {**(run_obj.metrics or {}), "citations": citations}
+            flag_modified(run_obj, "metrics")
             await db.commit()
 
-            await _set_status(run, RunStatus.complete, db)
-            await emit(rid, "complete", {"output": run.final_output[:500]})
+        # STAGE 1: Research Approval — no session held during wait
+        user_feedback = await _wait_for_hitl(
+            rid, RunStatus.awaiting_research_approval, "hitl_required", research_output
+        )
+
+        # ── ANALYSIS ─────────────────────────────────────────────────────────
+        async with AsyncSessionLocal() as db:
+            run_obj = await db.get(Run, run_id)
+            await _set_status(run_obj, RunStatus.analyzing, db)
+        await emit(rid, "status", {"status": "analyzing"})
+        await emit(rid, "agent_start", {"stage": "analysis"})
+        analysis_state = await _invoke_supervisor_with_retry(supervisor, {
+            **research_state, "analysis_output": "", "user_feedback": user_feedback
+        }, recursion_limit=15)
+        await emit(rid, "agent_end", {"stage": "analysis"})
+
+        analysis_output = analysis_state.get("analysis_output", "")
+        async with AsyncSessionLocal() as db:
+            run_obj = await db.get(Run, run_id)
+            run_obj.analysis_output = analysis_output
+            await db.commit()
+
+        # STAGE 2: Analysis Approval — no session held during wait
+        user_feedback = await _wait_for_hitl(
+            rid, RunStatus.awaiting_analysis_approval, "hitl_required", analysis_output
+        )
+
+        # ── WRITING ───────────────────────────────────────────────────────────
+        async with AsyncSessionLocal() as db:
+            run_obj = await db.get(Run, run_id)
+            await _set_status(run_obj, RunStatus.writing, db)
+        await emit(rid, "status", {"status": "writing"})
+        await emit(rid, "agent_start", {"stage": "writing"})
+        final_state = await _invoke_supervisor_with_retry(supervisor, {
+            **analysis_state, "final_output": "", "user_feedback": user_feedback
+        }, recursion_limit=25)
+        await emit(rid, "agent_end", {"stage": "writing"})
+
+        final_output = final_state.get("final_output", "")
+
+        # Merge final-output citations (dedup by source+page)
+        final_citations = extract_citations(final_output or "")
+        async with AsyncSessionLocal() as db:
+            run_obj = await db.get(Run, run_id)
+            run_obj.final_output = final_output
+            existing = (run_obj.metrics or {}).get("citations", [])
+            merged   = {(c["source"], c["page"]): c for c in existing + final_citations}
+            run_obj.metrics = {**(run_obj.metrics or {}), "citations": list(merged.values())}
+            flag_modified(run_obj, "metrics")
+            await db.commit()
+
+        # STAGE 3: Final Approval — no session held during wait
+        user_feedback = await _wait_for_hitl(
+            rid, RunStatus.awaiting_final_approval, "hitl_required", final_output
+        )
+
+        latency_sec = (datetime.now(timezone.utc) - run_start_time).total_seconds()
+        async with AsyncSessionLocal() as db:
+            run_obj = await db.get(Run, run_id)
+            run_obj.metrics = {**(run_obj.metrics or {}), "latency_sec": latency_sec}
+            flag_modified(run_obj, "metrics")
+            await _set_status(run_obj, RunStatus.complete, db)
+
+        # Fix 9: key was "output", now "final_output" to match SSEEvent type
+        await emit(rid, "complete", {"final_output": final_output[:500]})
 
     except Exception as e:
         async with AsyncSessionLocal() as db:
-            run = await db.get(Run, run_id)
-            if run:
-                run.error_message = str(e)[:500]
-                await _set_status(run, RunStatus.failed, db)
+            run_obj = await db.get(Run, run_id)
+            if run_obj:
+                run_obj.error_message = str(e)[:500]
+                await _set_status(run_obj, RunStatus.failed, db)
         error_msg = str(e)
         await emit(rid, "error", {"message": f"Run failed: {error_msg[:200]}"})
         raise
@@ -249,5 +287,4 @@ async def approve_hitl(run_id: str, instruction: str | None = None):
     redis_client = await get_redis_client()
     if instruction:
         await redis_client.set(f"{HITL_INSTRUCTION_KEY}{run_id}", instruction, ex=7200)
-    # Set the signal key
     await redis_client.set(f"{HITL_SIGNAL_KEY}{run_id}", "approved", ex=7200)

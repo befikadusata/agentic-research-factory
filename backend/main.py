@@ -5,6 +5,7 @@ from prometheus_fastapi_instrumentator import Instrumentator # NEW
 from database import init_db
 from routers import runs, stream, hitl, upload, outputs, workspaces, analytics
 from config import settings, validate_config
+from utils.redis_client import init_redis_pool, close_redis_pool
 
 import uuid
 from logger import logger, request_id_var
@@ -13,7 +14,9 @@ from fastapi import Request
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_config(settings)
+    init_redis_pool()
     yield
+    await close_redis_pool()
 
 app = FastAPI(title="Agentic Research Factory", lifespan=lifespan)
 

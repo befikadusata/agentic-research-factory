@@ -2,14 +2,13 @@ import pytest
 import asyncio
 import json
 import uuid
-from utils.redis_client import get_redis_client
-from services.run_service import emit, approve_hitl, HITL_SIGNAL_KEY, LOG_CHANNEL_PREFIX
+from utils.redis_client import init_redis_pool, LOG_CHANNEL_PREFIX, HITL_SIGNAL_KEY
+from services.run_service import emit, approve_hitl
 
 @pytest.fixture
 async def redis_client():
-    client = await get_redis_client()
+    client = init_redis_pool()
     yield client
-    await client.aclose()
 
 @pytest.mark.asyncio
 async def test_redis_emit_and_stream(redis_client):

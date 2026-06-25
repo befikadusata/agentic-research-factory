@@ -60,3 +60,11 @@ def auth_as():
 
     yield _set
     app.dependency_overrides.clear()
+
+@pytest.fixture
+async def redis_pool():
+    """Initialise the Redis singleton for tests that invoke service functions directly
+    (i.e. tests that do not go through the FastAPI app/lifespan)."""
+    from utils.redis_client import init_redis_pool
+    init_redis_pool()
+    yield
