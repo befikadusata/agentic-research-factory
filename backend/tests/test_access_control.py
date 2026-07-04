@@ -1,6 +1,6 @@
 import pytest
 from uuid import uuid4
-from models import Run, RunStatus, Workspace, WorkspaceMember
+from models import Run, RunStatus, Workspace, WorkspaceMember, Document
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -137,3 +137,68 @@ async def test_owner_can_access_own_run_without_workspace(client, db_session, au
     auth_as(owner)
     resp = await client.get(f"/runs/{run.id}")
     assert resp.status_code == 200
+
+
+# ── create_run rejects cross-tenant workspace/doc injection ───────────────────
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_non_member_workspace(client, db_session, auth_as):
+    owner = "owner@example.com"
+    member = "member@example.com"
+    outsider = "outsider@example.com"
+    ws = await _create_workspace_with_member(db_session, owner, member)
+
+    auth_as(outsider)
+    resp = await client.post(
+        "/runs", json={"topic": "test", "format": "report", "workspace_id": str(ws.id)}
+    )
+    assert resp.status_code == 403
+
+    result = await db_session.execute(Run.__table__.select().where(Run.workspace_id == ws.id))
+    assert result.first() is None
+
+
+@pytest.mark.asyncio
+async def test_create_run_allows_workspace_member(client, db_session, auth_as):
+    owner = "owner@example.com"
+    member = "member@example.com"
+    ws = await _create_workspace_with_member(db_session, owner, member)
+
+    auth_as(member)
+    resp = await client.post(
+        "/runs", json={"topic": "test", "format": "report", "workspace_id": str(ws.id)}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["workspace_id"] == str(ws.id)
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_doc_from_foreign_workspace(client, db_session, auth_as):
+    owner = "owner@example.com"
+    member = "member@example.com"
+    other_owner = "other-owner@example.com"
+    ws = await _create_workspace_with_member(db_session, owner, member)
+    other_ws = await _create_workspace_with_member(db_session, other_owner, "other-member@example.com")
+
+    foreign_doc = Document(
+        workspace_id=other_ws.id,
+        uploaded_by=other_owner,
+        filename="secret.pdf",
+        file_path="/tmp/secret.pdf",
+        file_size_bytes=123,
+    )
+    db_session.add(foreign_doc)
+    await db_session.commit()
+    await db_session.refresh(foreign_doc)
+
+    auth_as(member)
+    resp = await client.post(
+        "/runs",
+        json={
+            "topic": "test",
+            "format": "report",
+            "workspace_id": str(ws.id),
+            "doc_ids": [str(foreign_doc.id)],
+        },
+    )
+    assert resp.status_code == 403

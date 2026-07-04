@@ -6,7 +6,7 @@ from uuid import UUID
 from typing import Optional
 from database import get_db
 from schemas import CreateRunRequest, RunResponse, RunDetailResponse
-from models import Run, WorkspaceMember, RunStatus
+from models import Run, WorkspaceMember, RunStatus, Document
 from celery_app import execute_run_task
 from auth import get_current_user
 
@@ -19,6 +19,21 @@ async def create_run(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
+    if body.workspace_id:
+        member = await db.get(WorkspaceMember, (body.workspace_id, user_id))
+        if not member:
+            raise HTTPException(403, "Not a member of this workspace")
+
+    if body.doc_ids:
+        try:
+            doc_uuids = [UUID(d) for d in body.doc_ids]
+        except ValueError:
+            raise HTTPException(400, "Invalid doc_id")
+        result = await db.execute(select(Document).where(Document.id.in_(doc_uuids)))
+        docs = result.scalars().all()
+        if len(docs) != len(doc_uuids) or any(d.workspace_id != body.workspace_id for d in docs):
+            raise HTTPException(403, "One or more documents are not accessible in this workspace")
+
     run = Run(
         user_id=user_id,
         topic=body.topic,
