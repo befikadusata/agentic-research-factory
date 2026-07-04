@@ -25,9 +25,14 @@ FAKE_EVAL_SCORES = {
 }
 
 
-async def _fake_invoke(sup, state, **kwargs):
+async def _fake_invoke(sup, state, config=None, **kwargs):
+    # execute_run resumes the real graph via invoke(None, config) between HITL
+    # stages, so `state` is None on those calls — this fake short-circuits the
+    # whole run in one call regardless, since it's only exercising the
+    # cost/eval/latency plumbing here, not the stage-gating itself (see
+    # tests/test_run_service_hitl.py for that).
     return {
-        **state,
+        **(state or {}),
         "research_output": "Draft",
         "analysis_output": "Analyzed",
         "final_output": "Final Output",

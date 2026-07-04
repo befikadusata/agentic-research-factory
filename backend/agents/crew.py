@@ -7,7 +7,8 @@ task_type routing:
   "lead_intel"       → LeadIntel agent only
 """
 import operator
-from typing import TypedDict, Literal, Callable, Optional, List, Annotated
+from typing import TypedDict, Literal, Optional, List, Annotated
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 from configs.verticals import get_vertical
 from logger import logger
@@ -27,7 +28,6 @@ class ResearchState(TypedDict):
     review_output: str
     user_feedback: Optional[str]
     retry_count: int
-    step_callback: Optional[Callable]
     token_usages: Annotated[list, operator.add]
 
 
@@ -36,14 +36,18 @@ class ResearchState(TypedDict):
 from crewai import Crew, Process
 from utils.langfuse_utils import get_langfuse
 
-def _run_crew_node(agents_list, tasks_list, state: ResearchState, result_key: str) -> dict:
+def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: RunnableConfig, result_key: str) -> dict:
     lf = get_langfuse()
     trace = span = None
     if lf:
         trace = lf.trace(name=f"crew_node_{result_key}", user_id="system")
         span = trace.span(name="run_crew")
 
-    cb = state.get("step_callback")
+    # step_callback is a live Python function, not state — it can't go through
+    # ResearchState because the checkpointer serializes every state update
+    # (functions aren't msgpack-serializable). It travels via config instead,
+    # which is per-call and never persisted.
+    cb = (config.get("configurable") or {}).get("step_callback")
     crew = Crew(
         agents=agents_list,
         tasks=tasks_list,
@@ -83,14 +87,14 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, result_key: st
 
 # ── nodes ────────────────────────────────────────────────────────────────────
 
-def node_plan(state: ResearchState) -> dict:
+def node_plan(state: ResearchState, config: RunnableConfig) -> dict:
     from agents.strategist import strategist_agent, planning_task
     agent = strategist_agent()
     task = planning_task(agent, state["topic"])
-    return _run_crew_node([agent], [task], state, "plan_output")
+    return _run_crew_node([agent], [task], state, config, "plan_output")
 
 
-def node_research(state: ResearchState) -> dict:
+def node_research(state: ResearchState, config: RunnableConfig) -> dict:
     from agents.researcher import researcher_agent, research_task
     from tools.search import tavily_search_tool
     from tools.scraper import firecrawl_tool, batch_scrape_tool
@@ -122,10 +126,10 @@ def node_research(state: ResearchState) -> dict:
         topic = f"{topic}\n\n**RETRY FEEDBACK**:\n{state['review_output']}"
 
     task = research_task(agent, topic, state.get("context_docs", ""))
-    return _run_crew_node([agent], [task], state, "research_output")
+    return _run_crew_node([agent], [task], state, config, "research_output")
 
 
-def node_lead_intel(state: ResearchState) -> dict:
+def node_lead_intel(state: ResearchState, config: RunnableConfig) -> dict:
     from agents.lead_intel import lead_intel_agent, lead_intel_task
     agent = lead_intel_agent()
     
@@ -135,10 +139,10 @@ def node_lead_intel(state: ResearchState) -> dict:
         topic = f"{topic}\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
         
     task = lead_intel_task(agent, topic)
-    return _run_crew_node([agent], [task], state, "final_output")
+    return _run_crew_node([agent], [task], state, config, "final_output")
 
 
-def node_analyse(state: ResearchState) -> dict:
+def node_analyse(state: ResearchState, config: RunnableConfig) -> dict:
     from agents.analyst import analyst_agent, analysis_task
     agent = analyst_agent()
     
@@ -153,10 +157,10 @@ def node_analyse(state: ResearchState) -> dict:
     task = analysis_task(agent, topic)
     task.context = []
     task.description = f"Research summary:\n{state['research_output']}\n\n" + task.description
-    return _run_crew_node([agent], [task], state, "analysis_output")
+    return _run_crew_node([agent], [task], state, config, "analysis_output")
 
 
-def node_review(state: ResearchState) -> dict:
+def node_review(state: ResearchState, config: RunnableConfig) -> dict:
     from agents.reviewer import reviewer_agent, review_task
     
     vertical_config = get_vertical(state.get("vertical"))
@@ -166,12 +170,12 @@ def node_review(state: ResearchState) -> dict:
     current_work = f"RESEARCH:\n{state['research_output']}\n\nANALYSIS:\n{state['analysis_output']}"
     task = review_task(agent, state["topic"], current_work, rubric)
     
-    res = _run_crew_node([agent], [task], state, "review_output")
+    res = _run_crew_node([agent], [task], state, config, "review_output")
     res["retry_count"] = state.get("retry_count", 0) + 1
     return res
 
 
-def node_write(state: ResearchState) -> dict:
+def node_write(state: ResearchState, config: RunnableConfig) -> dict:
     from agents.writer import writer_agent, write_task
     agent = writer_agent()
     task = write_task(agent, state["topic"], state["output_format"])
@@ -179,15 +183,15 @@ def node_write(state: ResearchState) -> dict:
     task.description = f"Prior work:\n{prior}\n\n" + task.description
     if state.get("user_feedback"):
         task.description += f"\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
-    return _run_crew_node([agent], [task], state, "final_output")
+    return _run_crew_node([agent], [task], state, config, "final_output")
 
 
-def node_edit(state: ResearchState) -> dict:
+def node_edit(state: ResearchState, config: RunnableConfig) -> dict:
     from agents.editor import editor_agent, edit_task
     agent = editor_agent()
     task = edit_task(agent, state["topic"])
     task.description = f"Draft:\n{state['final_output']}\n\n" + task.description
-    return _run_crew_node([agent], [task], state, "final_output")
+    return _run_crew_node([agent], [task], state, config, "final_output")
 
 
 # ── routing ──────────────────────────────────────────────────────────────────
@@ -200,18 +204,13 @@ def route_after_research(state: ResearchState) -> str:
 
 
 def route_entry(state: ResearchState) -> str:
+    # This only runs once, for the initial invoke() of a fresh thread — resuming
+    # after an interrupt (invoke(None, config)) continues from the paused node
+    # directly and never re-enters routing from START. It used to also sniff
+    # analysis_output/research_output to fake a "resume" by re-entering from
+    # START with hand-built state; that's now handled by the checkpointer.
     if state["task_type"] == "lead_intel":
         return "lead_intel"
-
-    # Resume for writing phase: analysis already done
-    if state.get("analysis_output"):
-        return "write"
-
-    # Resume for analysis phase: research already done
-    if state.get("research_output"):
-        return "analyse"
-
-    # Full reports now start with planning
     if state["task_type"] == "research_report":
         return "plan"
     # RESERVED: quick_snapshot falls through to "research" (no vertical currently maps to quick_snapshot)
@@ -233,6 +232,14 @@ def route_after_review(state: ResearchState) -> str:
 
 
 # ── graph ────────────────────────────────────────────────────────────────────
+
+from langgraph.checkpoint.memory import InMemorySaver
+
+# One process-lifetime checkpointer shared by every run; runs are isolated from
+# each other by thread_id (the run id), and run_service purges a run's entries
+# via `supervisor.checkpointer.delete_thread(run_id)` once the run finishes.
+checkpointer = InMemorySaver()
+
 
 def build_graph() -> StateGraph:
     g = StateGraph(ResearchState)
@@ -271,7 +278,13 @@ def build_graph() -> StateGraph:
     g.add_edge("write",      "edit")
     g.add_edge("edit",       END)
 
-    return g.compile()
+    # interrupt_before makes these pauses real: the compiled graph stops execution
+    # before "analyse" and before "write" and returns control to run_service, which
+    # only resumes it (via .invoke(None, config)) after a human approves the prior
+    # stage. Without this, .invoke() runs the whole graph to END in one call and the
+    # HITL gates in run_service were just re-invoking it with hand-rolled state,
+    # never actually pausing anything.
+    return g.compile(checkpointer=checkpointer, interrupt_before=["analyse", "write"])
 
 
 # Compiled graph — import and call .invoke(state) from run_service

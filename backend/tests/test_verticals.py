@@ -140,7 +140,7 @@ async def test_execute_run_task_routing():
             with patch("services.run_service._wait_for_hitl", new_callable=AsyncMock) as mock_hitl:
                 # Test lead_intel routing
                 session_instance.get.return_value = mock_run_lead
-                mock_invoke.side_effect = lambda s, state, **kwargs: {**state, "research_output": "Lead data", "analysis_output": "Analyzed", "final_output": "Done"}
+                mock_invoke.side_effect = lambda s, state, config=None, **kwargs: {**(state or {}), "research_output": "Lead data", "analysis_output": "Analyzed", "final_output": "Done"}
                 mock_hitl.return_value = "continue"
                 
                 await execute_run(mock_run_lead.id)

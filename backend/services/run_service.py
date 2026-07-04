@@ -60,9 +60,14 @@ async def _set_status(run: Run, status: RunStatus, db: AsyncSession):
     wait=wait_exponential(multiplier=1, min=2, max=10),
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )
-async def _invoke_supervisor_with_retry(supervisor, state: dict, recursion_limit: int = 25):
-    config = {"recursion_limit": recursion_limit}
-    call = asyncio.to_thread(supervisor.invoke, state, config)
+async def _invoke_supervisor_with_retry(supervisor, state: dict | None, config: dict, recursion_limit: int = 25):
+    """Run (or resume) the graph up to its next interrupt point or END.
+
+    `state=None` resumes an in-progress thread (`config["configurable"]["thread_id"]`)
+    from its last checkpoint instead of starting a fresh graph run.
+    """
+    call_config = {**config, "recursion_limit": recursion_limit}
+    call = asyncio.to_thread(supervisor.invoke, state, call_config)
     return await asyncio.wait_for(call, timeout=LLM_STAGE_TIMEOUT_SEC)
 
 async def _wait_for_hitl(run_id: str, status: RunStatus, emit_event: str, summary: str):
@@ -209,46 +214,189 @@ async def execute_run(run_id: UUID):
             "final_output":    "",
             "review_output":   "",
             "retry_count":     0,
-            "step_callback":   _step_cb,
             "user_feedback":   "",
             "token_usages":    [],
         }
 
-        if task_type == "lead_intel":
-            # ── LEAD INTEL: single pass, one HITL checkpoint ─────────────────
+        # Every invoke/resume below shares this thread_id so the compiled graph's
+        # checkpointer (backend/agents/crew.py) can actually pause and resume the
+        # same run instead of run_service re-simulating stages by hand.
+        # step_callback rides in `configurable` (per-call, never checkpointed) rather
+        # than in state, since state gets serialized on every checkpoint and a live
+        # function reference isn't serializable.
+        graph_config = {"configurable": {"thread_id": rid, "step_callback": _step_cb}}
+        usage_cursor = 0
+
+        async def _log_new_usages(state: dict):
+            nonlocal usage_cursor
+            all_usages = state.get("token_usages", [])
+            await _log_token_usages(rid, all_usages[usage_cursor:])
+            usage_cursor = len(all_usages)
+
+        try:
+            if task_type == "lead_intel":
+                # ── LEAD INTEL: single pass, one HITL checkpoint ─────────────
+                async with AsyncSessionLocal() as db:
+                    run_obj = await db.get(Run, run_id)
+                    await _set_status(run_obj, RunStatus.researching, db)
+                await emit(rid, "status", {"status": "researching"})
+                await emit(rid, "agent_start", {"stage": "research"})
+
+                final_state = await _invoke_supervisor_with_retry(
+                    supervisor, initial_state, graph_config, recursion_limit=15
+                )
+                await emit(rid, "agent_end", {"stage": "research"})
+                await _log_new_usages(final_state)
+
+                final_output    = final_state.get("final_output", "")
+                final_citations = extract_citations(final_output or "")
+
+                try:
+                    eval_scores = await evaluate_output(
+                        content=final_output, research=final_output, topic=topic,
+                    )
+                except Exception as e:
+                    log.warning("eval_failed", error=str(e))
+                    eval_scores = {}
+
+                async with AsyncSessionLocal() as db:
+                    run_obj = await db.get(Run, run_id)
+                    run_obj.final_output = final_output
+                    run_obj.metrics = {
+                        **(run_obj.metrics or {}),
+                        "citations": final_citations,
+                        "eval_scores": eval_scores,
+                    }
+                    flag_modified(run_obj, "metrics")
+                    await db.commit()
+
+                await _wait_for_hitl(rid, RunStatus.awaiting_final_approval, "hitl_required", final_output)
+
+                latency_sec = (datetime.now(timezone.utc) - run_start_time).total_seconds()
+                async with AsyncSessionLocal() as db:
+                    run_obj = await db.get(Run, run_id)
+                    run_obj.metrics = {**(run_obj.metrics or {}), "latency_sec": latency_sec}
+                    flag_modified(run_obj, "metrics")
+                    await _set_status(run_obj, RunStatus.complete, db)
+                await emit(rid, "complete", {"final_output": final_output[:500]})
+                return
+
+            # ── RESEARCH REPORT: graph-native HITL ───────────────────────────
+            # The graph is compiled with interrupt_before=["analyse", "write"], so
+            # it genuinely stops at those points and returns control here — no
+            # analysis/writing/review work (or a review-triggered research retry)
+            # happens before a human approves the stage they're currently seeing.
             async with AsyncSessionLocal() as db:
                 run_obj = await db.get(Run, run_id)
                 await _set_status(run_obj, RunStatus.researching, db)
             await emit(rid, "status", {"status": "researching"})
             await emit(rid, "agent_start", {"stage": "research"})
-
-            final_state = await _invoke_supervisor_with_retry(supervisor, initial_state, recursion_limit=15)
+            state = await _invoke_supervisor_with_retry(
+                supervisor, initial_state, graph_config, recursion_limit=25
+            )
             await emit(rid, "agent_end", {"stage": "research"})
-            await _log_token_usages(rid, final_state.get("token_usages", []))
+            await _log_new_usages(state)
 
-            final_output    = final_state.get("final_output", "")
-            final_citations = extract_citations(final_output or "")
+            research_output = state.get("research_output", "")
+
+            while True:
+                snapshot = await asyncio.to_thread(supervisor.get_state, graph_config)
+                next_node = snapshot.next[0] if snapshot.next else None
+                if next_node is None:
+                    break
+
+                if next_node == "analyse":
+                    research_output = state.get("research_output", "")
+                    citations = extract_citations(research_output or "")
+                    async with AsyncSessionLocal() as db:
+                        run_obj = await db.get(Run, run_id)
+                        run_obj.research_output = research_output
+                        run_obj.metrics = {**(run_obj.metrics or {}), "citations": citations}
+                        flag_modified(run_obj, "metrics")
+                        await db.commit()
+
+                    # STAGE 1: Research Approval — no session held during wait
+                    user_feedback = await _wait_for_hitl(
+                        rid, RunStatus.awaiting_research_approval, "hitl_required", research_output
+                    )
+
+                    async with AsyncSessionLocal() as db:
+                        run_obj = await db.get(Run, run_id)
+                        await _set_status(run_obj, RunStatus.analyzing, db)
+                    await emit(rid, "status", {"status": "analyzing"})
+                    await emit(rid, "agent_start", {"stage": "analysis"})
+                    await asyncio.to_thread(
+                        supervisor.update_state, graph_config, {"user_feedback": user_feedback}
+                    )
+                    state = await _invoke_supervisor_with_retry(
+                        supervisor, None, graph_config, recursion_limit=25
+                    )
+                    await emit(rid, "agent_end", {"stage": "analysis"})
+                    await _log_new_usages(state)
+
+                    analysis_output = state.get("analysis_output", "")
+                    async with AsyncSessionLocal() as db:
+                        run_obj = await db.get(Run, run_id)
+                        run_obj.analysis_output = analysis_output
+                        await db.commit()
+
+                elif next_node == "write":
+                    analysis_output = state.get("analysis_output", "")
+
+                    # STAGE 2: Analysis Approval — no session held during wait
+                    user_feedback = await _wait_for_hitl(
+                        rid, RunStatus.awaiting_analysis_approval, "hitl_required", analysis_output
+                    )
+
+                    async with AsyncSessionLocal() as db:
+                        run_obj = await db.get(Run, run_id)
+                        await _set_status(run_obj, RunStatus.writing, db)
+                    await emit(rid, "status", {"status": "writing"})
+                    await emit(rid, "agent_start", {"stage": "writing"})
+                    await asyncio.to_thread(
+                        supervisor.update_state, graph_config, {"user_feedback": user_feedback}
+                    )
+                    state = await _invoke_supervisor_with_retry(
+                        supervisor, None, graph_config, recursion_limit=25
+                    )
+                    await emit(rid, "agent_end", {"stage": "writing"})
+                    await _log_new_usages(state)
+
+                else:
+                    # The graph is only compiled to pause at "analyse"/"write" — anything
+                    # else would mean the graph definition changed without updating this loop.
+                    log.warning("unexpected_graph_pause", next_node=next_node)
+                    break
+
+            final_output = state.get("final_output", "")
 
             try:
                 eval_scores = await evaluate_output(
-                    content=final_output, research=final_output, topic=topic,
+                    content=final_output, research=research_output, topic=topic,
                 )
             except Exception as e:
                 log.warning("eval_failed", error=str(e))
                 eval_scores = {}
 
+            # Merge final-output citations (dedup by source+page)
+            final_citations = extract_citations(final_output or "")
             async with AsyncSessionLocal() as db:
                 run_obj = await db.get(Run, run_id)
                 run_obj.final_output = final_output
+                existing = (run_obj.metrics or {}).get("citations", [])
+                merged   = {(c["source"], c["page"]): c for c in existing + final_citations}
                 run_obj.metrics = {
                     **(run_obj.metrics or {}),
-                    "citations": final_citations,
+                    "citations": list(merged.values()),
                     "eval_scores": eval_scores,
                 }
                 flag_modified(run_obj, "metrics")
                 await db.commit()
 
-            await _wait_for_hitl(rid, RunStatus.awaiting_final_approval, "hitl_required", final_output)
+            # STAGE 3: Final Approval — no session held during wait
+            await _wait_for_hitl(
+                rid, RunStatus.awaiting_final_approval, "hitl_required", final_output
+            )
 
             latency_sec = (datetime.now(timezone.utc) - run_start_time).total_seconds()
             async with AsyncSessionLocal() as db:
@@ -256,111 +404,12 @@ async def execute_run(run_id: UUID):
                 run_obj.metrics = {**(run_obj.metrics or {}), "latency_sec": latency_sec}
                 flag_modified(run_obj, "metrics")
                 await _set_status(run_obj, RunStatus.complete, db)
+
             await emit(rid, "complete", {"final_output": final_output[:500]})
-            return
-
-        # ── RESEARCH REPORT: 3-stage HITL ────────────────────────────────────
-        user_feedback = ""
-
-        # ── RESEARCH ─────────────────────────────────────────────────────────
-        async with AsyncSessionLocal() as db:
-            run_obj = await db.get(Run, run_id)
-            await _set_status(run_obj, RunStatus.researching, db)
-        await emit(rid, "status", {"status": "researching"})
-        await emit(rid, "agent_start", {"stage": "research"})
-        research_state = await _invoke_supervisor_with_retry(supervisor, initial_state, recursion_limit=15)
-        await emit(rid, "agent_end", {"stage": "research"})
-        await _log_token_usages(rid, research_state.get("token_usages", []))
-
-        research_output = research_state.get("research_output", "")
-        citations       = extract_citations(research_output or "")
-        async with AsyncSessionLocal() as db:
-            run_obj = await db.get(Run, run_id)
-            run_obj.research_output = research_output
-            run_obj.metrics = {**(run_obj.metrics or {}), "citations": citations}
-            flag_modified(run_obj, "metrics")
-            await db.commit()
-
-        # STAGE 1: Research Approval — no session held during wait
-        user_feedback = await _wait_for_hitl(
-            rid, RunStatus.awaiting_research_approval, "hitl_required", research_output
-        )
-
-        # ── ANALYSIS ─────────────────────────────────────────────────────────
-        async with AsyncSessionLocal() as db:
-            run_obj = await db.get(Run, run_id)
-            await _set_status(run_obj, RunStatus.analyzing, db)
-        await emit(rid, "status", {"status": "analyzing"})
-        await emit(rid, "agent_start", {"stage": "analysis"})
-        analysis_state = await _invoke_supervisor_with_retry(supervisor, {
-            **research_state, "analysis_output": "", "user_feedback": user_feedback,
-            "token_usages": [],
-        }, recursion_limit=15)
-        await emit(rid, "agent_end", {"stage": "analysis"})
-        await _log_token_usages(rid, analysis_state.get("token_usages", []))
-
-        analysis_output = analysis_state.get("analysis_output", "")
-        async with AsyncSessionLocal() as db:
-            run_obj = await db.get(Run, run_id)
-            run_obj.analysis_output = analysis_output
-            await db.commit()
-
-        # STAGE 2: Analysis Approval — no session held during wait
-        user_feedback = await _wait_for_hitl(
-            rid, RunStatus.awaiting_analysis_approval, "hitl_required", analysis_output
-        )
-
-        # ── WRITING ───────────────────────────────────────────────────────────
-        async with AsyncSessionLocal() as db:
-            run_obj = await db.get(Run, run_id)
-            await _set_status(run_obj, RunStatus.writing, db)
-        await emit(rid, "status", {"status": "writing"})
-        await emit(rid, "agent_start", {"stage": "writing"})
-        final_state = await _invoke_supervisor_with_retry(supervisor, {
-            **analysis_state, "final_output": "", "user_feedback": user_feedback,
-            "token_usages": [],
-        }, recursion_limit=25)
-        await emit(rid, "agent_end", {"stage": "writing"})
-        await _log_token_usages(rid, final_state.get("token_usages", []))
-
-        final_output = final_state.get("final_output", "")
-
-        try:
-            eval_scores = await evaluate_output(
-                content=final_output, research=research_output, topic=topic,
-            )
-        except Exception as e:
-            log.warning("eval_failed", error=str(e))
-            eval_scores = {}
-
-        # Merge final-output citations (dedup by source+page)
-        final_citations = extract_citations(final_output or "")
-        async with AsyncSessionLocal() as db:
-            run_obj = await db.get(Run, run_id)
-            run_obj.final_output = final_output
-            existing = (run_obj.metrics or {}).get("citations", [])
-            merged   = {(c["source"], c["page"]): c for c in existing + final_citations}
-            run_obj.metrics = {
-                **(run_obj.metrics or {}),
-                "citations": list(merged.values()),
-                "eval_scores": eval_scores,
-            }
-            flag_modified(run_obj, "metrics")
-            await db.commit()
-
-        # STAGE 3: Final Approval — no session held during wait
-        user_feedback = await _wait_for_hitl(
-            rid, RunStatus.awaiting_final_approval, "hitl_required", final_output
-        )
-
-        latency_sec = (datetime.now(timezone.utc) - run_start_time).total_seconds()
-        async with AsyncSessionLocal() as db:
-            run_obj = await db.get(Run, run_id)
-            run_obj.metrics = {**(run_obj.metrics or {}), "latency_sec": latency_sec}
-            flag_modified(run_obj, "metrics")
-            await _set_status(run_obj, RunStatus.complete, db)
-
-        await emit(rid, "complete", {"final_output": final_output[:500]})
+        finally:
+            # Bound the checkpointer's memory to in-flight runs — it's a single
+            # process-lifetime InMemorySaver shared across every run (see crew.py).
+            await asyncio.to_thread(supervisor.checkpointer.delete_thread, rid)
 
     except Exception as e:
         log.exception("run_failed")
