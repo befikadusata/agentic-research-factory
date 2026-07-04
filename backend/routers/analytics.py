@@ -1,20 +1,35 @@
-from fastapi import APIRouter, Depends
+from uuid import UUID
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from database import get_db
-from models import Run, RunCost, RunStatus
+from models import Run, RunCost, RunStatus, WorkspaceMember
 from auth import get_current_user
 
 router = APIRouter()
 
+
+async def _scope_to_caller(db: AsyncSession, user_id: str, workspace_id: Optional[UUID]):
+    """Restrict analytics to the caller's own runs, or a workspace they belong to."""
+    if workspace_id:
+        member = await db.get(WorkspaceMember, (workspace_id, user_id))
+        if not member:
+            raise HTTPException(403, "Not a member of this workspace")
+        return Run.workspace_id == workspace_id
+    return Run.user_id == user_id
+
+
 @router.get("/metrics")
 async def get_global_metrics(
+    workspace_id: Optional[UUID] = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    """Aggregate metrics across completed runs."""
+    """Aggregate metrics across the caller's completed runs (optionally scoped to a workspace)."""
+    scope = await _scope_to_caller(db, user_id, workspace_id)
     result = await db.execute(
-        select(Run.metrics).where(Run.status == RunStatus.complete)
+        select(Run.metrics).where(Run.status == RunStatus.complete, scope)
     )
     all_metrics = [r[0] for r in result.all() if r[0]]
 
@@ -47,16 +62,19 @@ async def get_global_metrics(
 
 @router.get("/costs")
 async def get_cost_summary(
+    workspace_id: Optional[UUID] = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    """Total token usage and cost breakdown by agent."""
+    """Total token usage and cost breakdown by agent, scoped to the caller's own runs (or a workspace they belong to)."""
+    scope = await _scope_to_caller(db, user_id, workspace_id)
+
     total_result = await db.execute(
         select(
             func.sum(RunCost.total_cost).label("total_cost"),
             func.sum(RunCost.input_tokens).label("total_input_tokens"),
             func.sum(RunCost.output_tokens).label("total_output_tokens"),
-        )
+        ).join(Run, Run.id == RunCost.run_id).where(scope)
     )
     t = total_result.one()
 
@@ -66,7 +84,7 @@ async def get_cost_summary(
             func.sum(RunCost.total_cost).label("cost"),
             func.sum(RunCost.input_tokens).label("input_tokens"),
             func.sum(RunCost.output_tokens).label("output_tokens"),
-        ).group_by(RunCost.agent_name)
+        ).join(Run, Run.id == RunCost.run_id).where(scope).group_by(RunCost.agent_name)
     )
 
     return {
