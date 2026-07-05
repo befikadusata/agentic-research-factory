@@ -33,15 +33,12 @@ class ResearchState(TypedDict):
 
 # ── node helpers ────────────────────────────────────────────────────────────
 
+from contextlib import nullcontext
 from crewai import Crew, Process
 from utils.langfuse_utils import get_langfuse
 
 def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: RunnableConfig, result_key: str) -> dict:
     lf = get_langfuse()
-    trace = span = None
-    if lf:
-        trace = lf.trace(name=f"crew_node_{result_key}", user_id="system")
-        span = trace.span(name="run_crew")
 
     # step_callback is a live Python function, not state — it can't go through
     # ResearchState because the checkpointer serializes every state update
@@ -57,21 +54,24 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
     )
 
     logger.info("crew_node_start", node=result_key)
-    exc = None
-    try:
-        result = crew.kickoff()
-    except Exception as e:
-        exc = e
-        logger.exception("crew_node_failed", node=result_key)
-        raise
-    finally:
-        if lf and span:
-            if exc is not None:
-                span.end(status_message="ERROR")
-            else:
-                span.end()
-        if lf and trace and exc is None:
-            trace.update(output=str(result))
+    # Langfuse v4's client dropped the old .trace()/.span() object model in
+    # favor of an OTEL-based context manager (start_as_current_observation);
+    # nullcontext() keeps `span` as None so the tracing calls below can be
+    # unconditional instead of duplicating the kickoff/logging block per branch.
+    span_cm = (
+        lf.start_as_current_observation(name=f"crew_node_{result_key}", as_type="span")
+        if lf else nullcontext()
+    )
+    with span_cm as span:
+        try:
+            result = crew.kickoff()
+        except Exception:
+            logger.exception("crew_node_failed", node=result_key)
+            if span is not None:
+                span.update(level="ERROR", status_message="crew_kickoff_failed")
+            raise
+        if span is not None:
+            span.update(output=str(result))
 
     logger.info("crew_node_complete", node=result_key)
     usage = result.token_usage
