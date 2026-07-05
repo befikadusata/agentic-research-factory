@@ -39,12 +39,15 @@ def test_run_crew_node_succeeds_with_real_langfuse_client(monkeypatch, real_lang
     fake_crew.kickoff.return_value = _FakeCrewOutput("RESULT")
     monkeypatch.setattr(crew_module, "Crew", MagicMock(return_value=fake_crew))
 
-    result = crew_module._run_crew_node([], [], {}, {"configurable": {}}, "research_output")
+    result = crew_module._run_crew_node([], [], {}, {"configurable": {}}, "research_output", "researcher")
 
     assert result["research_output"] == "RESULT"
-    assert result["token_usages"] == [
-        {"agent_name": "research_output", "prompt_tokens": 10, "completion_tokens": 5}
-    ]
+    assert result["token_usages"] == [{
+        "agent_name": "research_output",
+        "model": crew_module.get_model("researcher"),
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+    }]
 
 
 def test_run_crew_node_propagates_crew_failure_with_real_langfuse_client(monkeypatch, real_langfuse_client):
@@ -53,7 +56,7 @@ def test_run_crew_node_propagates_crew_failure_with_real_langfuse_client(monkeyp
     monkeypatch.setattr(crew_module, "Crew", MagicMock(return_value=fake_crew))
 
     with pytest.raises(RuntimeError, match="boom"):
-        crew_module._run_crew_node([], [], {}, {"configurable": {}}, "research_output")
+        crew_module._run_crew_node([], [], {}, {"configurable": {}}, "research_output", "researcher")
 
 
 def test_run_crew_node_works_without_langfuse_configured(monkeypatch):
@@ -64,5 +67,5 @@ def test_run_crew_node_works_without_langfuse_configured(monkeypatch):
     fake_crew.kickoff.return_value = _FakeCrewOutput("RESULT")
     monkeypatch.setattr(crew_module, "Crew", MagicMock(return_value=fake_crew))
 
-    result = crew_module._run_crew_node([], [], {}, {"configurable": {}}, "research_output")
+    result = crew_module._run_crew_node([], [], {}, {"configurable": {}}, "research_output", "researcher")
     assert result["research_output"] == "RESULT"

@@ -112,3 +112,44 @@ async def test_log_cost_multiple_agents(db_session):
     assert len(costs) == 2
     names = {c.agent_name for c in costs}
     assert names == {"researcher", "writer"}
+
+
+@pytest.mark.asyncio
+async def test_log_token_usages_computes_real_cost_not_zero(db_session, monkeypatch):
+    """§4.1 regression: unlike the tests above (which call log_cost() directly
+    with a hand-picked total_cost), this goes through the actual production
+    caller — run_service._log_token_usages — which used to hardcode
+    total_cost=0.0 regardless of the model or token counts."""
+    import services.run_service as run_service_module
+    from services.run_service import _log_token_usages
+
+    monkeypatch.setattr(run_service_module, "AsyncSessionLocal", lambda: db_session_cm(db_session))
+
+    run = Run(
+        id=uuid.uuid4(), user_id="u3", topic="t", format="report",
+        status=RunStatus.pending, doc_paths=[],
+    )
+    db_session.add(run)
+    await db_session.commit()
+
+    await _log_token_usages(str(run.id), [
+        {"agent_name": "researcher", "model": "gpt-4o", "prompt_tokens": 1000, "completion_tokens": 1000},
+    ])
+
+    result = await db_session.execute(select(RunCost).where(RunCost.run_id == run.id))
+    cost = result.scalar_one()
+    assert cost.total_cost > 0.0
+    assert abs(cost.total_cost - 0.0125) < 0.0001
+
+
+class db_session_cm:
+    """Minimal async-context-manager wrapper so a fixture-provided db_session
+    can stand in for AsyncSessionLocal()'s real context-manager interface."""
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc):
+        return False

@@ -13,6 +13,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_l
 from configs.verticals import build_execution_brief, get_vertical
 from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_SIGNAL_KEY, HITL_INSTRUCTION_KEY
 from utils.cost_tracker import log_cost
+from utils.pricing import calculate_cost
 from services.eval_service import evaluate_output
 
 LLM_STAGE_TIMEOUT_SEC = 300
@@ -37,13 +38,16 @@ async def emit(run_id: str, event_type: str, data: dict):
 async def _log_token_usages(run_id: str, token_usages: list):
     for usage in token_usages:
         try:
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            cost = calculate_cost(usage.get("model", ""), prompt_tokens, completion_tokens)
             async with AsyncSessionLocal() as db:
                 await log_cost(
                     db, run_id,
                     usage["agent_name"],
-                    usage.get("prompt_tokens", 0),
-                    usage.get("completion_tokens", 0),
-                    0.0,
+                    prompt_tokens,
+                    completion_tokens,
+                    cost,
                 )
         except Exception:
             pass

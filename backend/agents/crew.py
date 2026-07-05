@@ -35,9 +35,10 @@ class ResearchState(TypedDict):
 
 from contextlib import nullcontext
 from crewai import Crew, Process
+from services.llm_router import get_model
 from utils.langfuse_utils import get_langfuse
 
-def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: RunnableConfig, result_key: str) -> dict:
+def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: RunnableConfig, result_key: str, agent_key: str) -> dict:
     lf = get_langfuse()
 
     # step_callback is a live Python function, not state — it can't go through
@@ -79,6 +80,9 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
         result_key: str(result),
         "token_usages": [{
             "agent_name":        result_key,
+            # Model actually used for this call, so run_service can look up
+            # real per-model pricing instead of hardcoding cost to $0 (§4.1).
+            "model":             get_model(agent_key),
             "prompt_tokens":     (usage.prompt_tokens     if usage else 0),
             "completion_tokens": (usage.completion_tokens if usage else 0),
         }],
@@ -91,7 +95,7 @@ def node_plan(state: ResearchState, config: RunnableConfig) -> dict:
     from agents.strategist import strategist_agent, planning_task
     agent = strategist_agent()
     task = planning_task(agent, state["topic"])
-    return _run_crew_node([agent], [task], state, config, "plan_output")
+    return _run_crew_node([agent], [task], state, config, "plan_output", "strategist")
 
 
 def node_research(state: ResearchState, config: RunnableConfig) -> dict:
@@ -126,7 +130,7 @@ def node_research(state: ResearchState, config: RunnableConfig) -> dict:
         topic = f"{topic}\n\n**RETRY FEEDBACK**:\n{state['review_output']}"
 
     task = research_task(agent, topic, state.get("context_docs", ""))
-    return _run_crew_node([agent], [task], state, config, "research_output")
+    return _run_crew_node([agent], [task], state, config, "research_output", "researcher")
 
 
 def node_lead_intel(state: ResearchState, config: RunnableConfig) -> dict:
@@ -139,7 +143,7 @@ def node_lead_intel(state: ResearchState, config: RunnableConfig) -> dict:
         topic = f"{topic}\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
         
     task = lead_intel_task(agent, topic)
-    return _run_crew_node([agent], [task], state, config, "final_output")
+    return _run_crew_node([agent], [task], state, config, "final_output", "lead_intel")
 
 
 def node_analyse(state: ResearchState, config: RunnableConfig) -> dict:
@@ -157,7 +161,7 @@ def node_analyse(state: ResearchState, config: RunnableConfig) -> dict:
     task = analysis_task(agent, topic)
     task.context = []
     task.description = f"Research summary:\n{state['research_output']}\n\n" + task.description
-    return _run_crew_node([agent], [task], state, config, "analysis_output")
+    return _run_crew_node([agent], [task], state, config, "analysis_output", "analyst")
 
 
 def node_review(state: ResearchState, config: RunnableConfig) -> dict:
@@ -170,7 +174,7 @@ def node_review(state: ResearchState, config: RunnableConfig) -> dict:
     current_work = f"RESEARCH:\n{state['research_output']}\n\nANALYSIS:\n{state['analysis_output']}"
     task = review_task(agent, state["topic"], current_work, rubric)
     
-    res = _run_crew_node([agent], [task], state, config, "review_output")
+    res = _run_crew_node([agent], [task], state, config, "review_output", "reviewer")
     res["retry_count"] = state.get("retry_count", 0) + 1
     return res
 
@@ -183,7 +187,7 @@ def node_write(state: ResearchState, config: RunnableConfig) -> dict:
     task.description = f"Prior work:\n{prior}\n\n" + task.description
     if state.get("user_feedback"):
         task.description += f"\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
-    return _run_crew_node([agent], [task], state, config, "final_output")
+    return _run_crew_node([agent], [task], state, config, "final_output", "writer")
 
 
 def node_edit(state: ResearchState, config: RunnableConfig) -> dict:
@@ -191,7 +195,7 @@ def node_edit(state: ResearchState, config: RunnableConfig) -> dict:
     agent = editor_agent()
     task = edit_task(agent, state["topic"])
     task.description = f"Draft:\n{state['final_output']}\n\n" + task.description
-    return _run_crew_node([agent], [task], state, config, "final_output")
+    return _run_crew_node([agent], [task], state, config, "final_output", "editor")
 
 
 # ── routing ──────────────────────────────────────────────────────────────────
