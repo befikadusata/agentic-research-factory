@@ -79,6 +79,56 @@ def test_extract_citations_na_page():
     assert result == [{"source": "unknown.pdf", "page": "N/A"}]
 
 
+def test_extract_citations_parses_markdown_links():
+    """§8.1 regression: every prompt (configs/prompts.yaml, agents/writer.py)
+    instructs agents to cite sources as Markdown links, e.g. '[Title](URL)' —
+    never the internal RAG 'SOURCE: ... (Page: ...)' format, which is only
+    ever produced by RAGTool._run for internal-document search. Before this
+    fix, extract_citations only knew the RAG format and returned [] for
+    essentially every real web-search-driven run."""
+    from tools.rag import extract_citations
+    text = (
+        "## Findings\n\n"
+        "- Revenue grew 40% YoY [TechCrunch](https://techcrunch.com/article1).\n"
+        "- Market share expanded [Company Blog](https://example.com/blog/post).\n"
+    )
+    result = extract_citations(text)
+    assert result == [
+        {"source": "TechCrunch", "page": "https://techcrunch.com/article1"},
+        {"source": "Company Blog", "page": "https://example.com/blog/post"},
+    ]
+
+
+def test_extract_citations_deduplicates_markdown_links():
+    from tools.rag import extract_citations
+    text = (
+        "First mention [Reuters](https://reuters.com/a) here.\n"
+        "Second mention [Reuters](https://reuters.com/a) again."
+    )
+    result = extract_citations(text)
+    assert result == [{"source": "Reuters", "page": "https://reuters.com/a"}]
+
+
+def test_extract_citations_ignores_non_http_markdown_links():
+    """In-page anchors and relative TOC links aren't source attributions."""
+    from tools.rag import extract_citations
+    text = "See [Section 2](#section-2) and [appendix](./appendix.md) for details."
+    assert extract_citations(text) == []
+
+
+def test_extract_citations_handles_mixed_rag_and_markdown_formats():
+    from tools.rag import extract_citations
+    text = (
+        "SOURCE: internal_report.pdf (Page: 4)\n---\nsome internal content\n\n"
+        "According to [Bloomberg](https://bloomberg.com/story) the market shifted."
+    )
+    result = extract_citations(text)
+    assert result == [
+        {"source": "internal_report.pdf", "page": "4"},
+        {"source": "Bloomberg", "page": "https://bloomberg.com/story"},
+    ]
+
+
 # ── generate_sub_queries ──────────────────────────────────────────────────────
 
 def test_generate_sub_queries_returns_list():

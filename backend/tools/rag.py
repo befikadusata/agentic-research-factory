@@ -181,14 +181,34 @@ def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", 
 # rag_tool = RAGTool() # Removed to force instantiation with specific collection_name
 
 
+_RAG_CITATION_RE = re.compile(r"SOURCE:\s*(.+?)\s*\(Page:\s*(.+?)\)")
+# Every prompt that governs actual output (configs/prompts.yaml, agents/writer.py)
+# instructs agents to cite sources as Markdown links, never the internal
+# "SOURCE: ... (Page: ...)" format above — that format is only ever produced by
+# RAGTool._run for internal-document search results. Restricting to http(s)
+# targets excludes non-citation Markdown links (in-page anchors, relative TOC
+# links) that aren't source attributions.
+_MARKDOWN_CITATION_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)")
+
+
 def extract_citations(text: str) -> list[dict]:
-    """Parse 'SOURCE: <file> (Page: <N>)' lines into a deduped list."""
-    pattern = re.compile(r"SOURCE:\s*(.+?)\s*\(Page:\s*(.+?)\)")
+    """Parse citations out of agent output. Handles both the internal RAG
+    'SOURCE: <file> (Page: <N>)' format and the Markdown-link '[Title](URL)'
+    format every prompt actually instructs agents to produce for web-sourced
+    citations, deduped across both."""
     seen: set = set()
     citations = []
-    for m in pattern.finditer(text):
+
+    for m in _RAG_CITATION_RE.finditer(text):
         key = (m.group(1).strip(), m.group(2).strip())
         if key not in seen:
             seen.add(key)
             citations.append({"source": key[0], "page": key[1]})
+
+    for m in _MARKDOWN_CITATION_RE.finditer(text):
+        key = (m.group(1).strip(), m.group(2).strip())
+        if key not in seen:
+            seen.add(key)
+            citations.append({"source": key[0], "page": key[1]})
+
     return citations
