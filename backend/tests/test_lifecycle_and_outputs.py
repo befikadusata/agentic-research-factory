@@ -10,11 +10,12 @@ async def _create_run(
     user_id: str,
     status: RunStatus,
     final_output: str | None = None,
+    format: str = "report",
 ) -> str:
     run = Run(
         user_id=user_id,
         topic="Test topic",
-        format="report",
+        format=format,
         status=status,
         final_output=final_output,
         doc_paths=[],
@@ -164,6 +165,40 @@ async def test_output_none_content_returns_404(client, auth_as, db_session, fmt)
     auth_as(owner_id)
     resp = await client.get(f"/runs/{run_id}/output/{fmt}")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_md_download_applies_linkedin_formatting(client, auth_as, db_session):
+    """§7.1 regression: outputs.py used to serve run.final_output verbatim
+    regardless of run.format, so a format="linkedin" run downloaded as raw
+    Markdown ([text](url), # headers) instead of LinkedIn-safe plain text."""
+    owner_id = "owner@example.com"
+    run_id = await _create_run(
+        db_session, owner_id, RunStatus.complete,
+        final_output="# Title\n\nSee [source](https://example.com/a).",
+        format="linkedin",
+    )
+
+    auth_as(owner_id)
+    resp = await client.get(f"/runs/{run_id}/output/md")
+    assert resp.status_code == 200
+    assert "**Title**" in resp.text
+    assert "#" not in resp.text
+    assert "https://example.com/a" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_md_download_report_format_is_unaffected(client, auth_as, db_session):
+    owner_id = "owner@example.com"
+    run_id = await _create_run(
+        db_session, owner_id, RunStatus.complete,
+        final_output="# Final report", format="report",
+    )
+
+    auth_as(owner_id)
+    resp = await client.get(f"/runs/{run_id}/output/md")
+    assert resp.status_code == 200
+    assert resp.text == "# Final report"
 
 
 @pytest.mark.asyncio

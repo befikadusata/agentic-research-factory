@@ -7,6 +7,7 @@ from database import get_db
 from models import Run, RunStatus
 from services.pdf_service import markdown_to_pdf
 from auth import get_current_user, assert_run_access
+from formatters import format_output
 from starlette.background import BackgroundTask
 import tempfile, os
 
@@ -31,7 +32,8 @@ async def download_pdf(
     generated_at = ts.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
         path = f.name
-    await markdown_to_pdf(run.final_output, path, title=run.topic, generated_at=generated_at)
+    content = format_output(run.format, run.final_output)
+    await markdown_to_pdf(content, path, title=run.topic, generated_at=generated_at)
     return FileResponse(
         path,
         filename=f"report_{run_id}.pdf",
@@ -52,7 +54,8 @@ async def download_md(
     if not run.final_output:
         raise HTTPException(404, "Output not available")
     await assert_run_access(run, user_id, db)
+    content = format_output(run.format, run.final_output)
     return PlainTextResponse(
-        run.final_output,
+        content,
         headers={"Content-Disposition": f'attachment; filename="report_{run_id}.md"'},
     )
