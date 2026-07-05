@@ -20,7 +20,7 @@ async def approve(
     run = await db.get(Run, run_id)
     if not run:
         raise HTTPException(404, "Run not found")
-    await assert_run_access(run, user_id, db)
+    await assert_run_access(run, user_id, db, min_role="operator")
     if run.status not in [
         RunStatus.awaiting_research_approval,
         RunStatus.awaiting_analysis_approval,

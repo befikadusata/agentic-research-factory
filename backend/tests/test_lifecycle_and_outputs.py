@@ -2,7 +2,7 @@ import pytest
 import unittest.mock
 from uuid import uuid4
 
-from models import Run, RunStatus
+from models import Run, RunStatus, Workspace, WorkspaceMember
 
 
 async def _create_run(
@@ -18,6 +18,22 @@ async def _create_run(
         status=status,
         final_output=final_output,
         doc_paths=[],
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    return str(run.id)
+
+
+async def _create_workspace_run(db, owner_id: str, member_id: str, member_role: str, status: RunStatus) -> str:
+    ws = Workspace(name="test-ws", owner_id=owner_id)
+    db.add(ws)
+    await db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=owner_id, role="admin"))
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=member_id, role=member_role))
+    run = Run(
+        user_id=owner_id, topic="Test topic", format="report",
+        status=status, workspace_id=ws.id, doc_paths=[],
     )
     db.add(run)
     await db.commit()
@@ -66,6 +82,50 @@ async def test_hitl_approve_rejects_invalid_status(client, auth_as, db_session):
     response = await client.post(f"/runs/{run_id}/approve", json={"instruction": "continue"})
     assert response.status_code == 400
     assert "not awaiting HITL" in response.text
+
+
+@pytest.mark.asyncio
+async def test_hitl_approve_denies_viewer_role(client, auth_as, db_session):
+    """§2.1 regression: assert_run_access used to ignore WorkspaceMember.role
+    entirely, so a "viewer" — same as any other member — could approve/resume
+    a HITL-gated run with an arbitrary instruction, same as an admin."""
+    owner_id = "owner@example.com"
+    viewer_id = "viewer@example.com"
+    run_id = await _create_workspace_run(
+        db_session, owner_id, viewer_id, "viewer", RunStatus.awaiting_research_approval
+    )
+
+    auth_as(viewer_id)
+    response = await client.post(f"/runs/{run_id}/approve", json={"instruction": "continue"})
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_hitl_approve_allows_operator_role(client, auth_as, db_session):
+    owner_id = "owner@example.com"
+    operator_id = "operator@example.com"
+    run_id = await _create_workspace_run(
+        db_session, owner_id, operator_id, "operator", RunStatus.awaiting_research_approval
+    )
+
+    auth_as(operator_id)
+    response = await client.post(f"/runs/{run_id}/approve", json={"instruction": "continue"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "resumed"
+
+
+@pytest.mark.asyncio
+async def test_hitl_approve_allows_admin_role(client, auth_as, db_session):
+    owner_id = "owner@example.com"
+    admin_id = "admin@example.com"
+    run_id = await _create_workspace_run(
+        db_session, owner_id, admin_id, "admin", RunStatus.awaiting_research_approval
+    )
+
+    auth_as(admin_id)
+    response = await client.post(f"/runs/{run_id}/approve", json={"instruction": "continue"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "resumed"
 
 
 @pytest.mark.asyncio
