@@ -3,7 +3,6 @@ LangGraph Supervisor — replaces the sequential CrewAI crew.
 
 task_type routing:
   "research_report"  → Researcher → Analyst → Writer → Editor
-  "quick_snapshot"   → Researcher (no Firecrawl) → Writer → Editor  (skip Analyst)
   "lead_intel"       → LeadIntel agent only
 """
 import operator
@@ -16,7 +15,7 @@ from logger import logger
 class ResearchState(TypedDict):
     topic: str
     vertical: Optional[str]
-    task_type: Literal["research_report", "lead_intel", "quick_snapshot"]
+    task_type: Literal["research_report", "lead_intel"]
     context_docs: str
     workspace_id: str
     collection_name: Optional[str]
@@ -108,11 +107,7 @@ def node_research(state: ResearchState, config: RunnableConfig) -> dict:
     collection = state.get("collection_name") or "default_workspace"
     custom_rag = RAGTool(collection_name=collection, vertical=state.get("vertical"))
 
-    # RESERVED: quick_snapshot skips deep scraping (no vertical currently maps to quick_snapshot)
-    tools = [tavily_search_tool, custom_rag]
-    if state["task_type"] != "quick_snapshot":
-        tools.append(firecrawl_tool)
-        tools.append(batch_scrape_tool)
+    tools = [tavily_search_tool, custom_rag, firecrawl_tool, batch_scrape_tool]
 
     agent = researcher_agent(tools=tools)
     
@@ -201,9 +196,6 @@ def node_edit(state: ResearchState, config: RunnableConfig) -> dict:
 # ── routing ──────────────────────────────────────────────────────────────────
 
 def route_after_research(state: ResearchState) -> str:
-    # RESERVED: quick_snapshot skips analysis (no vertical currently maps to quick_snapshot)
-    if state["task_type"] == "quick_snapshot":
-        return "write"
     return "analyse"
 
 
@@ -217,7 +209,6 @@ def route_entry(state: ResearchState) -> str:
         return "lead_intel"
     if state["task_type"] == "research_report":
         return "plan"
-    # RESERVED: quick_snapshot falls through to "research" (no vertical currently maps to quick_snapshot)
     return "research"
 
 
