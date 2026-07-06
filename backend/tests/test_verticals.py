@@ -111,6 +111,43 @@ async def test_create_run_missing_required_vertical_inputs_rejected(client, mock
     assert "missing required vertical input" in str(body).lower()
 
 @pytest.mark.asyncio
+async def test_create_run_invalid_url_field_rejected(client, mock_user):
+    """A non-URL value in a `type: url` field should return 422."""
+    payload = {
+        "topic": "Test invalid url field",
+        "format": "report",
+        "doc_ids": [],
+        "vertical": "b2b_sales_lead_intel",
+        "vertical_inputs": {
+            "company_url": "not a url",
+        },
+    }
+    response = await client.post("/runs", json=payload)
+    assert response.status_code == 422
+    body = response.json()
+    assert "company_url" in str(body).lower()
+
+
+@pytest.mark.asyncio
+async def test_create_run_invalid_select_field_rejected(client, mock_user):
+    """A value outside the declared options for a `type: select` field should return 422."""
+    payload = {
+        "topic": "Test invalid select field",
+        "format": "report",
+        "doc_ids": [],
+        "vertical": "founder_strategy_briefs",
+        "vertical_inputs": {
+            "market_segment": "AI legal tech",
+            "stage": "Definitely Not A Real Stage",
+        },
+    }
+    response = await client.post("/runs", json=payload)
+    assert response.status_code == 422
+    body = response.json()
+    assert "stage" in str(body).lower()
+
+
+@pytest.mark.asyncio
 async def test_execute_run_task_routing():
     """Verify task routing logic assigns correct task_type based on vertical."""
     mock_run_lead = Run(

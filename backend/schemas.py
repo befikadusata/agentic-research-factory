@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
 from uuid import UUID
 from datetime import datetime
+from urllib.parse import urlparse
 from models import RunStatus
 from typing import Optional, Any
 from configs.verticals import VALID_VERTICALS, VERTICALS
@@ -24,10 +25,24 @@ class CreateRunRequest(BaseModel):
             vertical_config = VERTICALS[self.vertical]
             schema = vertical_config.get("input_schema", {})
             for key, field_def in schema.items():
-                if field_def.get("required"):
-                    val = self.vertical_inputs.get(key)
-                    if not val or not str(val).strip():
-                        raise ValueError(f"Missing required vertical input: '{key}'")
+                val = self.vertical_inputs.get(key)
+                if field_def.get("required") and (not val or not str(val).strip()):
+                    raise ValueError(f"Missing required vertical input: '{key}'")
+                if val is None or not str(val).strip():
+                    continue
+                field_type = field_def.get("type")
+                if field_type == "url":
+                    parsed = urlparse(str(val))
+                    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                        raise ValueError(
+                            f"Invalid vertical input '{key}': must be a valid http(s) URL"
+                        )
+                elif field_type == "select":
+                    options = field_def.get("options", [])
+                    if val not in options:
+                        raise ValueError(
+                            f"Invalid vertical input '{key}': must be one of {options}"
+                        )
         return self
 
 class HitlApproveRequest(BaseModel):
