@@ -1,0 +1,18 @@
+# Minimal override merged on top of SearXNG's built-in default settings.
+# Full reference: https://docs.searxng.org/admin/settings/settings.html
+use_default_settings: true
+
+server:
+  # Placeholder — docker-compose.yml's searxng entrypoint replaces this with a
+  # real `openssl rand -hex 32` value in-place on first container boot, so no
+  # real secret is ever committed to git.
+  secret_key: "ultrasecretkey"
+  # The bot-detection limiter needs a Valkey/Redis backend to work; since this
+  # instance is only called by our own backend (not exposed publicly), disable it.
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json

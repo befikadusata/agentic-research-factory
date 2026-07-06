@@ -28,7 +28,7 @@ services:
 
   migrate:
     build: ./backend
-    command: uv run alembic upgrade head
+    command: alembic upgrade head
     env_file: ./backend/.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/research_factory
@@ -44,6 +44,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/research_factory
       - REDIS_URL=redis://redis:6379/0
+      - SEARXNG_URL=http://searxng:8080
+      - FIRECRAWL_API_URL=http://firecrawl-api:3002
     depends_on:
       db:
         condition: service_healthy
@@ -51,6 +53,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      searxng:
+        condition: service_started
+      firecrawl-api:
+        condition: service_started
     ports:
       - "8000:8000"
     volumes:
@@ -63,18 +69,105 @@ services:
 
   celery:
     build: ./backend
-    command: celery -A celery_app worker --loglevel=info
+    command: celery -A celery_app worker --loglevel=info --concurrency=1
     env_file: ./backend/.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/research_factory
       - REDIS_URL=redis://redis:6379/0
+      - SEARXNG_URL=http://searxng:8080
+      - FIRECRAWL_API_URL=http://firecrawl-api:3002
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      searxng:
+        condition: service_started
+      firecrawl-api:
+        condition: service_started
     volumes:
       - ./backend:/app
+
+  # --- Self-hosted web search (Tavily alternative) ---
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8081/
+    # settings.yml ships with a placeholder secret_key so no real secret is
+    # committed to git; generate a real one in-place on first boot, then hand
+    # off to the image's own entrypoint.
+    entrypoint: >
+      sh -c "
+        if grep -q ultrasecretkey /etc/searxng/settings.yml; then
+          sed -i \"s/ultrasecretkey/$$(openssl rand -hex 32)/\" /etc/searxng/settings.yml;
+        fi;
+        exec /usr/local/searxng/entrypoint.sh
+      "
+    restart: unless-stopped
+
+  # --- Self-hosted scraping (Firecrawl alternative) ---
+  firecrawl-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  firecrawl-rabbitmq:
+    image: rabbitmq:3-management
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  firecrawl-postgres:
+    image: ghcr.io/firecrawl/nuq-postgres:latest
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    volumes:
+      - firecrawl_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  firecrawl-playwright:
+    image: ghcr.io/firecrawl/playwright-service:latest
+    environment:
+      - PORT=3000
+    restart: unless-stopped
+
+  firecrawl-api:
+    image: ghcr.io/firecrawl/firecrawl:latest
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3002
+      - REDIS_URL=redis://firecrawl-redis:6379
+      - REDIS_RATE_LIMIT_URL=redis://firecrawl-redis:6379
+      - PLAYWRIGHT_MICROSERVICE_URL=http://firecrawl-playwright:3000/scrape
+      - NUQ_RABBITMQ_URL=amqp://firecrawl-rabbitmq:5672
+      - POSTGRES_HOST=firecrawl-postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+      # No cloud account needed — self-hosted mode skips API-key auth entirely.
+      - USE_DB_AUTHENTICATION=false
+      - BULL_AUTH_KEY=self-hosted-local-key
+      - TEST_API_KEY=self-hosted-local-key
+    ports:
+      - "3002:3002"
+    depends_on:
+      firecrawl-redis:
+        condition: service_started
+      firecrawl-rabbitmq:
+        condition: service_healthy
+      firecrawl-playwright:
+        condition: service_started
+      firecrawl-postgres:
+        condition: service_started
+    restart: unless-stopped
 
   frontend:
     build:
@@ -99,3 +192,4 @@ services:
 
 volumes:
   pgdata:
+  firecrawl_pgdata:
