@@ -6,11 +6,24 @@ const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 const cache = new Map<string, { data: unknown; expires: number }>();
 const CACHE_TTL = 30 * 1000; // 30 seconds
 
-async function authHeaders(): Promise<Record<string, string>> {
+let cachedAuth: { token: string; expiresAt: number } | null = null;
+const TOKEN_REFRESH_MARGIN = 30 * 1000; // refresh this long before actual expiry
+
+function decodeJwtExpiry(token: string): number {
+  const payload = token.split(".")[1];
+  const { exp } = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+  return exp * 1000;
+}
+
+export async function authHeaders(): Promise<Record<string, string>> {
+  if (cachedAuth && cachedAuth.expiresAt - TOKEN_REFRESH_MARGIN > Date.now()) {
+    return { Authorization: `Bearer ${cachedAuth.token}` };
+  }
   const res = await fetch("/api/backend-token");
   if (!res.ok) throw new Error("Failed to obtain backend auth token.");
   const { token } = await res.json();
   if (!token) throw new Error("Missing backend auth token.");
+  cachedAuth = { token, expiresAt: decodeJwtExpiry(token) };
   return { Authorization: `Bearer ${token}` };
 }
 
