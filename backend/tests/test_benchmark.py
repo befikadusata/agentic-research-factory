@@ -1,11 +1,30 @@
-import pytest
-from services.run_service import execute_run
-from models import Run, RunCost, Workspace, RunStatus
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select as sa_select
-from database import AsyncSessionLocal
+"""
+Benchmark smoke test — runs execute_run against the real LangGraph supervisor,
+with fake leaf-node functions swapped in for the CrewAI-backed ones (same
+technique as test_run_service_hitl.py's `_install_fake_graph`).
+
+§11.5 regression: this test used to patch `_invoke_supervisor_with_retry` with
+a fake that just merged hardcoded strings into state, so the real graph in
+crew.py (routing, checkpointer, interrupt_before) never ran — it couldn't have
+caught the HITL orchestration bug that the §5.1 fix addressed. It also mocked
+`evaluate_output` wholesale and asserted `eval_scores["overall"] >= 70` against
+`FAKE_EVAL_SCORES`, a constant defined in this same file, so the "quality bar"
+assertion could never fail. Now only `_wait_for_hitl` (an unavoidable external
+wait) and the eval LLM call boundary (`acompletion`) are faked; the real graph
+routing/interrupt/resume logic and the real `evaluate_output` JSON-parsing
+both execute for real.
+"""
+import json
 import uuid
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from sqlalchemy import select as sa_select
+
+import agents.crew as crew_module
+from database import AsyncSessionLocal
+from models import Run, RunCost, RunStatus, Workspace
+from services.run_service import execute_run
 
 # 4 topics (1 from each category in eval_set.md)
 BENCHMARK_SUBSET = [
@@ -15,33 +34,70 @@ BENCHMARK_SUBSET = [
     {"topic": "AI legal tech SMB market viability", "format": "lead_intel", "vertical": "founder"},
 ]
 
-FAKE_TOKEN_USAGES = [
-    {"agent_name": "research_output", "prompt_tokens": 500, "completion_tokens": 200},
-]
-
 FAKE_EVAL_SCORES = {
     "accuracy": 82, "relevance": 85, "completeness": 78,
     "writing_quality": 80, "overall": 81, "issues": [],
 }
 
 
-async def _fake_invoke(sup, state, config=None, **kwargs):
-    # execute_run resumes the real graph via invoke(None, config) between HITL
-    # stages, so `state` is None on those calls — this fake short-circuits the
-    # whole run in one call regardless, since it's only exercising the
-    # cost/eval/latency plumbing here, not the stage-gating itself (see
-    # tests/test_run_service_hitl.py for that).
-    return {
-        **(state or {}),
-        "research_output": "Draft",
-        "analysis_output": "Analyzed",
-        "final_output": "Final Output",
-        "token_usages": FAKE_TOKEN_USAGES,
-    }
+def _install_fake_graph(monkeypatch):
+    """Swap the CrewAI-backed node functions for cheap fakes, then rebuild the
+    graph so it picks them up, preserving the real routing/interrupt/checkpointer
+    configuration under test."""
+    def fake_plan(state):
+        return {"plan_output": "PLAN"}
+
+    def fake_research(state):
+        return {
+            "research_output": "Draft",
+            "token_usages": [{"agent_name": "researcher", "prompt_tokens": 500, "completion_tokens": 200}],
+        }
+
+    def fake_analyse(state):
+        return {"analysis_output": "Analyzed"}
+
+    def fake_review(state):
+        return {"review_output": "PASS", "retry_count": state.get("retry_count", 0) + 1}
+
+    def fake_write(state):
+        return {"final_output": "Final Output"}
+
+    def fake_edit(state):
+        return {"final_output": state["final_output"]}
+
+    monkeypatch.setattr(crew_module, "node_plan", fake_plan)
+    monkeypatch.setattr(crew_module, "node_research", fake_research)
+    monkeypatch.setattr(crew_module, "node_analyse", fake_analyse)
+    monkeypatch.setattr(crew_module, "node_review", fake_review)
+    monkeypatch.setattr(crew_module, "node_write", fake_write)
+    monkeypatch.setattr(crew_module, "node_edit", fake_edit)
+
+    fresh_graph = crew_module.build_graph()
+    monkeypatch.setattr(crew_module, "supervisor", fresh_graph)
+    return fresh_graph
+
+
+def _fake_eval_completion(content: str):
+    msg = MagicMock()
+    msg.content = content
+    choice = MagicMock()
+    choice.message = msg
+    resp = MagicMock()
+    resp.choices = [choice]
+    return resp
 
 
 @pytest.mark.asyncio
-async def test_benchmark_smoke(redis_pool):
+async def test_benchmark_smoke(redis_pool, monkeypatch):
+    _install_fake_graph(monkeypatch)
+
+    async def fake_wait_for_hitl(run_id, status, emit_event, summary):
+        return ""
+
+    monkeypatch.setattr("services.run_service._wait_for_hitl", fake_wait_for_hitl)
+
+    eval_response = _fake_eval_completion(json.dumps(FAKE_EVAL_SCORES))
+
     async with AsyncSessionLocal() as db:
         ws = Workspace(name="test_ws", owner_id="test_user")
         db.add(ws)
@@ -61,18 +117,8 @@ async def test_benchmark_smoke(redis_pool):
             db.add(new_run)
             await db.commit()
 
-            with patch("services.run_service.evaluate_output", new_callable=AsyncMock) as mock_eval:
-                mock_eval.return_value = FAKE_EVAL_SCORES
-                with patch(
-                    "services.run_service._invoke_supervisor_with_retry",
-                    new_callable=AsyncMock,
-                ) as mock_invoke:
-                    with patch(
-                        "services.run_service._wait_for_hitl", new_callable=AsyncMock
-                    ) as mock_hitl:
-                        mock_invoke.side_effect = _fake_invoke
-                        mock_hitl.return_value = "continue"
-                        await execute_run(run_id)
+            with patch("services.eval_service.acompletion", AsyncMock(return_value=eval_response)):
+                await execute_run(run_id)
 
             async with AsyncSessionLocal() as db2:
                 run = await db2.get(Run, run_id)
