@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     FIRECRAWL_API_KEY: str | None = None
     LLAMA_CLOUD_API_KEY: str | None = None
 
+    # Self-hosted alternatives. If set, these take priority over the cloud
+    # providers above (no payment/geo-restricted API key required).
+    SEARXNG_URL: str | None = None
+    FIRECRAWL_API_URL: str | None = None
+
     DATABASE_URL: str
     REDIS_URL: str = "redis://localhost:6379/0"
     BACKEND_JWT_SECRET: str
@@ -74,6 +79,10 @@ _FEATURE_LABEL = {
 
 def validate_config(s: Settings) -> None:
     missing = [k for k in _PROD_REQUIRED if getattr(s, k) is None]
+    if s.SEARXNG_URL:
+        missing = [k for k in missing if k != "TAVILY_API_KEY"]
+    if s.FIRECRAWL_API_URL:
+        missing = [k for k in missing if k != "FIRECRAWL_API_KEY"]
     if not missing:
         return
     if s.ENVIRONMENT == "production":
