@@ -255,4 +255,50 @@ test.describe("Core Flow Smoke Tests", () => {
     await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Download MD" })).toBeVisible();
   });
+
+  test("shows the real backend error message when a run fails during a live session", async ({ page }) => {
+    // §10.1 regression: the "error" stream event used to only flip status to
+    // "failed" without storing parsed.data.message, so the banner fell back to
+    // run.error_message — null for a run that fails after the page already loaded.
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+
+    await page.route("**/runs/failing-run", async (route) => {
+      if (route.request().isNavigationRequest()) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "failing-run",
+          topic: "AI market brief",
+          format: "summary",
+          status: "researching",
+          workspace_id: null,
+          vertical: null,
+          created_at: "2026-01-01T00:00:00Z",
+          logs: [],
+          research_output: null,
+          final_output: null,
+          error_message: null,
+        }),
+      });
+    });
+
+    await page.route("**/runs/failing-run/stream", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: 'retry: 10000\ndata: {"type":"error","data":{"message":"Run failed: rate limit exceeded"}}\n\n',
+      });
+    });
+
+    await createSessionCookie(page);
+    await page.goto("/runs/failing-run");
+
+    await expect(page.getByText("This run failed. Check the agent logs above for details.")).toBeVisible();
+    await expect(page.getByText("Run failed: rate limit exceeded")).toBeVisible();
+  });
 });

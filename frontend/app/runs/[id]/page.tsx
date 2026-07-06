@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { getRun } from "@/lib/api";
+import { createParser } from "eventsource-parser";
+import { getRun, authHeaders } from "@/lib/api";
 import { AgentLog } from "@/components/AgentLog";
 import { AgentGraph } from "@/components/AgentGraph";
 import { HitlModal } from "@/components/HitlModal";
@@ -38,6 +39,7 @@ export default function RunPage() {
   const [status, setStatus] = useState<RunStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
 
   useEffect(() => {
@@ -60,31 +62,57 @@ export default function RunPage() {
 
   useEffect(() => {
     if (!id) return;
-    const es = new EventSource(`${process.env.NEXT_PUBLIC_BACKEND_URL}/runs/${id}/stream`, { withCredentials: true });
+    const controller = new AbortController();
 
-    es.onmessage = (e) => {
-        const parsed = JSON.parse(e.data);
-        if (parsed.type === "log") {
-            setLogs((prev) => [...prev, parsed.data]);
-        } else if (parsed.type === "status") {
-            setStatus(parsed.data.status);
-            setResuming(false);
-        } else if (parsed.type === "hitl_required") {
-            setHitlStage(parsed.data.stage);
-            setHitlSummary(parsed.data.summary);
-            setStatus(parsed.data.stage as RunStatus);
-        } else if (parsed.type === "complete") {
-            setStatus("complete");
-            getRun(id).then(setRun);
-        } else if (parsed.type === "error") {
-            setStatus("failed");
+    const handleEvent = (data: string) => {
+      if (data === "heartbeat") return;
+      const parsed = JSON.parse(data);
+      if (parsed.type === "log") {
+          setLogs((prev) => [...prev, parsed.data]);
+      } else if (parsed.type === "status") {
+          setStatus(parsed.data.status);
+          setResuming(false);
+      } else if (parsed.type === "hitl_required") {
+          setHitlStage(parsed.data.stage);
+          setHitlSummary(parsed.data.summary);
+          setStatus(parsed.data.stage as RunStatus);
+      } else if (parsed.type === "complete") {
+          setStatus("complete");
+          getRun(id).then(setRun);
+      } else if (parsed.type === "error") {
+          setStatus("failed");
+          setRunError(parsed.data.message ?? null);
+      }
+    };
+
+    (async () => {
+      // Native EventSource can't send an Authorization header, so the stream
+      // is read via fetch (same bearer-token auth as every other backend call)
+      // and parsed by hand instead.
+      try {
+        const headers = await authHeaders();
+        const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/runs/${id}/stream`, {
+          headers,
+          signal: controller.signal,
+        });
+        if (!res.ok || !res.body) throw new Error(`stream failed: ${res.status}`);
+
+        const parser = createParser({ onEvent: (e) => handleEvent(e.data) });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parser.feed(decoder.decode(value, { stream: true }));
         }
-    };
-    es.onerror = () => {
-      setStreamError("Live update stream disconnected. Refresh the page to reconnect.");
-      es.close();
-    };
-    return () => es.close();
+      } catch {
+        if (!controller.signal.aborted) {
+          setStreamError("Live update stream disconnected. Refresh the page to reconnect.");
+        }
+      }
+    })();
+
+    return () => controller.abort();
   }, [id]);
 
   if (loadError) return <p className="text-red-400 p-8">{loadError}</p>;
@@ -170,8 +198,8 @@ export default function RunPage() {
       {status === "failed" && (
         <div className="border border-red-900 bg-red-950/20 rounded-lg p-5 text-red-400 font-medium">
           This run failed. Check the agent logs above for details.
-          {run.error_message && (
-            <p className="mt-2 text-sm font-normal opacity-80">{run.error_message}</p>
+          {(runError ?? run.error_message) && (
+            <p className="mt-2 text-sm font-normal opacity-80">{runError ?? run.error_message}</p>
           )}
         </div>
       )}
