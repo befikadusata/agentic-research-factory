@@ -33,15 +33,15 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 
 ### Low — cleanup, dead code, minor perf, test-only
 
-17. **§5.2 — `agents/publisher.py` is dead code with a config lookup that can never succeed** even if it were wired in. **✅ Fixed.** Deleted — zero callers anywhere in the codebase, and the `LINKEDIN_ACCESS_TOKEN`/`BUFFER_ACCESS_TOKEN`/`BUFFER_PROFILE_IDS` vars it reads were never declared on `Settings`, so `getattr` always returned `None` regardless of environment. Removed the matching orphaned entries from `.env.example`.
+17. **§5.2 — `agents/publisher.py` is dead code with a config lookup that can never succeed** even if it were wired in. **✅ Fixed (`e4c7bf6`).** Deleted — zero callers anywhere in the codebase, and the `LINKEDIN_ACCESS_TOKEN`/`BUFFER_ACCESS_TOKEN`/`BUFFER_PROFILE_IDS` vars it reads were never declared on `Settings`, so `getattr` always returned `None` regardless of environment. Removed the matching orphaned entries from `.env.example`.
 18. **§6.1 — Prompt externalization (YAML) is used by only 1 of 7 agents**; the rest hardcode prompts in Python.
 19. **§6.2 — `task_type: "quick_snapshot"` is fully wired into `crew.py` but unreachable** from any registered vertical.
 20. **§10.2 — `lib/hooks.ts`'s `useRunStream` is dead code** that would 404 and can't carry auth headers if it were ever used.
-21. **§8.3 — `tools/scraper.py` imports the transitive-only dependency `nest_asyncio` directly**, with no direct entry in `pyproject.toml`.
+21. **§8.3 — `tools/scraper.py` imports the transitive-only dependency `nest_asyncio` directly**, with no direct entry in `pyproject.toml`. **✅ Fixed.** Added `"nest-asyncio>=1.6.0"` to `pyproject.toml`'s `dependencies` and regenerated `uv.lock`.
 22. **§9.2 — `get_redis_client()` leaks the old connection pool on event-loop change** — only fires under pytest's per-test event loops, not in production.
 23. **§2.2 — `authHeaders()` mints a fresh JWT on every API call** instead of caching until near expiry — latency, not correctness.
-24. **§1.4 — Stale, unused `backend/requirements.txt`** tracked in git, drifted from `pyproject.toml`. **✅ Fixed.** Deleted — confirmed unused by `Dockerfile` (reads `pyproject.toml`/`uv.lock` directly) or anything else in the repo.
-25. **§1.5 — A 45KB `backend/test.db` SQLite file is committed to git.** **✅ Fixed.** Removed from git and disk; added `*.db` to `.gitignore` so it can't be re-committed by accident.
+24. **§1.4 — Stale, unused `backend/requirements.txt`** tracked in git, drifted from `pyproject.toml`. **✅ Fixed (`e4c7bf6`).** Deleted — confirmed unused by `Dockerfile` (reads `pyproject.toml`/`uv.lock` directly) or anything else in the repo.
+25. **§1.5 — A 45KB `backend/test.db` SQLite file is committed to git.** **✅ Fixed (`e4c7bf6`, `7cb57eb`).** Removed from git and disk; added `*.db` to `.gitignore` so it can't be re-committed by accident.
 
 ## 1. Setup/Infra
 
@@ -59,11 +59,11 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 
 4. **`backend/requirements.txt`** — Stray tracked file, unused by the Dockerfile (which reads `pyproject.toml` directly) or anything else in the repo. Stale relative to `pyproject.toml` — missing `celery`, `docling`, `langchain-text-splitters`, `langfuse`, `prometheus-fastapi-instrumentator`, `torch`, `torchvision`. Dead weight that can mislead. Recommend deleting.
 
-   **✅ Fixed.** Deleted.
+   **✅ Fixed (`e4c7bf6`).** Deleted.
 
 5. **`backend/test.db`** — A 45KB SQLite file from a test run is checked into git (tracked, not ignored). Should be removed from version control and added to `.gitignore`.
 
-   **✅ Fixed.** `git rm --cached` plus deleted from disk; added `*.db` to `.gitignore`.
+   **✅ Fixed (`e4c7bf6`, `7cb57eb`).** `git rm --cached` plus deleted from disk; added `*.db` to `.gitignore`.
 
 ## 2. Auth
 
@@ -103,7 +103,7 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 
 2. **`backend/agents/publisher.py` (`publish_to_linkedin`, `publish_to_buffer`) is dead code with a broken config lookup.** It's never imported or called anywhere in the codebase (routers, services, or `crew.py`). Even if wired in, it can't work: it reads `getattr(settings, "LINKEDIN_ACCESS_TOKEN", None)` / `BUFFER_ACCESS_TOKEN` / `BUFFER_PROFILE_IDS`, but none of these are declared fields on `Settings` in `backend/config.py` (only documented in `.env.example:66-69`). Since `Settings.model_config = {"extra": "ignore"}`, pydantic-settings never loads them onto the `settings` object no matter what's in the environment, so `getattr` always falls through to `None` and the functions always return a "not configured" error.
 
-   **✅ Fixed.** Deleted `publisher.py` and the orphaned `LINKEDIN_ACCESS_TOKEN`/`BUFFER_ACCESS_TOKEN`/`BUFFER_PROFILE_IDS` block from `.env.example`. No test coverage existed and nothing referenced it, so there was nothing worth fixing forward — this was pure V2 scaffolding that never got wired to a router.
+   **✅ Fixed (`e4c7bf6`).** Deleted `publisher.py` and the orphaned `LINKEDIN_ACCESS_TOKEN`/`BUFFER_ACCESS_TOKEN`/`BUFFER_PROFILE_IDS` block from `.env.example`. No test coverage existed and nothing referenced it, so there was nothing worth fixing forward — this was pure V2 scaffolding that never got wired to a router.
 
 ## 6. Prompts & vertical config
 
@@ -136,6 +136,8 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
    **✅ Fixed (`8d99c2e`).** Both `_execute_search` methods now key `tool_cache.get/set` on a provider-scoped namespace (`"web_search:searxng"` / `"web_search:tavily"`) instead of the shared `self.name`; the agent-facing tool `name` stays `"web_search"` for both since that's unrelated to caching. Regression tests added in `test_tools.py`, including full `SearxngSearchTool` coverage (closing the §11.3 blind spot) and an explicit cache-key-namespace assertion per provider.
 
 3. *(Minor)* **`tools/scraper.py:107` imports `nest_asyncio` directly, but it's only a transitive dependency** — present in `uv.lock` with no direct entry in `pyproject.toml`'s `dependencies`. If the upstream package pulling it in ever drops it, this import breaks silently with no lockfile signal pointing at `scraper.py` as the cause.
+
+   **✅ Fixed.** Added `"nest-asyncio>=1.6.0"` to `pyproject.toml`'s `dependencies` and regenerated `uv.lock` (isolated diff — just the two `nest-asyncio` entries, no unrelated version churn). Full test suite verified green afterward (167 passed).
 
 ## 9. Observability & cost
 
