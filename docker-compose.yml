@@ -54,9 +54,9 @@ services:
       migrate:
         condition: service_completed_successfully
       searxng:
-        condition: service_started
+        condition: service_healthy
       firecrawl-api:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "8000:8000"
     volumes:
@@ -82,9 +82,9 @@ services:
       redis:
         condition: service_healthy
       searxng:
-        condition: service_started
+        condition: service_healthy
       firecrawl-api:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./backend:/app
 
@@ -107,11 +107,22 @@ services:
         fi;
         exec /usr/local/searxng/entrypoint.sh
       "
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # --- Self-hosted scraping (Firecrawl alternative) ---
   firecrawl-redis:
     image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   firecrawl-rabbitmq:
@@ -131,12 +142,23 @@ services:
       - POSTGRES_DB=postgres
     volumes:
       - firecrawl_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
   firecrawl-playwright:
     image: ghcr.io/firecrawl/playwright-service:latest
     environment:
       - PORT=3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   firecrawl-api:
@@ -160,13 +182,19 @@ services:
       - "3002:3002"
     depends_on:
       firecrawl-redis:
-        condition: service_started
+        condition: service_healthy
       firecrawl-rabbitmq:
         condition: service_healthy
       firecrawl-playwright:
-        condition: service_started
+        condition: service_healthy
       firecrawl-postgres:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/v0/health/liveness"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   frontend:
