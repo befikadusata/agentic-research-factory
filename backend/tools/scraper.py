@@ -14,7 +14,11 @@ class FirecrawlTool(BaseTool):
         "Scrape the full content of a webpage and return it as clean markdown. "
         "Input: a URL string. Use this to get the full text of articles or reports found via web_search."
     )
-    app: FirecrawlApp = Field(default_factory=lambda: FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY))
+    app: FirecrawlApp = Field(
+        default_factory=lambda: FirecrawlApp(
+            api_key=settings.FIRECRAWL_API_KEY, api_url=settings.FIRECRAWL_API_URL
+        )
+    )
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def _execute_scrape(self, url: str) -> dict:
@@ -51,7 +55,11 @@ class BatchScrapeTool(BaseTool):
         "Scrape multiple webpages concurrently and return their clean markdown content. "
         "Input: a list of URL strings. Use this to quickly get the full text of multiple articles at once."
     )
-    app: FirecrawlApp = Field(default_factory=lambda: FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY))
+    app: FirecrawlApp = Field(
+        default_factory=lambda: FirecrawlApp(
+            api_key=settings.FIRECRAWL_API_KEY, api_url=settings.FIRECRAWL_API_URL
+        )
+    )
 
     async def _scrape_single(self, url: str) -> Dict:
         """Scrape a single URL with caching."""

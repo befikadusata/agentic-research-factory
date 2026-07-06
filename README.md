@@ -62,6 +62,8 @@ Open `backend/.env` and fill in your API keys. The minimum set to run the full f
 
 > Keys marked optional in dev (`TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, `LLAMA_CLOUD_API_KEY`) can be left blank — the server boots with a warning and those features are disabled at call time.
 
+> **No Tavily/Firecrawl account?** `docker compose up` also starts self-hosted SearXNG and Firecrawl instances and points the backend at them automatically (`SEARXNG_URL` / `FIRECRAWL_API_URL` in `docker-compose.yml`). `TAVILY_API_KEY` can then be left blank; `FIRECRAWL_API_KEY` still needs a placeholder value (the self-hosted API doesn't check it) — see `backend/.env.example`.
+
 **2. Configure the frontend environment (Docker):**
 
 Open `docker-compose.yml` and replace the placeholder values in the `frontend.environment` block:
@@ -175,6 +177,8 @@ npm run dev
 | `TAVILY_API_KEY` | optional | ✓ | Web search; warns if missing in dev |
 | `FIRECRAWL_API_KEY` | optional | ✓ | Web scraping; warns if missing in dev |
 | `LLAMA_CLOUD_API_KEY` | optional | ✓ | PDF parsing; warns if missing in dev |
+| `SEARXNG_URL` | optional | — | Self-hosted web search; if set, takes priority over `TAVILY_API_KEY` and exempts it from the required-key check |
+| `FIRECRAWL_API_URL` | optional | — | Self-hosted scraping; if set, takes priority over the Firecrawl cloud API and exempts `FIRECRAWL_API_KEY` from the required-key check |
 
 In `production` mode, missing optional keys cause a hard startup failure with an explicit error message.
 
