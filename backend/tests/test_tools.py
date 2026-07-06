@@ -67,6 +67,112 @@ def test_tavily_search_no_results_returns_fallback():
     assert result == "No search results found for this query."
 
 
+def test_tavily_search_uses_provider_scoped_cache_key():
+    """§8.2 regression: TavilySearchTool/SearxngSearchTool both have
+    name == "web_search", so caching keyed on `self.name` collided between
+    providers. Cache calls must use a provider-specific namespace instead."""
+    from tools.search import TavilySearchTool
+
+    tool = TavilySearchTool()
+    with patch("tools.search.tool_cache") as mock_cache:
+        mock_cache.get.return_value = None
+        with patch.object(tool.client, "search", return_value=_make_tavily_response()):
+            tool._run("AI trends")
+
+    mock_cache.get.assert_called_with("web_search:tavily", "AI trends")
+    mock_cache.set.assert_called_with("web_search:tavily", "AI trends", _make_tavily_response())
+
+
+# ── SearxngSearchTool ─────────────────────────────────────────────────────────
+
+def _make_searxng_response(results: list = None):
+    return {
+        "results": results or [
+            {"title": "Result 1", "url": "http://a.com", "content": "content A"},
+        ],
+    }
+
+
+def test_searxng_search_success():
+    from tools.search import SearxngSearchTool
+
+    tool = SearxngSearchTool()
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = _make_searxng_response()
+    mock_resp.raise_for_status.return_value = None
+
+    with patch("tools.search.tool_cache") as mock_cache:
+        mock_cache.get.return_value = None
+        with patch("tools.search.httpx.get", return_value=mock_resp):
+            result = tool._run("AI trends")
+
+    assert "Result 1" in result
+    assert "http://a.com" in result
+
+
+def test_searxng_search_cache_hit_skips_api():
+    from tools.search import SearxngSearchTool
+
+    tool = SearxngSearchTool()
+    cached = _make_searxng_response(results=[{"title": "Cached", "url": "http://b.com", "content": "c"}])
+
+    with patch("tools.search.tool_cache") as mock_cache:
+        mock_cache.get.return_value = cached
+        with patch("tools.search.httpx.get") as mock_get:
+            result = tool._run("cached query")
+            mock_get.assert_not_called()
+
+    assert "Cached" in result
+
+
+def test_searxng_search_failure_returns_degradation_string():
+    from tools.search import SearxngSearchTool
+
+    tool = SearxngSearchTool()
+    with patch("tools.search.tool_cache") as mock_cache:
+        mock_cache.get.return_value = None
+        with patch.object(tool, "_execute_search", side_effect=Exception("SearXNG down")):
+            result = tool._run("failing query")
+
+    assert "⚠️" in result
+    assert "unavailable" in result.lower()
+
+
+def test_searxng_search_no_results_returns_fallback():
+    from tools.search import SearxngSearchTool
+
+    tool = SearxngSearchTool()
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"results": []}
+    mock_resp.raise_for_status.return_value = None
+
+    with patch("tools.search.tool_cache") as mock_cache:
+        mock_cache.get.return_value = None
+        with patch("tools.search.httpx.get", return_value=mock_resp):
+            result = tool._run("empty query")
+
+    assert result == "No search results found for this query."
+
+
+def test_searxng_search_uses_provider_scoped_cache_key():
+    """§8.2 regression: same as the Tavily-side test above, but for SearXNG —
+    the two providers must never read/write each other's cached results."""
+    from tools.search import SearxngSearchTool
+
+    tool = SearxngSearchTool()
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = _make_searxng_response()
+    mock_resp.raise_for_status.return_value = None
+
+    with patch("tools.search.tool_cache") as mock_cache:
+        mock_cache.get.return_value = None
+        with patch("tools.search.httpx.get", return_value=mock_resp):
+            tool._run("AI trends")
+
+    mock_cache.get.assert_called_with("web_search:searxng", "AI trends")
+    mock_cache.set.assert_called_with("web_search:searxng", "AI trends", _make_searxng_response())
+
+
 # ── FirecrawlTool ─────────────────────────────────────────────────────────────
 
 def test_firecrawl_scrape_success():
