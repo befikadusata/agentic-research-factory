@@ -37,7 +37,7 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 18. **§6.1 — Prompt externalization (YAML) is used by only 1 of 7 agents**; the rest hardcode prompts in Python.
 19. **§6.2 — `task_type: "quick_snapshot"` is fully wired into `crew.py` but unreachable** from any registered vertical.
 20. **§10.2 — `lib/hooks.ts`'s `useRunStream` is dead code** that would 404 and can't carry auth headers if it were ever used.
-21. **§8.3 — `tools/scraper.py` imports the transitive-only dependency `nest_asyncio` directly**, with no direct entry in `pyproject.toml`. **✅ Fixed.** Added `"nest-asyncio>=1.6.0"` to `pyproject.toml`'s `dependencies` and regenerated `uv.lock`.
+21. **§8.3 — `tools/scraper.py` imports the transitive-only dependency `nest_asyncio` directly**, with no direct entry in `pyproject.toml`. **✅ Fixed (`ad529ea`).** Added `"nest-asyncio>=1.6.0"` to `pyproject.toml`'s `dependencies` and regenerated `uv.lock`.
 22. **§9.2 — `get_redis_client()` leaks the old connection pool on event-loop change** — only fires under pytest's per-test event loops, not in production.
 23. **§2.2 — `authHeaders()` mints a fresh JWT on every API call** instead of caching until near expiry — latency, not correctness.
 24. **§1.4 — Stale, unused `backend/requirements.txt`** tracked in git, drifted from `pyproject.toml`. **✅ Fixed (`e4c7bf6`).** Deleted — confirmed unused by `Dockerfile` (reads `pyproject.toml`/`uv.lock` directly) or anything else in the repo.
@@ -137,7 +137,7 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 
 3. *(Minor)* **`tools/scraper.py:107` imports `nest_asyncio` directly, but it's only a transitive dependency** — present in `uv.lock` with no direct entry in `pyproject.toml`'s `dependencies`. If the upstream package pulling it in ever drops it, this import breaks silently with no lockfile signal pointing at `scraper.py` as the cause.
 
-   **✅ Fixed.** Added `"nest-asyncio>=1.6.0"` to `pyproject.toml`'s `dependencies` and regenerated `uv.lock` (isolated diff — just the two `nest-asyncio` entries, no unrelated version churn). Full test suite verified green afterward (167 passed).
+   **✅ Fixed (`ad529ea`).** Added `"nest-asyncio>=1.6.0"` to `pyproject.toml`'s `dependencies` and regenerated `uv.lock` (isolated diff — just the two `nest-asyncio` entries, no unrelated version churn). Full test suite verified green afterward (167 passed).
 
 ## 9. Observability & cost
 
