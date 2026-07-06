@@ -36,7 +36,7 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 17. **§5.2 — `agents/publisher.py` is dead code with a config lookup that can never succeed** even if it were wired in. **✅ Fixed (`e4c7bf6`).** Deleted — zero callers anywhere in the codebase, and the `LINKEDIN_ACCESS_TOKEN`/`BUFFER_ACCESS_TOKEN`/`BUFFER_PROFILE_IDS` vars it reads were never declared on `Settings`, so `getattr` always returned `None` regardless of environment. Removed the matching orphaned entries from `.env.example`.
 18. **§6.1 — Prompt externalization (YAML) is used by only 1 of 7 agents**; the rest hardcode prompts in Python.
 19. **§6.2 — `task_type: "quick_snapshot"` is fully wired into `crew.py` but unreachable** from any registered vertical.
-20. **§10.2 — `lib/hooks.ts`'s `useRunStream` is dead code** that would 404 and can't carry auth headers if it were ever used.
+20. **§10.2 — `lib/hooks.ts`'s `useRunStream` is dead code** that would 404 and can't carry auth headers if it were ever used. **✅ Fixed.** Deleted `lib/hooks.ts` entirely (it was the file's only export, with zero call sites or imports anywhere). `tsc --noEmit` clean afterward.
 21. **§8.3 — `tools/scraper.py` imports the transitive-only dependency `nest_asyncio` directly**, with no direct entry in `pyproject.toml`. **✅ Fixed (`ad529ea`).** Added `"nest-asyncio>=1.6.0"` to `pyproject.toml`'s `dependencies` and regenerated `uv.lock`.
 22. **§9.2 — `get_redis_client()` leaks the old connection pool on event-loop change** — only fires under pytest's per-test event loops, not in production.
 23. **§2.2 — `authHeaders()` mints a fresh JWT on every API call** instead of caching until near expiry — latency, not correctness.
@@ -154,6 +154,8 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
    **✅ Fixed (`66dd1e5`).** Added a `runError` state set from `parsed.data.message` on the `"error"` stream event; the failed-state banner now renders `runError ?? run.error_message`, so a live failure shows the real backend message immediately while a reload still falls back to the DB-persisted value. Regression test added in `smoke.spec.ts`.
 
 2. **`lib/hooks.ts`'s `useRunStream` is dead code that reimplements streaming incorrectly and would 404 if it were ever wired up.** It has zero call sites (only the working hand-rolled stream logic in `app/runs/[id]/page.tsx` is actually used) and does `new EventSource(\`/api/runs/${id}/stream\`)` — a relative Next.js API route that doesn't exist (`app/api/` only contains `auth/` and `backend-token/`, no `runs/` proxy). Even if that route existed, a native `EventSource` can't attach an `Authorization` header, which `page.tsx:87-89` explicitly calls out as the reason it uses `fetch` + manual SSE parsing instead. Since every backend endpoint requires the bearer JWT (`auth.py`), this hook could never have worked against the real backend. Safe to delete — keeping it around risks a future refactor "simplifying" `page.tsx` back to this broken pattern.
+
+   **✅ Fixed.** Deleted `lib/hooks.ts`.
 
 ## 11. Tests
 
