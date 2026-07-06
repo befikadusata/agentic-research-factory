@@ -17,15 +17,15 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 
 ### High — security or core-feature correctness, bounded impact
 
-7. **§2.1 — `assert_run_access` ignores workspace role entirely.** A `"viewer"` member can approve/resume a HITL-gated run with an arbitrary instruction, same as an admin. Privilege escalation, but bounded to members already inside the workspace (vs. the cross-tenant issues above).
-8. **§7.1 — The entire `formatters/` package is dead code.** A run created with `format="linkedin"` downloads as raw Markdown (`[text](url)`, `#` headers) instead of LinkedIn-safe plain text — an advertised output format ships broken.
-9. **§8.2 — `SearxngSearchTool`/`TavilySearchTool` share the cache key `"web_search"`.** Toggling `SEARXNG_URL` — the flagship feature of this change — can silently serve one provider's cached results under the other for up to 7 days.
-10. **§1.1 — A real 64-char SearXNG `secret_key` is committed to git.** Works today as a default but is exactly the kind of checked-in secret that ships to prod by accident.
+7. **§2.1 — `assert_run_access` ignores workspace role entirely.** A `"viewer"` member can approve/resume a HITL-gated run with an arbitrary instruction, same as an admin. Privilege escalation, but bounded to members already inside the workspace (vs. the cross-tenant issues above). **✅ Fixed (`376e7ba`).**
+8. **§7.1 — The entire `formatters/` package is dead code.** A run created with `format="linkedin"` downloads as raw Markdown (`[text](url)`, `#` headers) instead of LinkedIn-safe plain text — an advertised output format ships broken. **✅ Fixed (`1847de1`).**
+9. **§8.2 — `SearxngSearchTool`/`TavilySearchTool` share the cache key `"web_search"`.** Toggling `SEARXNG_URL` — the flagship feature of this change — can silently serve one provider's cached results under the other for up to 7 days. **✅ Fixed (`8d99c2e`).**
+10. **§1.1 — A real 64-char SearXNG `secret_key` is committed to git.** Works today as a default but is exactly the kind of checked-in secret that ships to prod by accident. **✅ Fixed (`cdb9b85`).**
 
 ### Medium — real bugs, contained blast radius
 
-11. **§10.1 — A failed run's real error message never reaches the UI during a live session.** User sees a generic failure banner instead of the specific backend-emitted reason unless they manually reload the page.
-12. **§7.2 — `formatters/linkedin.py`'s link-stripping regex deletes citation URLs outright** rather than preserving them — moot while formatters are dead code (§7.1), but a landmine for whoever wires it back in.
+11. **§10.1 — A failed run's real error message never reaches the UI during a live session.** User sees a generic failure banner instead of the specific backend-emitted reason unless they manually reload the page. **✅ Fixed (`66dd1e5`).**
+12. **§7.2 — `formatters/linkedin.py`'s link-stripping regex deletes citation URLs outright** rather than preserving them — moot while formatters are dead code (§7.1), but a landmine for whoever wires it back in. **✅ Fixed (`1847de1`).**
 13. **§6.3 — `input_schema` field types (`url`, `select`) aren't validated server-side**, so an arbitrary string can be submitted into a `select` field and flows straight into the LLM prompt unvalidated.
 14. **§1.3 — Asymmetric prod-config validation**: `SEARXNG_URL` exempts `TAVILY_API_KEY` from required settings, but `FIRECRAWL_API_URL` does not similarly exempt `FIRECRAWL_API_KEY` — inconsistent rule, easy to trip on at deploy time.
 15. **§1.2 — Several `docker-compose.yml` dependencies use `service_started` instead of a healthcheck-gated condition**, so a cold `docker compose up` can hit not-yet-ready dependent services, masked by `restart: unless-stopped` as flaky first-run errors.
@@ -47,6 +47,8 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 
 1. **`searxng/settings.yml:7`** — A real-looking 64-char `secret_key` is committed to git. The comment says to regenerate it "for anything beyond local dev," but a working default checked into the repo is exactly the kind of secret that ships to prod by accident. Should be generated at deploy time (env var / entrypoint script), not hardcoded in a tracked file.
 
+   **✅ Fixed (`cdb9b85`).** `settings.yml` now ships the literal placeholder `secret_key: "ultrasecretkey"`. `docker-compose.yml`'s `searxng` service entrypoint replaces it in-place with a real `openssl rand -hex 32` value on first container boot (only if the placeholder is still present, so it's idempotent across restarts), then hands off to the image's real entrypoint. Verified live against the actual `searxng/searxng` image: placeholder gets replaced on first boot, the generated secret persists unchanged across a restart, and the container serves the search UI afterward.
+
 2. **`docker-compose.yml`** — `firecrawl-redis`, `firecrawl-playwright`, `firecrawl-postgres` have no healthchecks, yet `firecrawl-api` (lines 151-159) depends on them via `service_started` (process started, not "ready for connections"). Same pattern for `backend`/`celery` depending on `searxng`/`firecrawl-api` (lines 56-59, 84-87). On a cold `docker compose up`, the first real requests can hit services that aren't actually ready yet — masked by `restart: unless-stopped` but shows up as flaky first-run errors.
 
 3. **`backend/config.py:80-89`** — Asymmetric prod validation: setting `SEARXNG_URL` exempts `TAVILY_API_KEY` from the required list, but setting `FIRECRAWL_API_URL` does *not* exempt `FIRECRAWL_API_KEY`. Self-hosted-Firecrawl-only users must still set a placeholder `FIRECRAWL_API_KEY` or production startup hard-fails — works today only because `.env.example` documents the workaround, but the rule is inconsistent and easy to trip on.
@@ -58,6 +60,8 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 ## 2. Auth
 
 1. **`backend/auth.py:23-32` `assert_run_access` ignores the `role` field entirely.** `WorkspaceMember.role` (viewer/operator/admin, `backend/models.py:48`) is set correctly when members are added, but nothing ever reads it back except membership add/remove. Any workspace member — including one added as `"viewer"` — passes `assert_run_access` and can hit `POST /{run_id}/approve` (`backend/routers/hitl.py:13-31`) to approve/resume a HITL-gated run with an arbitrary instruction, same as an admin. Either enforce role checks on mutating run actions (approve, maybe delete), or drop the role field if view-only access was never meant to be enforced — right now it's a control that looks real but does nothing.
+
+   **✅ Fixed (`376e7ba`).** Added an opt-in `min_role` parameter to `assert_run_access` (role hierarchy `viewer < operator < admin`); the run owner is always exempt regardless of role. Applied to `hitl.py`'s `approve` endpoint (the only mutating run action gated by this function — no `delete`-run endpoint exists) via `min_role="operator"`. Regression tests added in `test_lifecycle_and_outputs.py` covering viewer (403), operator (200), and admin (200).
 
 2. *(Minor, perf not security)* **`frontend/lib/api.ts` `authHeaders()`** mints a brand-new JWT via `/api/backend-token` on every API call instead of caching it until near its 15-min expiry — doubles round-trip latency per action.
 
@@ -103,7 +107,11 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 
 1. **The entire `formatters/` package is dead code.** Repo-wide grep confirms `format_linkedin`, `format_report`, and `format_summary` have zero call sites. `backend/routers/outputs.py`'s `download_pdf`/`download_md` serve `run.final_output` straight from the DB with no format-specific post-processing, and `run_service.py` never imports from `formatters/`. The only place output format is actually handled is `agents/writer.py`'s `FORMAT_INSTRUCTIONS` dict (prompt-level guidance only). Concretely: a run created with `format="linkedin"` is stored and downloaded as raw Markdown — `[text](url)` links and `#` headers intact — but LinkedIn's post composer doesn't render Markdown, so the user gets literal bracket/paren/pound syntax instead of the plain-text-with-bullets format `formatters/linkedin.py` was clearly built to produce.
 
+   **✅ Fixed (`1847de1`).** Added `formatters.format_output(fmt, raw_markdown)`, a dispatcher over the three formatters (falling back to `format_report` passthrough for unknown values). Wired into both `download_md` and `download_pdf` in `routers/outputs.py`. Regression tests added in `test_formatters.py` plus two router-level tests in `test_lifecycle_and_outputs.py`.
+
 2. **Even if wired up, `formatters/linkedin.py`'s link-stripping regex silently deletes citations rather than preserving them.** `re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)` (line 8) keeps the link text but discards the URL entirely. The rest of the pipeline treats citations as load-bearing (reviewer's rubric explicitly scores "Citation Integrity," editor's backstory calls citations "a badge of authority"), so a LinkedIn-formatted run would ship with every source attribution silently dropped — should convert to `text (URL)` or move sources to a trailing list instead of deleting them.
+
+   **✅ Fixed (`1847de1`), bundled with #1 above** since wiring `formatters/` into the download endpoints made this regex live immediately — leaving it would have silently undone the §8.1 citation fix for every LinkedIn-format run. Changed to `text (URL)`. Covered by `test_format_linkedin_preserves_citation_urls` in `test_formatters.py`.
 
 ## 8. Search/crawl tools
 
@@ -112,6 +120,8 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
    **✅ Fixed (`c6f6ad5`).** Added a second regex for `[Title](URL)`, restricted to `http(s)` targets so in-page anchors/relative links aren't misread as citations. Both formats are parsed and deduped together into the same `{"source", "page"}` shape (page = URL for Markdown-link citations), so no downstream changes were needed in `run_service.py`'s merge logic or the frontend. Regression tests added in `test_retrieval.py` covering Markdown-link parsing, dedup, non-http links being ignored, and mixed RAG+Markdown content in one document.
 
 2. **`SearxngSearchTool` and `TavilySearchTool` share the literal cache key `name = "web_search"`** (`tools/search.py:11`, `:52`), and `tool_cache.get/set` keys purely on `(tool_name, query)` with no provider dimension. Toggling `SEARXNG_URL` on/off — exactly the feature this diff adds — means a query cached under one provider is silently served back under the other for up to the cache's 7-day TTL, even though the two backends can return meaningfully different result sets/freshness.
+
+   **✅ Fixed (`8d99c2e`).** Both `_execute_search` methods now key `tool_cache.get/set` on a provider-scoped namespace (`"web_search:searxng"` / `"web_search:tavily"`) instead of the shared `self.name`; the agent-facing tool `name` stays `"web_search"` for both since that's unrelated to caching. Regression tests added in `test_tools.py`, including full `SearxngSearchTool` coverage (closing the §11.3 blind spot) and an explicit cache-key-namespace assertion per provider.
 
 3. *(Minor)* **`tools/scraper.py:107` imports `nest_asyncio` directly, but it's only a transitive dependency** — present in `uv.lock` with no direct entry in `pyproject.toml`'s `dependencies`. If the upstream package pulling it in ever drops it, this import breaks silently with no lockfile signal pointing at `scraper.py` as the cause.
 
@@ -126,6 +136,8 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 ## 10. Frontend
 
 1. **A failed run's error reason never reaches the UI during a live session.** `app/runs/[id]/page.tsx`'s stream handler has an asymmetry: on `{ type: "complete" }` it calls `getRun(id).then(setRun)` to refresh the full run object before rendering, but on `{ type: "error" }` (`page.tsx:81-83`) it only does `setStatus("failed")` — it neither refetches `run` nor stores the `parsed.data.message` the backend actually sends. The backend emits real, specific messages for this event (`run_service.py:90,155,172,373`, e.g. `"HITL stage {status} timed out after 30 minutes."` or `"Run failed: {error_msg[:200]}"`), but the failed-state banner (`page.tsx:196-202`) reads `run.error_message` off the `run` object fetched at page-load time — which is `null` for a run that fails *during* the open session. The user sees a generic "This run failed. Check the agent logs above for details." with no reason, and only gets the real message if they manually reload the page (which triggers a fresh `getRun`).
+
+   **✅ Fixed (`66dd1e5`).** Added a `runError` state set from `parsed.data.message` on the `"error"` stream event; the failed-state banner now renders `runError ?? run.error_message`, so a live failure shows the real backend message immediately while a reload still falls back to the DB-persisted value. Regression test added in `smoke.spec.ts`.
 
 2. **`lib/hooks.ts`'s `useRunStream` is dead code that reimplements streaming incorrectly and would 404 if it were ever wired up.** It has zero call sites (only the working hand-rolled stream logic in `app/runs/[id]/page.tsx` is actually used) and does `new EventSource(\`/api/runs/${id}/stream\`)` — a relative Next.js API route that doesn't exist (`app/api/` only contains `auth/` and `backend-token/`, no `runs/` proxy). Even if that route existed, a native `EventSource` can't attach an `Authorization` header, which `page.tsx:87-89` explicitly calls out as the reason it uses `fetch` + manual SSE parsing instead. Since every backend endpoint requires the bearer JWT (`auth.py`), this hook could never have worked against the real backend. Safe to delete — keeping it around risks a future refactor "simplifying" `page.tsx` back to this broken pattern.
 
