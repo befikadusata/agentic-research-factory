@@ -39,7 +39,7 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 20. **§10.2 — `lib/hooks.ts`'s `useRunStream` is dead code** that would 404 and can't carry auth headers if it were ever used. **✅ Fixed (`59da97e`).** Deleted `lib/hooks.ts` entirely (it was the file's only export, with zero call sites or imports anywhere). `tsc --noEmit` clean afterward.
 21. **§8.3 — `tools/scraper.py` imports the transitive-only dependency `nest_asyncio` directly**, with no direct entry in `pyproject.toml`. **✅ Fixed (`ad529ea`).** Added `"nest-asyncio>=1.6.0"` to `pyproject.toml`'s `dependencies` and regenerated `uv.lock`.
 22. **§9.2 — `get_redis_client()` leaks the old connection pool on event-loop change** — only fires under pytest's per-test event loops, not in production. **✅ Fixed (`6fb7762`).** Now awaits `aclose()` on the stale client before replacing it, guarding against `RuntimeError` when the old client's connections belong to a now-dead event loop.
-23. **§2.2 — `authHeaders()` mints a fresh JWT on every API call** instead of caching until near expiry — latency, not correctness.
+23. **§2.2 — `authHeaders()` mints a fresh JWT on every API call** instead of caching until near expiry — latency, not correctness. **✅ Fixed (`06c196a`).** Caches the token in module scope and decodes its `exp` claim to refetch only within 30s of actual expiry; also fixed the (previously non-exported) `authHeaders` to actually export, since `runs/[id]/page.tsx` already imported it directly.
 24. **§1.4 — Stale, unused `backend/requirements.txt`** tracked in git, drifted from `pyproject.toml`. **✅ Fixed (`e4c7bf6`).** Deleted — confirmed unused by `Dockerfile` (reads `pyproject.toml`/`uv.lock` directly) or anything else in the repo.
 25. **§1.5 — A 45KB `backend/test.db` SQLite file is committed to git.** **✅ Fixed (`e4c7bf6`, `7cb57eb`).** Removed from git and disk; added `*.db` to `.gitignore` so it can't be re-committed by accident.
 
@@ -71,7 +71,7 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 
    **✅ Fixed (`376e7ba`).** Added an opt-in `min_role` parameter to `assert_run_access` (role hierarchy `viewer < operator < admin`); the run owner is always exempt regardless of role. Applied to `hitl.py`'s `approve` endpoint (the only mutating run action gated by this function — no `delete`-run endpoint exists) via `min_role="operator"`. Regression tests added in `test_lifecycle_and_outputs.py` covering viewer (403), operator (200), and admin (200).
 
-2. *(Minor, perf not security)* **`frontend/lib/api.ts` `authHeaders()`** mints a brand-new JWT via `/api/backend-token` on every API call instead of caching it until near its 15-min expiry — doubles round-trip latency per action.
+2. *(Minor, perf not security)* **`frontend/lib/api.ts` `authHeaders()`** mints a brand-new JWT via `/api/backend-token` on every API call instead of caching it until near its 15-min expiry — doubles round-trip latency per action. **✅ Fixed (`06c196a`).** Caches `{ token, expiresAt }` in module scope, decoding the JWT's `exp` claim client-side; only refetches once within 30s of that expiry.
 
 ## 3. Backend API surface
 
