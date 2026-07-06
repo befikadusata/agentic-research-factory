@@ -40,8 +40,8 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 21. **§8.3 — `tools/scraper.py` imports the transitive-only dependency `nest_asyncio` directly**, with no direct entry in `pyproject.toml`.
 22. **§9.2 — `get_redis_client()` leaks the old connection pool on event-loop change** — only fires under pytest's per-test event loops, not in production.
 23. **§2.2 — `authHeaders()` mints a fresh JWT on every API call** instead of caching until near expiry — latency, not correctness.
-24. **§1.4 — Stale, unused `backend/requirements.txt`** tracked in git, drifted from `pyproject.toml`.
-25. **§1.5 — A 45KB `backend/test.db` SQLite file is committed to git.**
+24. **§1.4 — Stale, unused `backend/requirements.txt`** tracked in git, drifted from `pyproject.toml`. **✅ Fixed.** Deleted — confirmed unused by `Dockerfile` (reads `pyproject.toml`/`uv.lock` directly) or anything else in the repo.
+25. **§1.5 — A 45KB `backend/test.db` SQLite file is committed to git.** **✅ Fixed.** Removed from git and disk; added `*.db` to `.gitignore` so it can't be re-committed by accident.
 
 ## 1. Setup/Infra
 
@@ -59,7 +59,11 @@ All 25 issues below, ranked by severity. `§N.M` refers to item M in section N f
 
 4. **`backend/requirements.txt`** — Stray tracked file, unused by the Dockerfile (which reads `pyproject.toml` directly) or anything else in the repo. Stale relative to `pyproject.toml` — missing `celery`, `docling`, `langchain-text-splitters`, `langfuse`, `prometheus-fastapi-instrumentator`, `torch`, `torchvision`. Dead weight that can mislead. Recommend deleting.
 
+   **✅ Fixed.** Deleted.
+
 5. **`backend/test.db`** — A 45KB SQLite file from a test run is checked into git (tracked, not ignored). Should be removed from version control and added to `.gitignore`.
+
+   **✅ Fixed.** `git rm --cached` plus deleted from disk; added `*.db` to `.gitignore`.
 
 ## 2. Auth
 

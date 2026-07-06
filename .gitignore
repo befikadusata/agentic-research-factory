@@ -8,6 +8,7 @@ venv/
 dist/
 .pytest_cache/
 .mypy_cache/
+*.db
 
 # Env
 .env
