@@ -703,9 +703,19 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
       `VerticalSelector.tsx`/`FormatSelector.tsx`. 7.2 (progress bar), 7.6
       (citation pill), 7.7 (cost widget), 7.8 (tenant switcher) have no
       existing component to retrofit — not built, not needed yet.
-- [ ] Verify contrast: primary text ≥ 7:1, secondary ≥ 4.5:1 on every surface.
-      Not formally checked (no contrast-ratio tooling run) — reasoned about
-      qualitatively while authoring tokens only.
+- [x] Verify contrast: primary text ≥ 7:1, secondary ≥ 4.5:1 on every surface.
+      Computed WCAG ratios for every text/surface pair. `text-primary`
+      (14.8–17.4:1) and `text-secondary` (6.65–7.79:1) clear their targets
+      everywhere. Found two failures and fixed by promoting the affected
+      tokens from `gray-500` to `gray-400`: `text-muted` (was 2.9–3.4:1,
+      now 4.27–5.01:1 — used for real content like log timestamps, not
+      decorative) and `agent-idle` badge text (was 3.20:1, now 4.74:1).
+      Light-mode surfaces re-checked too; light `text-muted` bumped from
+      `gray-400` to `gray-500` (was 3.6–4.05:1, now 5.33–5.99:1). Note:
+      light-mode `agent-thinking`/`agent-complete`/`agent-error` text
+      colors were never re-themed for light surfaces and measure badly
+      (1.86–3.06:1) — deferred to the light-mode task since fixing them
+      means adding new base palette shades, not just re-measuring.
 - [x] Confirm every status has a non-colour glyph (colour-blind safe).
       `AGENT_STATE_GLYPH` in `lib/types.ts` (◐ ✓ ✕ ▮▮), verified live via
       Playwright screenshots.

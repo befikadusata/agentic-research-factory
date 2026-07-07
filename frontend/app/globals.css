@@ -78,7 +78,7 @@
   /* ── SEMANTIC: Text ──────────────────────────────────────── */
   --text-primary:   var(--base-gray-050);
   --text-secondary: var(--base-gray-300);
-  --text-muted:     var(--base-gray-500);
+  --text-muted:     var(--base-gray-400);   /* gray-500 measured 2.9-3.4:1 on surface-0..4, fails AA */
   --text-inverse:   var(--base-obsidian-950);
   --text-link:      var(--base-cyan-400);
 
@@ -89,7 +89,7 @@
   --color-on-primary:    var(--base-obsidian-950);
 
   /* ── SEMANTIC: Agent status states ───────────────────────── */
-  --color-agent-idle:     var(--base-gray-500);
+  --color-agent-idle:     var(--base-gray-400);   /* gray-500 measured 3.2:1 as badge text, fails AA */
   --color-agent-active:   var(--base-cyan-400);
   --color-agent-thinking: var(--base-violet-400);
   --color-agent-complete: var(--base-mint-400);
@@ -201,7 +201,7 @@
 
   --text-primary:   #0E141E;
   --text-secondary: #45566A;
-  --text-muted:     #6F8093;
+  --text-muted:     #556575;   /* gray-400 measured 4.05:1 on white, fails AA; gray-500 gives 5.99:1 */
   --text-inverse:   #F7FAFC;
 
   --color-primary:      var(--base-cyan-600);
