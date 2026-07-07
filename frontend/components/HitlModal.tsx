@@ -83,7 +83,7 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
           <header className="mb-4 flex items-center gap-2 border-b border-hitl/30 pb-3">
             <span className="text-hitl" aria-hidden>▮▮</span>
             <Dialog.Title asChild>
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-hitl">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-content">
                 Checkpoint · {copy.title}
               </span>
             </Dialog.Title>
@@ -123,7 +123,7 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
                        focus:ring-2 focus:ring-hitl"
           />
 
-          {error && <p className="text-feedback-error text-sm mb-3">{error}</p>}
+          {error && <p className="text-content text-sm mb-3">{error}</p>}
 
           <div className="flex justify-end">
             <button

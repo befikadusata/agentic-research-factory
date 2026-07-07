@@ -48,7 +48,7 @@ export function FileUpload({ onUploaded, onRemoved }: Props) {
       <p className="text-xs text-content-muted mb-2">PDF only · max 1 file</p>
       {uploadedFileName ? (
         <div className="border-2 border-feedback-success/40 bg-feedback-success/10 rounded-lg p-4 flex items-center justify-between">
-          <span className="text-feedback-success text-sm font-medium">✓ {uploadedFileName}</span>
+          <span className="text-content text-sm font-medium">✓ {uploadedFileName}</span>
           <button
             type="button"
             onClick={handleRemove}
@@ -74,7 +74,7 @@ export function FileUpload({ onUploaded, onRemoved }: Props) {
           </p>
         </div>
       )}
-      {error && <p className="text-feedback-error text-sm mt-1">{error}</p>}
+      {error && <p className="text-content text-sm mt-1">{error}</p>}
     </div>
   );
 }

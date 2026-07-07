@@ -722,10 +722,57 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
 - [x] Test full `prefers-reduced-motion` path — state must stay legible with
       all loops/scanline/caret off. Verified via Playwright's
       `reducedMotion: 'reduce'` emulation.
-- [ ] Add a `.light` opt-in and re-check contrast on light surfaces.
-      `:root.light` token overrides are in `globals.css`, but nothing in the
-      app toggles the `light` class yet, and it hasn't been visually
-      verified or contrast-checked.
+- [x] Add a `.light` opt-in and re-check contrast on light surfaces.
+      Added a real toggle (`components/ThemeToggle.tsx`, in the sidebar)
+      that flips a `light` class on `<html>` and persists it via
+      `localStorage`, plus a blocking inline script in `layout.tsx` to set
+      it before first paint (no flash of the wrong theme).
+
+      Re-checking surfaced a deeper bug than a missing override: Tailwind's
+      `agent.*`/`feedback.*`/`primary`/`hitl` colors all resolve through the
+      `--rgb-cyan`/`--rgb-violet`/`--rgb-mint`/`--rgb-rose`/`--rgb-amber`
+      triples (required for opacity modifiers), not the `--color-*`
+      semantic aliases — so the `:root.light` overrides on `--color-primary`
+      /`--color-agent-active`/`--color-agent-paused`/`--color-hitl` were
+      dead code for every Tailwind utility class; they only ever reached
+      the component-layer tokens (`--node-*-border`, `--hitl-*`,
+      `--log-caret`, `--cite-*`, `--cost-*`) that reference them directly.
+      Fixed by overriding the `--rgb-*` triples themselves inside
+      `:root.light`, using new `--base-mint-600`/`--base-rose-600` (added;
+      only a `-400` existed before) plus the existing `-600` cyan/violet/
+      amber shades.
+
+      Also found while re-checking: even the *deepened* shades the original
+      spec's `:root.light` block picked (cyan-600, amber-500) don't clear
+      4.5:1 as text on white (measured 3.25:1 / 2.53:1) — they only clear
+      the 3:1 non-text/border minimum. So every place a hue was used as
+      real (non-decorative) text — `AGENT_STATE_BADGE`, HITL/error/resuming
+      banners, the HITL eyebrow label — now uses neutral `text-content`
+      instead, with the hue kept for the background tint, border, and
+      decorative glyphs (state is still never color-only: badges also
+      carry the glyph from `AGENT_STATE_GLYPH`). Bumped `agent-paused`/
+      `hitl` from amber-500 to amber-600 for the border/glyph case (was
+      2.53:1, fails even 3:1).
+
+      Bonus fix found along the way: `bg-agent-idle/15` was silently
+      generating no CSS at all (Tailwind can't apply an opacity modifier to
+      a plain `var(--color-agent-idle)` hex string) — added `--rgb-gray-400`
+      and pointed `agent.idle` at it so the idle/pending badge tint
+      actually renders.
+
+      Verified live in both themes via Playwright (toggle click + full-page
+      screenshots): sign-in page and a component harness covering all 6
+      status badges, the HITL card, and the agent log. No console errors.
+
+      **Known follow-up (not fixed, flagged not requested):** two other
+      color systems are still fixed-hue and not light-mode-aware —
+      (1) `VERTICALS[].accentClass` in `lib/types.ts` uses raw Tailwind
+      defaults (`text-violet-400 bg-violet-950/40`, etc.), confirmed via
+      screenshot to be nearly illegible in light mode though fine in dark;
+      (2) `AGENT_COLORS` in `AgentLog.tsx` (the `[agent name]` prefix hues)
+      reads `--base-agent-*` directly, also fixed across modes. Also noted:
+      `OutputPanel.tsx` hardcodes `prose-invert` (always-dark markdown
+      typography) regardless of theme.
 
 ---
 

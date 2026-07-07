@@ -54,6 +54,8 @@
   /* ── BASE: Feedback ─────────────────────────────────────── */
   --base-mint-400: #3FD69A;
   --base-rose-400: #F26478;
+  --base-mint-600: #0F8560;   /* light-mode-only: 4.62:1 on white, mint-400 measures 1.86:1 */
+  --base-rose-600: #C43F55;   /* light-mode-only: 5.01:1 on white, rose-400 measures 3.06:1 */
 
   /* ── BASE: Agent identity (fixed, muted) ────────────────── */
   --base-agent-supervisor: #5FC7D4;
@@ -116,6 +118,9 @@
   --rgb-mint:   63 214 154;   /* mint-400  → agent-complete, success       */
   --rgb-rose:   242 100 120;  /* rose-400  → agent-error, error            */
   --rgb-amber:  233 178 92;   /* amber-400 → agent-paused, hitl, warning   */
+  --rgb-gray-400: 111 128 147; /* gray-400 → agent-idle (needs a triple too:
+                                   bg-agent-idle/15 silently generated no CSS
+                                   at all when idle was a plain hex var) */
 
   /* ── SEMANTIC: Elevation ──────────────────────────────────── */
   --shadow-hairline: inset 0 0 0 1px rgb(56 70 91 / 0.40);
@@ -204,10 +209,34 @@
   --text-muted:     #556575;   /* gray-400 measured 4.05:1 on white, fails AA; gray-500 gives 5.99:1 */
   --text-inverse:   #F7FAFC;
 
-  --color-primary:      var(--base-cyan-600);
-  --color-agent-active: var(--base-cyan-600);
-  --color-agent-paused: var(--base-amber-500);
-  --color-hitl:         var(--base-amber-500);
+  --color-primary:        var(--base-cyan-600);
+  --color-agent-active:   var(--base-cyan-600);
+  --color-agent-thinking: var(--base-violet-600);
+  --color-agent-complete: var(--base-mint-600);
+  --color-agent-error:    var(--base-rose-600);
+  --color-agent-paused:   var(--base-amber-600);   /* amber-500 measured 2.53:1 on white, fails even 3:1 */
+
+  --color-success: var(--base-mint-600);
+  --color-error:   var(--base-rose-600);
+  --color-warning: var(--base-amber-600);
+  --color-info:    var(--base-cyan-600);
+
+  --color-hitl:       var(--base-amber-600);        /* amber-500 measured 2.53:1 on white, fails even 3:1 */
+  --color-hitl-quiet: var(--base-amber-600);
+
+  /* Tailwind's agent, feedback, primary and hitl colors all resolve through
+     these --rgb-* triples (needed for opacity modifiers — see the note by
+     their :root definition), NOT the --color-* vars above. Those --color-*
+     overrides only reach the component tokens below (--node-*-border,
+     --hitl-*, --log-caret, --cite-*, --cost-*) which reference them
+     directly; every Tailwind utility (text-agent-x, bg-hitl/10, etc.) reads
+     the triples, so they must be re-pointed here too or light mode keeps
+     rendering dark-mode hues. */
+  --rgb-cyan:   12 157 176;   /* cyan-600 */
+  --rgb-violet: 106 79 203;   /* violet-600 */
+  --rgb-mint:   15 133 96;    /* mint-600 */
+  --rgb-rose:   196 63 85;    /* rose-600 */
+  --rgb-amber:  180 118 42;   /* amber-600 */
 
   --shadow-hairline: inset 0 0 0 1px rgb(194 205 217 / 0.7);
 }

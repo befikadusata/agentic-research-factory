@@ -33,7 +33,7 @@ export function RunCard({ run }: { run: Run }) {
           )}
         </div>
         {run.status === "failed" && (
-          <p className="text-feedback-error text-xs italic">
+          <p className="text-content-secondary text-xs italic">
             Check failed run details
           </p>
         )}

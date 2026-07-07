@@ -50,7 +50,7 @@ export default function Dashboard() {
       </div>
 
       {loading && <p className="text-content-muted">Loading runs…</p>}
-      {error && <p className="text-feedback-error bg-feedback-error/10 p-4 rounded-lg">{error}</p>}
+      {error && <p className="text-content bg-feedback-error/10 border border-feedback-error/40 p-4 rounded-lg">{error}</p>}
       {!loading && !error && runs.length === 0 && (
         <div className="border-2 border-dashed border-border-subtle rounded-lg p-16 text-center text-content-muted">
           <p className="text-lg mb-4">No research runs yet.</p>

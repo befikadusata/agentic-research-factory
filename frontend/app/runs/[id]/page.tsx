@@ -115,7 +115,7 @@ export default function RunPage() {
     return () => controller.abort();
   }, [id]);
 
-  if (loadError) return <p className="text-feedback-error p-8">{loadError}</p>;
+  if (loadError) return <p className="text-content p-8">{loadError}</p>;
   if (!run) return <p className="text-content-muted p-8">Loading run…</p>;
 
   const verticalDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) ?? null : null;
@@ -158,11 +158,11 @@ export default function RunPage() {
       </div>
 
       {streamError && (
-        <div className="flex items-center justify-between gap-2 text-hitl text-sm bg-hitl/10 border border-hitl/40 rounded-lg px-4 py-3">
+        <div className="flex items-center justify-between gap-2 text-content text-sm bg-hitl/10 border border-hitl/40 rounded-lg px-4 py-3">
           <span>⚠ {streamError}</span>
           <button
             onClick={() => setStreamError(null)}
-            className="text-hitl/70 hover:text-hitl text-xs underline flex-shrink-0"
+            className="text-content-secondary hover:text-content text-xs underline flex-shrink-0"
           >
             Dismiss
           </button>
@@ -187,7 +187,7 @@ export default function RunPage() {
       )}
 
       {resuming && (
-        <div className="flex items-center gap-3 text-agent-thinking text-sm bg-agent-thinking/10 border border-agent-thinking/40 rounded-lg px-4 py-3">
+        <div className="flex items-center gap-3 text-content text-sm bg-agent-thinking/10 border border-agent-thinking/40 rounded-lg px-4 py-3">
           <span className="inline-block animate-spin">⟳</span>
           Pipeline resuming, waiting for the next stage to begin…
         </div>
@@ -198,10 +198,10 @@ export default function RunPage() {
       )}
 
       {status === "failed" && (
-        <div className="border border-feedback-error/40 bg-feedback-error/10 rounded-lg p-5 text-feedback-error font-medium">
+        <div className="border border-feedback-error/40 bg-feedback-error/10 rounded-lg p-5 text-content font-medium">
           This run failed. Check the agent logs above for details.
           {(runError ?? run.error_message) && (
-            <p className="mt-2 text-sm font-normal opacity-80">{runError ?? run.error_message}</p>
+            <p className="mt-2 text-sm font-normal text-content-secondary">{runError ?? run.error_message}</p>
           )}
         </div>
       )}

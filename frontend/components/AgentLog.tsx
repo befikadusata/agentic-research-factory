@@ -64,7 +64,7 @@ export function AgentLog({ logs }: { logs: LogEntry[] }) {
             <span className="font-bold" style={{ color: AGENT_COLORS[log.agent] ?? "var(--text-secondary)" }}>
               [{log.agent}]
             </span>{" "}
-            <span className={`whitespace-pre-wrap break-words ${log.message.toLowerCase().includes("error") ? "text-feedback-error" : "text-content-secondary"}`}>
+            <span className={`whitespace-pre-wrap break-words ${log.message.toLowerCase().includes("error") ? "text-content" : "text-content-secondary"}`}>
               {log.message.slice(0, 400)}
               {log.message.length > 400 && "…"}
             </span>

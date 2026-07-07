@@ -205,13 +205,17 @@ export const AGENT_STATE_GLYPH: Record<AgentState, string> = {
   paused: "▮▮",
 };
 
+// Text stays neutral (text-content) rather than colored — several agent hues
+// can't reach 4.5:1 as text on light surfaces even at their deepened light-mode
+// shade. The hue still carries the state via the tint + border; the glyph in
+// AGENT_STATE_GLYPH carries it a second way (color is never the only signal).
 export const AGENT_STATE_BADGE: Record<AgentState, string> = {
-  idle:     "bg-agent-idle/15 text-agent-idle",
-  active:   "bg-agent-active/15 text-agent-active",
-  thinking: "bg-agent-thinking/15 text-agent-thinking",
-  complete: "bg-agent-complete/15 text-agent-complete",
-  error:    "bg-agent-error/15 text-agent-error",
-  paused:   "bg-agent-paused/15 text-agent-paused",
+  idle:     "bg-agent-idle/10 border border-agent-idle/40 text-content",
+  active:   "bg-agent-active/10 border border-agent-active/40 text-content",
+  thinking: "bg-agent-thinking/10 border border-agent-thinking/40 text-content",
+  complete: "bg-agent-complete/10 border border-agent-complete/40 text-content",
+  error:    "bg-agent-error/10 border border-agent-error/40 text-content",
+  paused:   "bg-agent-paused/10 border border-agent-paused/40 text-content",
 };
 
 export function statusBadgeClass(status: RunStatus): string {

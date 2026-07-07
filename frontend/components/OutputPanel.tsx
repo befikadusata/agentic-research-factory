@@ -46,7 +46,7 @@ export function OutputPanel({ content, runId }: Props) {
         </div>
       </div>
       {downloadError && (
-        <p className="text-feedback-error text-sm px-4 py-2 bg-feedback-error/10 border-b border-feedback-error/30">
+        <p className="text-content text-sm px-4 py-2 bg-feedback-error/10 border-b border-feedback-error/30">
           {downloadError}
         </p>
       )}

@@ -5,6 +5,7 @@ import "./globals.css";
 import { SessionProvider } from "./providers";
 import { LayoutGrid, Plus, History } from "lucide-react";
 import { SidebarUser } from "@/components/SidebarUser";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
@@ -17,6 +18,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`dark ${sans.variable} ${mono.variable}`}>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem("ftm-theme")==="light"){document.documentElement.classList.add("light")}}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="bg-surface-0 text-content min-h-screen flex">
         <SessionProvider>
           {/* Sidebar */}
@@ -38,7 +46,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 History
               </Link>
             </nav>
-            <div className="mt-auto">
+            <div className="mt-auto flex flex-col gap-2">
+              <ThemeToggle />
               <SidebarUser />
             </div>
           </aside>

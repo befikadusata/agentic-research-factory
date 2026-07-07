@@ -41,7 +41,7 @@ const config: Config = {
         // pending→idle, researching→active, awaiting_hitl→paused,
         // writing→thinking, complete→complete, failed→error.
         agent: {
-          idle: "var(--color-agent-idle)",
+          idle: "rgb(var(--rgb-gray-400) / <alpha-value>)",
           active: "rgb(var(--rgb-cyan) / <alpha-value>)",
           thinking: "rgb(var(--rgb-violet) / <alpha-value>)",
           complete: "rgb(var(--rgb-mint) / <alpha-value>)",

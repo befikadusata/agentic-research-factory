@@ -187,7 +187,7 @@ export default function NewRunPage() {
           />
         </div>
 
-        {error && <p className="text-feedback-error text-sm bg-feedback-error/10 p-3 rounded-md">{error}</p>}
+        {error && <p className="text-content text-sm bg-feedback-error/10 border border-feedback-error/40 p-3 rounded-md">{error}</p>}
 
         <button
           type="submit"
