@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { downloadOutput } from "@/lib/api";
 import { DownloadButton } from "./DownloadButton";
+import { useIsLightMode } from "@/lib/useTheme";
 
 interface Props {
   content: string;
@@ -14,6 +15,7 @@ interface Props {
 export function OutputPanel({ content, runId }: Props) {
   const [downloading, setDownloading] = useState<"pdf" | "md" | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const light = useIsLightMode();
 
   async function handleDownload(format: "pdf" | "md") {
     setDownloading(format);
@@ -50,7 +52,7 @@ export function OutputPanel({ content, runId }: Props) {
           {downloadError}
         </p>
       )}
-      <div className="p-6 prose prose-invert max-w-none overflow-y-auto max-h-[60vh]">
+      <div className={`p-6 prose ${light ? "" : "prose-invert"} max-w-none overflow-y-auto max-h-[60vh]`}>
         {content?.trim() ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         ) : (

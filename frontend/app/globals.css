@@ -57,6 +57,10 @@
   --base-mint-600: #0F8560;   /* light-mode-only: 4.62:1 on white, mint-400 measures 1.86:1 */
   --base-rose-600: #C43F55;   /* light-mode-only: 5.01:1 on white, rose-400 measures 3.06:1 */
 
+  /* ── BASE: Blue — vertical/category accent (marketing brief) ── */
+  --base-blue-400: #5B9EE8;
+  --base-blue-600: #2B6CB0;   /* light-mode-only: 5.42:1 on white */
+
   /* ── BASE: Agent identity (fixed, muted) ────────────────── */
   --base-agent-supervisor: #5FC7D4;
   --base-agent-strategist: #A38BF5;
@@ -118,6 +122,7 @@
   --rgb-mint:   63 214 154;   /* mint-400  → agent-complete, success       */
   --rgb-rose:   242 100 120;  /* rose-400  → agent-error, error            */
   --rgb-amber:  233 178 92;   /* amber-400 → agent-paused, hitl, warning   */
+  --rgb-blue:   91 158 232;   /* blue-400  → category-competitor           */
   --rgb-gray-400: 111 128 147; /* gray-400 → agent-idle (needs a triple too:
                                    bg-agent-idle/15 silently generated no CSS
                                    at all when idle was a plain hex var) */
@@ -237,8 +242,21 @@
   --rgb-mint:   15 133 96;    /* mint-600 */
   --rgb-rose:   196 63 85;    /* rose-600 */
   --rgb-amber:  180 118 42;   /* amber-600 */
+  --rgb-blue:   43 108 176;   /* blue-600 */
 
   --shadow-hairline: inset 0 0 0 1px rgb(194 205 217 / 0.7);
+
+  /* Agent-identity hues (AgentLog's [Agent Name] prefix) are read directly
+     via var(--base-agent-x), not through an --rgb-* triple, so they need
+     their own light-mode overrides here. Dark-mode values measure
+     1.98–3.06:1 on white — nowhere near the 4.5:1 real text needs. */
+  --base-agent-supervisor: #0A7484;
+  --base-agent-strategist: #6A4FCB;
+  --base-agent-researcher: #1F6FB2;
+  --base-agent-analyst:    #127A5C;
+  --base-agent-reviewer:   #8C6425;
+  --base-agent-writer:     #8A4FAE;
+  --base-agent-editor:     #3F5C8A;
 }
 
 @layer base {

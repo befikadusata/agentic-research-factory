@@ -764,15 +764,22 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
       screenshots): sign-in page and a component harness covering all 6
       status badges, the HITL card, and the agent log. No console errors.
 
-      **Known follow-up (not fixed, flagged not requested):** two other
-      color systems are still fixed-hue and not light-mode-aware —
-      (1) `VERTICALS[].accentClass` in `lib/types.ts` uses raw Tailwind
-      defaults (`text-violet-400 bg-violet-950/40`, etc.), confirmed via
-      screenshot to be nearly illegible in light mode though fine in dark;
-      (2) `AGENT_COLORS` in `AgentLog.tsx` (the `[agent name]` prefix hues)
-      reads `--base-agent-*` directly, also fixed across modes. Also noted:
-      `OutputPanel.tsx` hardcodes `prose-invert` (always-dark markdown
-      typography) regardless of theme.
+      **Follow-up items found above are now fixed too:**
+      (1) `VERTICALS[].accentClass` moved off raw Tailwind defaults
+      (`text-violet-400 bg-violet-950/40`) onto a new `category.{sales,
+      competitor,strategy}` Tailwind color group backed by the same
+      light-mode-aware `--rgb-*` triples (added `--rgb-blue`/`--base-blue-
+      400/600` since no blue existed in the palette), with the tag text
+      switched to neutral `text-content` the same way the state badges
+      were; (2) `AGENT_COLORS` in `AgentLog.tsx` reads `--base-agent-*`
+      directly (by design, no Tailwind opacity use), so those seven base
+      values got direct `:root.light` overrides deepened to clear 4.5:1 on
+      white (dark-mode originals measured 1.98–3.06:1); (3) `OutputPanel.tsx`
+      and `HitlModal.tsx` both hardcoded `prose-invert` regardless of
+      theme — added `lib/useTheme.ts` (`useIsLightMode`, a `MutationObserver`
+      on `<html>`'s class list) so both now pick `prose` vs `prose-invert`
+      live. All three re-verified via the same Playwright toggle-and-
+      screenshot harness in both themes.
 
 ---
 

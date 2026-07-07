@@ -50,7 +50,7 @@ export const VERTICALS: VerticalDefinition[] = [
       "Build a prospect dossier — company overview, decision makers, funding, tech stack, and fit score.",
     icon: "🎯",
     defaultFormat: "report",
-    accentClass: "text-violet-400 bg-violet-950/40 border-violet-900/60",
+    accentClass: "text-content bg-category-sales/10 border-category-sales/40",
     inputSchema: {
       company_url: {
         label: "Company URL",
@@ -79,7 +79,7 @@ export const VERTICALS: VerticalDefinition[] = [
       "Analyze a competitor's positioning, content strategy, pricing, and differentiation gaps.",
     icon: "📊",
     defaultFormat: "report",
-    accentClass: "text-blue-400 bg-blue-950/40 border-blue-900/60",
+    accentClass: "text-content bg-category-competitor/10 border-category-competitor/40",
     inputSchema: {
       competitor_name: {
         label: "Competitor Name",
@@ -108,7 +108,7 @@ export const VERTICALS: VerticalDefinition[] = [
       "Get a strategic landscape analysis — market sizing, competition, timing, and entry points.",
     icon: "🚀",
     defaultFormat: "summary",
-    accentClass: "text-emerald-400 bg-emerald-950/40 border-emerald-900/60",
+    accentClass: "text-content bg-category-strategy/10 border-category-strategy/40",
     inputSchema: {
       market_segment: {
         label: "Market Segment",

@@ -55,6 +55,13 @@ const config: Config = {
           info: "rgb(var(--rgb-cyan) / <alpha-value>)",
         },
         hitl: "rgb(var(--rgb-amber) / <alpha-value>)",
+        // Vertical/category accent tags (reuses agent-state hues so they
+        // stay light-mode-aware automatically via the same --rgb-* triples).
+        category: {
+          sales: "rgb(var(--rgb-violet) / <alpha-value>)",
+          competitor: "rgb(var(--rgb-blue) / <alpha-value>)",
+          strategy: "rgb(var(--rgb-mint) / <alpha-value>)",
+        },
       },
       fontFamily: {
         sans: ["var(--font-sans)"],

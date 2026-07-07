@@ -5,6 +5,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { approveHitl } from "@/lib/api";
+import { useIsLightMode } from "@/lib/useTheme";
 
 interface Props {
   runId: string;
@@ -45,6 +46,7 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
   const [instruction, setInstruction] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const light = useIsLightMode();
 
   const copy = STAGE_COPY[stage] ?? DEFAULT_COPY;
 
@@ -95,7 +97,7 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
           <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-content-muted">
             Draft summary
           </p>
-          <div className="bg-surface-3 rounded-md p-4 max-h-64 overflow-y-auto text-sm mb-5 prose prose-invert prose-sm max-w-none text-content-secondary">
+          <div className={`bg-surface-3 rounded-md p-4 max-h-64 overflow-y-auto text-sm mb-5 prose ${light ? "" : "prose-invert"} prose-sm max-w-none text-content-secondary`}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{stageSummary}</ReactMarkdown>
           </div>
 
