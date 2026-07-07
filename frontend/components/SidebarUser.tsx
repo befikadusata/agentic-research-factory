@@ -8,7 +8,7 @@ export function SidebarUser() {
   if (!session?.user) return null;
 
   return (
-    <div className="border-t border-zinc-800 pt-4">
+    <div className="border-t border-border-subtle pt-4">
       <div className="flex items-center gap-3 mb-3 px-1">
         {session.user.image && (
           // Plain img — next/image requires remotePatterns config for lh3.googleusercontent.com
@@ -21,13 +21,13 @@ export function SidebarUser() {
           />
         )}
         <div className="min-w-0">
-          <p className="text-sm font-medium text-zinc-200 truncate">{session.user.name}</p>
-          <p className="text-xs text-zinc-500 truncate">{session.user.email}</p>
+          <p className="text-sm font-medium text-content truncate">{session.user.name}</p>
+          <p className="text-xs text-content-muted truncate">{session.user.email}</p>
         </div>
       </div>
       <button
         onClick={() => signOut({ callbackUrl: "/" })}
-        className="w-full flex items-center gap-2 text-sm text-zinc-400 hover:text-white px-2 py-2 rounded-lg hover:bg-zinc-800 transition-colors"
+        className="w-full flex items-center gap-2 text-sm text-content-secondary hover:text-content px-2 py-2 rounded-md hover:bg-surface-3 transition-colors"
       >
         <LogOut size={16} />
         Sign out

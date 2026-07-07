@@ -9,7 +9,7 @@ import { AgentGraph } from "@/components/AgentGraph";
 import { HitlModal } from "@/components/HitlModal";
 import { OutputPanel } from "@/components/OutputPanel";
 import type { RunDetail, LogEntry, RunStatus } from "@/lib/types";
-import { VERTICALS } from "@/lib/types";
+import { VERTICALS, AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, statusBadgeClass } from "@/lib/types";
 
 const STATUS_LABEL: Record<string, string> = {
   pending:                    "Pending",
@@ -115,20 +115,22 @@ export default function RunPage() {
     return () => controller.abort();
   }, [id]);
 
-  if (loadError) return <p className="text-red-400 p-8">{loadError}</p>;
-  if (!run) return <p className="text-zinc-500 p-8">Loading run…</p>;
+  if (loadError) return <p className="text-feedback-error p-8">{loadError}</p>;
+  if (!run) return <p className="text-content-muted p-8">Loading run…</p>;
 
   const verticalDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) ?? null : null;
+  const statusGlyph = status ? AGENT_STATE_GLYPH[STATUS_TO_AGENT_STATE[status]] : "";
 
   return (
     <div className="space-y-8">
-      <div className="pb-6 border-b border-zinc-800">
-        <h1 className="text-3xl font-bold text-zinc-100">{run.topic}</h1>
+      <div className="pb-6 border-b border-border-subtle">
+        <h1 className="text-3xl font-bold text-content">{run.topic}</h1>
         <div className="flex items-center gap-3 mt-4">
-          <span className="capitalize text-sm text-zinc-400 font-medium bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-sm">
+          <span className="capitalize text-sm text-content-secondary font-medium bg-surface-2 border border-border-subtle px-3 py-1 rounded-sm">
             {run.format} Run
           </span>
-          <span className="text-sm font-semibold text-primary-500 bg-primary-900/20 border border-primary-900/50 px-3 py-1 rounded-sm">
+          <span className={`text-sm font-semibold px-3 py-1 rounded-sm ${status ? statusBadgeClass(status) : "text-content-muted bg-surface-2"}`}>
+            {statusGlyph && <span aria-hidden>{statusGlyph} </span>}
             {status === null ? "…" : (STATUS_LABEL[status] ?? status)}
           </span>
           {verticalDef && (
@@ -139,15 +141,15 @@ export default function RunPage() {
         </div>
 
         {run.vertical_inputs && Object.keys(run.vertical_inputs).length > 0 && (
-          <div className="mt-6 p-5 bg-zinc-900 border border-zinc-800 rounded-lg">
-            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Submitted Context</h3>
+          <div className="mt-6 p-5 bg-surface-2 border border-border-subtle rounded-lg">
+            <h3 className="text-xs font-bold text-content-secondary uppercase tracking-wider mb-3">Submitted Context</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {Object.entries(run.vertical_inputs).map(([k, v]) => (
                 <div key={k}>
-                  <dt className="text-xs text-zinc-500 font-medium">
+                  <dt className="text-xs text-content-muted font-medium">
                     {verticalDef?.inputSchema[k]?.label ?? k.replace(/_/g, " ")}
                   </dt>
-                  <dd className="text-sm text-zinc-200 mt-0.5 break-words font-medium">{String(v)}</dd>
+                  <dd className="text-sm text-content mt-0.5 break-words font-medium">{String(v)}</dd>
                 </div>
               ))}
             </div>
@@ -156,11 +158,11 @@ export default function RunPage() {
       </div>
 
       {streamError && (
-        <div className="flex items-center justify-between gap-2 text-amber-400 text-sm bg-amber-950/20 border border-amber-900/40 rounded-lg px-4 py-3">
+        <div className="flex items-center justify-between gap-2 text-hitl text-sm bg-hitl/10 border border-hitl/40 rounded-lg px-4 py-3">
           <span>⚠ {streamError}</span>
           <button
             onClick={() => setStreamError(null)}
-            className="text-amber-600 hover:text-amber-400 text-xs underline flex-shrink-0"
+            className="text-hitl/70 hover:text-hitl text-xs underline flex-shrink-0"
           >
             Dismiss
           </button>
@@ -185,7 +187,7 @@ export default function RunPage() {
       )}
 
       {resuming && (
-        <div className="flex items-center gap-3 text-violet-400 text-sm bg-violet-950/20 border border-violet-900/40 rounded-lg px-4 py-3">
+        <div className="flex items-center gap-3 text-agent-thinking text-sm bg-agent-thinking/10 border border-agent-thinking/40 rounded-lg px-4 py-3">
           <span className="inline-block animate-spin">⟳</span>
           Pipeline resuming, waiting for the next stage to begin…
         </div>
@@ -196,7 +198,7 @@ export default function RunPage() {
       )}
 
       {status === "failed" && (
-        <div className="border border-red-900 bg-red-950/20 rounded-lg p-5 text-red-400 font-medium">
+        <div className="border border-feedback-error/40 bg-feedback-error/10 rounded-lg p-5 text-feedback-error font-medium">
           This run failed. Check the agent logs above for details.
           {(runError ?? run.error_message) && (
             <p className="mt-2 text-sm font-normal opacity-80">{runError ?? run.error_message}</p>

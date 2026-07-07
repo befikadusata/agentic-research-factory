@@ -21,25 +21,25 @@ export function VerticalSelector({ value, onChange }: Props) {
             type="button"
             onClick={() => onChange(v.key)}
             className={clsx(
-              "relative text-left rounded-xl border p-4 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-violet-500",
+              "relative text-left rounded-lg border p-4 transition-all duration-base ease-standard focus:outline-none focus:ring-2 focus:ring-border-focus",
               selected
-                ? "border-violet-500 bg-violet-950/60 shadow-lg shadow-violet-900/30"
-                : "border-zinc-700 bg-zinc-900/60 hover:border-zinc-500 hover:bg-zinc-800/60"
+                ? "border-agent-active bg-surface-2 shadow-active"
+                : "border-border-subtle bg-surface-2 hover:-translate-y-0.5 hover:bg-surface-3"
             )}
           >
             {selected && (
-              <span className="absolute top-2.5 right-2.5 h-2 w-2 rounded-full bg-violet-400" />
+              <span className="absolute top-3 right-3 text-agent-active" aria-hidden>✓</span>
             )}
-            <div className="text-2xl mb-2">{v.icon}</div>
+            <div className="text-2xl mb-2 text-primary">{v.icon}</div>
             <div
               className={clsx(
                 "text-sm font-semibold mb-1",
-                selected ? "text-violet-200" : "text-zinc-200"
+                selected ? "text-content" : "text-content-secondary"
               )}
             >
               {v.displayName}
             </div>
-            <div className="text-xs text-zinc-400 leading-snug">{v.description}</div>
+            <div className="text-xs text-content-muted leading-snug">{v.description}</div>
           </button>
         );
       })}

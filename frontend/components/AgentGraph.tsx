@@ -11,33 +11,44 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { RunStatus } from "@/lib/types";
-
-type NodeState = "idle" | "running" | "complete" | "error";
-
-import { RUN_STATUS_MAP, PIPELINE } from "@/lib/types";
+import { RUN_STATUS_MAP, PIPELINE, STATUS_TO_AGENT_STATE, type AgentState } from "@/lib/types";
 
 const EDGES: Edge[] = PIPELINE.slice(0, -1).map((n, i) => ({
   id: `e${i}`,
   source: n.id,
   target: PIPELINE[i + 1].id,
-  style: { stroke: "#52525b" },
+  style: { stroke: "var(--node-edge-idle)" },
 }));
 
-function nodeStateFromStatus(status: RunStatus, nodeId: string): NodeState {
+function nodeStateFromStatus(status: RunStatus, nodeId: string): AgentState {
   const order = PIPELINE.map(n => n.id) as string[];
   const idx = order.indexOf(nodeId);
   const activeIdx = RUN_STATUS_MAP[status] ?? 0;
   if (status === "failed") return idx <= activeIdx ? "error" : "idle";
   if (idx < activeIdx)  return "complete";
-  if (idx === activeIdx) return "running";
+  if (idx === activeIdx) return STATUS_TO_AGENT_STATE[status];
   return "idle";
 }
 
-const STATE_STYLES: Record<NodeState, React.CSSProperties> = {
-  idle:     { background: "#27272a", border: "1px solid #52525b", color: "#a1a1aa" },
-  running:  { background: "#1e1b4b", border: "2px solid #7c3aed", color: "#c4b5fd", animation: "pulse 1.5s infinite" },
-  complete: { background: "#14532d", border: "2px solid #16a34a", color: "#86efac" },
-  error:    { background: "#450a0a", border: "2px solid #dc2626", color: "#fca5a5" },
+const STATE_STYLES: Record<AgentState, React.CSSProperties> = {
+  idle:     { background: "var(--color-surface-2)", border: "1px solid var(--node-idle-border)", color: "var(--text-muted)" },
+  active:   { background: "var(--node-active-fill)", border: "1px solid var(--node-active-border)", color: "var(--text-primary)", boxShadow: "var(--node-active-glow)" },
+  thinking: { background: "rgb(var(--rgb-violet) / 0.10)", border: "1px solid var(--color-agent-thinking)", color: "var(--text-primary)" },
+  complete: { background: "rgb(var(--rgb-mint) / 0.12)", border: "1px solid var(--node-complete-border)", color: "var(--color-agent-complete)" },
+  error:    { background: "rgb(var(--rgb-rose) / 0.12)", border: "1px solid var(--node-error-border)", color: "var(--color-agent-error)" },
+  paused:   { background: "rgb(var(--rgb-amber) / 0.12)", border: "1px solid var(--node-paused-border)", color: "var(--color-agent-paused)" },
+};
+
+const STATE_ANIMATION: Partial<Record<AgentState, string>> = {
+  active: "animate-node-pulse",
+  paused: "animate-hitl-breath",
+  error: "animate-node-shake",
+};
+
+const STATE_GLYPH: Partial<Record<AgentState, string>> = {
+  complete: "✓ ",
+  error: "✕ ",
+  paused: "▮▮ ",
 };
 
 interface Props {
@@ -45,15 +56,20 @@ interface Props {
   onNodeClick?: (nodeId: string) => void;
 }
 
+function nodeFor(n: (typeof PIPELINE)[number], i: number, status: RunStatus): Node {
+  const state = nodeStateFromStatus(status, n.id);
+  return {
+    id: n.id,
+    position: { x: i * 160, y: 60 },
+    data: { label: `${STATE_GLYPH[state] ?? ""}${n.label}` },
+    className: `ftm-node ${STATE_ANIMATION[state] ?? ""}`,
+    style: { ...STATE_STYLES[state], borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 500 },
+  };
+}
+
 export function AgentGraph({ status, onNodeClick }: Props) {
   const initialNodes: Node[] = useMemo(
-    () =>
-      PIPELINE.map((n, i) => ({
-        id: n.id,
-        position: { x: i * 160, y: 60 },
-        data: { label: n.label },
-        style: { ...STATE_STYLES[nodeStateFromStatus(status, n.id)], borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 500 },
-      })),
+    () => PIPELINE.map((n, i) => nodeFor(n, i, status)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
@@ -62,23 +78,11 @@ export function AgentGraph({ status, onNodeClick }: Props) {
   const [edges, , onEdgesChange] = useEdgesState(EDGES);
 
   useEffect(() => {
-    setNodes((prev) =>
-      prev.map((n) => ({
-        ...n,
-        style: {
-          ...STATE_STYLES[nodeStateFromStatus(status, n.id)],
-          borderRadius: 8,
-          padding: "8px 14px",
-          fontSize: 13,
-          fontWeight: 500,
-        },
-      }))
-    );
+    setNodes(PIPELINE.map((n, i) => nodeFor(n, i, status)));
   }, [status, setNodes]);
 
   return (
-    <div style={{ height: 180 }} className="rounded-xl border border-zinc-800 overflow-hidden">
-      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }`}</style>
+    <div style={{ height: 180 }} className="rounded-xl border border-border-subtle overflow-hidden bg-surface-2">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -92,7 +96,7 @@ export function AgentGraph({ status, onNodeClick }: Props) {
         panOnDrag={false}
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#27272a" gap={20} />
+        <Background color="var(--color-border-subtle)" gap={20} />
       </ReactFlow>
     </div>
   );

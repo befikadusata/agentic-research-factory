@@ -2,11 +2,272 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+/* Fonts are loaded via next/font in app/layout.tsx (Inter + JetBrains Mono),
+   which sets --font-sans / --font-mono via className variables on <html>. */
+
+/* ════════════════════════════════════════════════════════════════════
+   Factotum design tokens — see docs/design/factotum-{design,implementation}.md
+   Three layers: base (raw hex) → semantic (themeable) → component (scoped).
+   Components must read semantic/component tokens only, never base directly.
+   ════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── BASE: Obsidian / navy spine ───────────────────────── */
+  --base-obsidian-990: #04060A;
+  --base-obsidian-950: #070B11;
+  --base-obsidian-900: #0A0F17;
+  --base-obsidian-850: #0E141E;
+  --base-obsidian-800: #131B27;
+  --base-obsidian-750: #19222F;
+  --base-obsidian-700: #212C3B;
+  --base-obsidian-650: #2B3648;
+  --base-obsidian-600: #38465B;
+
+  /* ── BASE: Cyan — electric primary ─────────────────────── */
+  --base-cyan-300: #7FF3FB;
+  --base-cyan-400: #3DE3F0;
+  --base-cyan-500: #14C6D9;
+  --base-cyan-600: #0C9DB0;
+  --base-cyan-700: #0A7C8C;
+
+  /* ── BASE: Violet — agent activity ─────────────────────── */
+  --base-violet-300: #C9B8FF;
+  --base-violet-400: #A38BF5;
+  --base-violet-500: #8467E8;
+  --base-violet-600: #6A4FCB;
+
+  /* ── BASE: Amber — HITL / human turn ───────────────────── */
+  --base-amber-300: #F7D9A3;
+  --base-amber-400: #E9B25C;
+  --base-amber-500: #D6963C;
+  --base-amber-600: #B4762A;
+
+  /* ── BASE: Cool gray / neutral ──────────────────────────── */
+  --base-gray-050: #E9EEF4;
+  --base-gray-100: #D4DCE6;
+  --base-gray-200: #B4C0CE;
+  --base-gray-300: #93A2B4;
+  --base-gray-400: #6F8093;
+  --base-gray-500: #556575;
+  --base-gray-600: #3E4C5C;
+
+  /* ── BASE: Feedback ─────────────────────────────────────── */
+  --base-mint-400: #3FD69A;
+  --base-rose-400: #F26478;
+
+  /* ── BASE: Agent identity (fixed, muted) ────────────────── */
+  --base-agent-supervisor: #5FC7D4;
+  --base-agent-strategist: #A38BF5;
+  --base-agent-researcher: #6BA8E0;
+  --base-agent-analyst:    #58C6A6;
+  --base-agent-reviewer:   #C9A96A;
+  --base-agent-writer:     #B58BD0;
+  --base-agent-editor:     #7E93C4;
+
+  /* ── SEMANTIC: Surface hierarchy (5 levels) ─────────────── */
+  --color-surface-0: var(--base-obsidian-990);
+  --color-surface-1: var(--base-obsidian-900);
+  --color-surface-2: var(--base-obsidian-850);
+  --color-surface-3: var(--base-obsidian-800);
+  --color-surface-4: var(--base-obsidian-750);
+
+  --color-border-subtle: var(--base-obsidian-700);
+  --color-border-strong: var(--base-obsidian-600);
+  --color-border-focus:  var(--base-cyan-400);
+
+  /* ── SEMANTIC: Text ──────────────────────────────────────── */
+  --text-primary:   var(--base-gray-050);
+  --text-secondary: var(--base-gray-300);
+  --text-muted:     var(--base-gray-500);
+  --text-inverse:   var(--base-obsidian-950);
+  --text-link:      var(--base-cyan-400);
+
+  /* ── SEMANTIC: Primary / brand ───────────────────────────── */
+  --color-primary:       var(--base-cyan-400);
+  --color-primary-hover: var(--base-cyan-300);
+  --color-primary-press: var(--base-cyan-500);
+  --color-on-primary:    var(--base-obsidian-950);
+
+  /* ── SEMANTIC: Agent status states ───────────────────────── */
+  --color-agent-idle:     var(--base-gray-500);
+  --color-agent-active:   var(--base-cyan-400);
+  --color-agent-thinking: var(--base-violet-400);
+  --color-agent-complete: var(--base-mint-400);
+  --color-agent-error:    var(--base-rose-400);
+  --color-agent-paused:   var(--base-amber-400);
+
+  /* ── SEMANTIC: Feedback palette ──────────────────────────── */
+  --color-success: var(--base-mint-400);
+  --color-error:   var(--base-rose-400);
+  --color-warning: var(--base-amber-400);
+  --color-info:    var(--base-cyan-400);
+
+  /* ── SEMANTIC: HITL / human-turn accents ─────────────────── */
+  --color-hitl:       var(--base-amber-400);
+  --color-hitl-quiet: var(--base-amber-500);
+  --color-hitl-glow:  210 178 92;
+
+  /* ── SEMANTIC: RGB triplets — required so Tailwind's opacity
+     modifiers (bg-primary/10, bg-agent-thinking/10, border-hitl/30…)
+     work. A plain `var(--color-x)` hex string can't be combined with
+     a /NN modifier; only `rgb(var(--rgb-x) / <alpha-value>)` can. ── */
+  --rgb-cyan:   61 227 240;   /* cyan-400  → primary, agent-active, info   */
+  --rgb-violet: 163 139 245;  /* violet-400 → agent-thinking               */
+  --rgb-mint:   63 214 154;   /* mint-400  → agent-complete, success       */
+  --rgb-rose:   242 100 120;  /* rose-400  → agent-error, error            */
+  --rgb-amber:  233 178 92;   /* amber-400 → agent-paused, hitl, warning   */
+
+  /* ── SEMANTIC: Elevation ──────────────────────────────────── */
+  --shadow-hairline: inset 0 0 0 1px rgb(56 70 91 / 0.40);
+  --glow-active: 0 0 0 1px var(--base-cyan-400),
+                 0 0 16px -2px rgb(var(--rgb-cyan) / 0.45);
+  --glow-hitl:   0 0 0 1px var(--base-amber-400),
+                 0 0 24px -4px rgb(var(--rgb-amber) / 0.35);
+
+  /* ── SEMANTIC: Radii ──────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* ── SEMANTIC: Type ───────────────────────────────────────── */
+  --font-sans: "Inter", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* ── COMPONENT: Agent node ────────────────────────────────── */
+  --node-idle-border:     var(--color-agent-idle);
+  --node-active-border:   var(--color-agent-active);
+  --node-active-fill:     rgb(var(--rgb-cyan) / 0.10);
+  --node-active-glow:     var(--glow-active);
+  --node-complete-border: var(--color-agent-complete);
+  --node-error-border:    var(--color-agent-error);
+  --node-paused-border:   var(--color-agent-paused);
+  --node-edge-idle:       var(--color-border-strong);
+  --node-edge-done:       var(--base-cyan-700);
+  --node-edge-dot:        var(--base-cyan-400);
+
+  /* ── COMPONENT: HITL card ─────────────────────────────────── */
+  --hitl-surface:  var(--color-surface-2);
+  --hitl-border:   var(--color-hitl);
+  --hitl-glow:     var(--glow-hitl);
+  --hitl-eyebrow:  var(--color-hitl);
+  --hitl-focus:    var(--color-hitl);
+  --hitl-backdrop: rgb(4 6 10 / 0.55);
+
+  /* ── COMPONENT: Log stream ────────────────────────────────── */
+  --log-surface:   var(--color-surface-1);
+  --log-timestamp: var(--text-muted);
+  --log-caret:     var(--color-primary);
+  --log-scanline:  rgb(255 255 255 / 0.03);
+
+  /* ── COMPONENT: Citation pill ─────────────────────────────── */
+  --cite-surface: var(--color-surface-3);
+  --cite-border:  var(--base-cyan-700);
+  --cite-index:   var(--color-primary);
+  --cite-broken:  var(--color-error);
+
+  /* ── COMPONENT: Cost widget ───────────────────────────────── */
+  --cost-text:  var(--text-secondary);
+  --cost-glyph: var(--color-primary);
+  --cost-warn:  var(--color-warning);
+
+  /* ── MOTION ───────────────────────────────────────────────── */
+  --motion-instant:    80ms;
+  --motion-fast:       140ms;
+  --motion-base:       220ms;
+  --motion-slow:       400ms;
+  --motion-deliberate: 700ms;
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit:     cubic-bezier(0.4, 0, 1, 1);
+
+  --loop-pulse: 1.6s;
+  --loop-breath: 2.4s;
+  --loop-caret: 1.1s;
+  --edge-travel: 900ms;
+}
+
+/* ── Light mode (optional override, opt in via html.light) ─── */
+:root.light {
+  --color-surface-0: #EEF2F7;
+  --color-surface-1: #F7FAFC;
+  --color-surface-2: #FFFFFF;
+  --color-surface-3: #F1F5F9;
+  --color-surface-4: #FFFFFF;
+
+  --color-border-subtle: #D9E1EA;
+  --color-border-strong: #C2CDD9;
+
+  --text-primary:   #0E141E;
+  --text-secondary: #45566A;
+  --text-muted:     #6F8093;
+  --text-inverse:   #F7FAFC;
+
+  --color-primary:      var(--base-cyan-600);
+  --color-agent-active: var(--base-cyan-600);
+  --color-agent-paused: var(--base-amber-500);
+  --color-hitl:         var(--base-amber-500);
+
+  --shadow-hairline: inset 0 0 0 1px rgb(194 205 217 / 0.7);
+}
 
 @layer base {
   body {
     @apply font-sans;
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    background-color: var(--color-surface-0);
+    color: var(--text-primary);
   }
 }
+
+/* ── Keyframes ─────────────────────────────────────────────── */
+@keyframes ftm-node-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--base-cyan-400),
+                         0 0 0 0 rgb(var(--rgb-cyan) / 0.55); }
+  50%      { box-shadow: 0 0 0 1px var(--base-cyan-400),
+                         0 0 18px 3px rgb(var(--rgb-cyan) / 0.35); }
+}
+@keyframes ftm-hitl-breath {
+  0%, 100% { box-shadow: 0 0 0 1px var(--base-amber-400),
+                         0 0 14px -2px rgb(var(--rgb-amber) / 0.25); }
+  50%      { box-shadow: 0 0 0 1px var(--base-amber-400),
+                         0 0 30px -2px rgb(var(--rgb-amber) / 0.45); }
+}
+@keyframes ftm-edge-dot   { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+@keyframes ftm-log-in     { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes ftm-caret      { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes ftm-hitl-enter { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes ftm-node-shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-3px)} 75%{transform:translateX(3px)} }
+
+/* ── Reduced motion: kill loops & transitions, keep state ───── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .ftm-scanline { display: none; }
+  .ftm-node[data-state="active"] { box-shadow: var(--glow-active); }
+  .ftm-edge[data-flowing="true"] { background: var(--base-cyan-400); }
+}
+
+/* ── Traveling-dot edge (Agent Pipeline Visualizer) ──────────── */
+.ftm-edge { position: relative; height: 1px; background: var(--node-edge-idle); flex: 1; }
+.ftm-edge[data-flowing="true"]::after {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 5px; height: 5px;
+  border-radius: 999px; background: var(--node-edge-dot);
+  box-shadow: 0 0 8px 1px rgb(var(--rgb-cyan) / 0.6);
+  offset-path: path("M0,0 H400");
+  animation: ftm-edge-dot var(--edge-travel) linear infinite;
+}
+.ftm-edge[data-done="true"] { background: var(--node-edge-done); }
+
+/* ── Log stream scanline texture (never animated) ────────────── */
+.ftm-scanline::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom, transparent 0 1px, var(--log-scanline) 1px 2px);
+}
+
+/* ── HITL open: freeze pipeline motion behind the modal ──────── */
+[data-paused="true"] .ftm-node { animation: none; }

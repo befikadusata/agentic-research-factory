@@ -71,20 +71,35 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
   return (
     <Dialog.Root open>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/60 z-40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl bg-zinc-900 rounded-xl shadow-2xl p-6 border border-zinc-700">
-          <Dialog.Title className="text-xl font-bold mb-1">
-            ⏸ {copy.title}
-          </Dialog.Title>
-          <Dialog.Description className="text-zinc-400 text-sm mb-4">
+        <Dialog.Overlay
+          className="fixed inset-0 z-40"
+          style={{ background: "var(--hitl-backdrop)" }}
+        />
+        <Dialog.Content
+          className="ftm-hitl fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl
+                     rounded-lg p-6 animate-hitl-enter shadow-hitl"
+          style={{ background: "var(--hitl-surface)" }}
+        >
+          <header className="mb-4 flex items-center gap-2 border-b border-hitl/30 pb-3">
+            <span className="text-hitl" aria-hidden>▮▮</span>
+            <Dialog.Title asChild>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-hitl">
+                Checkpoint · {copy.title}
+              </span>
+            </Dialog.Title>
+          </header>
+          <Dialog.Description className="text-content-secondary text-sm mb-4">
             {copy.description}
           </Dialog.Description>
 
-          <div className="bg-zinc-800 rounded-lg p-4 max-h-64 overflow-y-auto text-sm mb-4 prose prose-invert prose-sm max-w-none">
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-content-muted">
+            Draft summary
+          </p>
+          <div className="bg-surface-3 rounded-md p-4 max-h-64 overflow-y-auto text-sm mb-5 prose prose-invert prose-sm max-w-none text-content-secondary">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{stageSummary}</ReactMarkdown>
           </div>
 
-          <label className="block text-sm font-medium mb-1 text-zinc-300">
+          <label className="block text-[11px] font-semibold uppercase tracking-wide mb-1 text-content-muted">
             {copy.feedbackLabel}
           </label>
           <div className="flex flex-wrap gap-2 mb-2">
@@ -92,7 +107,7 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
               <button
                 key={t}
                 onClick={() => setInstruction((prev) => prev ? `${prev}\n${t}` : t)}
-                className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-1 rounded border border-zinc-700"
+                className="text-xs bg-surface-3 hover:bg-surface-4 text-content-secondary px-2 py-1 rounded-sm border border-border-subtle transition-colors"
               >
                 {t}
               </button>
@@ -102,18 +117,24 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
             placeholder="e.g. Focus more on pricing strategy and enterprise segment"
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-sm resize-none h-20 mb-4 text-zinc-100 placeholder-zinc-500"
+            rows={3}
+            className="w-full resize-none rounded-md bg-surface-3 p-3 text-sm mb-6 text-content
+                       placeholder:text-content-muted outline-none ring-1 ring-border-subtle
+                       focus:ring-2 focus:ring-hitl"
           />
 
-          {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+          {error && <p className="text-feedback-error text-sm mb-3">{error}</p>}
 
           <div className="flex justify-end">
             <button
               onClick={handleApprove}
               disabled={loading}
-              className="bg-violet-600 hover:bg-violet-700 text-white font-medium px-6 py-2 rounded-lg disabled:opacity-50"
+              className="rounded-md bg-primary px-6 py-2 text-sm font-semibold text-primary-on
+                         hover:bg-primary-hover transition-colors disabled:opacity-50
+                         focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2
+                         focus:ring-offset-surface-2"
             >
-              {loading ? "Resuming…" : copy.cta}
+              {loading ? "Resuming…" : `${copy.cta} →`}
             </button>
           </div>
         </Dialog.Content>

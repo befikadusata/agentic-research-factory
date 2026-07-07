@@ -20,16 +20,16 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, [status]);
 
-  if (status === "loading") return <p className="text-zinc-500 p-8">Loading…</p>;
+  if (status === "loading") return <p className="text-content-muted p-8">Loading…</p>;
 
   if (!session) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-        <h1 className="text-4xl font-bold mb-4 text-zinc-100">Research Factory</h1>
-        <p className="text-zinc-400 mb-8 max-w-md">Autonomous research powered by intelligent agents. Sign in to get started.</p>
+        <h1 className="text-4xl font-bold mb-4 text-content">Research Factory</h1>
+        <p className="text-content-secondary mb-8 max-w-md">Autonomous research powered by intelligent agents. Sign in to get started.</p>
         <button
           onClick={() => signIn("google")}
-          className="bg-cta hover:bg-green-600 text-white font-medium px-8 py-3 rounded-lg transition-colors duration-200"
+          className="bg-primary hover:bg-primary-hover text-primary-on font-medium px-8 py-3 rounded-md transition-colors duration-base"
         >
           Sign in with Google
         </button>
@@ -40,21 +40,21 @@ export default function Dashboard() {
   return (
     <div className="max-w-4xl">
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold text-zinc-100">Recent Runs</h1>
+        <h1 className="text-3xl font-bold text-content">Recent Runs</h1>
         <a
           href="/new"
-          className="bg-cta hover:bg-green-600 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors duration-200 flex items-center gap-2"
+          className="bg-primary hover:bg-primary-hover text-primary-on text-sm font-medium px-5 py-2.5 rounded-md transition-colors duration-base flex items-center gap-2"
         >
           Create New Run
         </a>
       </div>
 
-      {loading && <p className="text-zinc-500">Loading runs…</p>}
-      {error && <p className="text-red-400 bg-red-900/20 p-4 rounded-lg">{error}</p>}
+      {loading && <p className="text-content-muted">Loading runs…</p>}
+      {error && <p className="text-feedback-error bg-feedback-error/10 p-4 rounded-lg">{error}</p>}
       {!loading && !error && runs.length === 0 && (
-        <div className="border-2 border-dashed border-zinc-800 rounded-xl p-16 text-center text-zinc-500">
+        <div className="border-2 border-dashed border-border-subtle rounded-lg p-16 text-center text-content-muted">
           <p className="text-lg mb-4">No research runs yet.</p>
-          <a href="/new" className="text-primary-500 hover:text-primary-400 font-medium">Create your first research run →</a>
+          <a href="/new" className="text-primary hover:text-primary-hover font-medium">Create your first research run →</a>
         </div>
       )}
 

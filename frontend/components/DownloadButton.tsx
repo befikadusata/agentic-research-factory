@@ -10,11 +10,11 @@ export function DownloadButton({ onClick, label, variant = "secondary", disabled
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`inline-block text-sm font-medium px-4 py-2 rounded-lg transition-colors
+      className={`inline-block text-sm font-medium px-4 py-2 rounded-md transition-colors duration-base
         disabled:opacity-50 disabled:cursor-not-allowed
         ${variant === "primary"
-          ? "bg-violet-600 hover:bg-violet-700 text-white"
-          : "border border-zinc-600 hover:bg-zinc-700 text-zinc-200"}`}
+          ? "bg-primary hover:bg-primary-hover text-primary-on"
+          : "border border-border-strong hover:bg-surface-3 text-content-secondary"}`}
     >
       {label}
     </button>

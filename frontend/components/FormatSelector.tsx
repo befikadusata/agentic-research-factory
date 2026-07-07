@@ -21,13 +21,13 @@ export function FormatSelector({ value, onChange }: Props) {
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
-          className={`text-left p-4 rounded-xl border transition-colors
+          className={`text-left p-4 rounded-lg border transition-colors duration-base
             ${value === opt.value
-              ? "border-violet-500 bg-violet-950/30"
-              : "border-zinc-700 hover:border-zinc-500"}`}
+              ? "border-agent-active bg-surface-2 shadow-active"
+              : "border-border-subtle bg-surface-2 hover:border-border-strong"}`}
         >
-          <p className="font-medium text-sm">{opt.label}</p>
-          <p className="text-zinc-500 text-xs mt-1">{opt.desc}</p>
+          <p className="font-medium text-sm text-content">{opt.label}</p>
+          <p className="text-content-muted text-xs mt-1">{opt.desc}</p>
         </button>
       ))}
     </div>

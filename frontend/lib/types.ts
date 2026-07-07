@@ -180,16 +180,41 @@ export const RUN_STATUS_MAP: Record<RunStatus, number> = {
   failed:                     -1,
 };
 
-export const STATUS_COLORS: Record<RunStatus, string> = {
-  pending:                    "bg-status-pending-bg text-status-pending-text",
-  researching:                "bg-status-researching-bg text-status-researching-text",
-  awaiting_hitl:              "bg-status-awaiting_hitl-bg text-status-awaiting_hitl-text",
-  awaiting_research_approval: "bg-status-awaiting_hitl-bg text-status-awaiting_hitl-text",
-  analyzing:                  "bg-status-researching-bg text-status-researching-text",
-  awaiting_analysis_approval: "bg-status-awaiting_hitl-bg text-status-awaiting_hitl-text",
-  writing:                    "bg-status-writing-bg text-status-writing-text",
-  awaiting_final_approval:    "bg-status-awaiting_hitl-bg text-status-awaiting_hitl-text",
-  complete:                   "bg-status-complete-bg text-status-complete-text",
-  failed:                     "bg-status-failed-bg text-status-failed-text",
+/** Factotum's six-state agent model — see docs/design/factotum-design.md §2.3/§5.1. */
+export type AgentState = "idle" | "active" | "thinking" | "complete" | "error" | "paused";
+
+export const STATUS_TO_AGENT_STATE: Record<RunStatus, AgentState> = {
+  pending:                    "idle",
+  researching:                "active",
+  awaiting_hitl:              "paused",
+  awaiting_research_approval: "paused",
+  analyzing:                  "active",
+  awaiting_analysis_approval: "paused",
+  writing:                    "thinking",
+  awaiting_final_approval:    "paused",
+  complete:                   "complete",
+  failed:                     "error",
 };
+
+export const AGENT_STATE_GLYPH: Record<AgentState, string> = {
+  idle: "",
+  active: "",
+  thinking: "◐",
+  complete: "✓",
+  error: "✕",
+  paused: "▮▮",
+};
+
+export const AGENT_STATE_BADGE: Record<AgentState, string> = {
+  idle:     "bg-agent-idle/15 text-agent-idle",
+  active:   "bg-agent-active/15 text-agent-active",
+  thinking: "bg-agent-thinking/15 text-agent-thinking",
+  complete: "bg-agent-complete/15 text-agent-complete",
+  error:    "bg-agent-error/15 text-agent-error",
+  paused:   "bg-agent-paused/15 text-agent-paused",
+};
+
+export function statusBadgeClass(status: RunStatus): string {
+  return AGENT_STATE_BADGE[STATUS_TO_AGENT_STATE[status]];
+}
 
