@@ -84,6 +84,7 @@ class Run(Base):
     topic           = Column(Text, nullable=False)
     format          = Column(String, nullable=False)
     status          = Column(SAEnum(RunStatus), default=RunStatus.pending, nullable=False)
+    failed_at_status = Column(SAEnum(RunStatus), nullable=True)
     vertical        = Column(String, nullable=True, index=True)
     vertical_inputs = Column(JSON, default=dict)
     doc_paths       = Column(JSON, default=list)

@@ -23,7 +23,7 @@ export function RunCard({ run }: { run: Run }) {
         </span>
       </div>
       <div className="mt-4">
-        <PipelineProgress status={run.status} />
+        <PipelineProgress status={run.status} failedAtStatus={run.failed_at_status} />
       </div>
       <div className="flex items-center justify-between mt-3">
         <div className="flex items-center gap-2 flex-wrap">

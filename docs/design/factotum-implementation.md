@@ -708,15 +708,34 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
       existing component to retrofit — not built, not needed yet.
 
       Note found while visually verifying 7.2 (Playwright screenshot
-      across all run statuses): for `status: "failed"` runs, every
-      segment renders idle instead of marking the failure point, because
-      `RUN_STATUS_MAP.failed = -1` and `pipelineNodeState`'s `idx <=
-      activeIdx` check can never be true. This is a pre-existing quirk
-      inherited unchanged from `AgentGraph.tsx` (same logic, just moved
-      into the shared helper) — not introduced by 7.2, and not fixed
-      here since it's out of scope for this pass. The ✕ FAILED badge is
-      currently the only failure signal; the bar/graph itself gives no
-      indication of where the run failed.
+      across all run statuses), since fixed: for `status: "failed"` runs,
+      every segment rendered idle instead of marking the failure point,
+      because `RUN_STATUS_MAP.failed = -1` and `pipelineNodeState`'s
+      `idx <= activeIdx` check could never be true — a pre-existing quirk
+      inherited unchanged from `AgentGraph.tsx`. Root cause: the backend
+      `Run` model only ever stored the terminal `status`, with no record
+      of which stage was active at the moment of failure. Fixed with a
+      new `runs.failed_at_status` column (migration
+      `15fd6ff9382d_add_failed_at_status_to_runs`, reusing the existing
+      `runstatus` Postgres enum type), populated in
+      `run_service._set_status()` by capturing the run's current status
+      right before it's overwritten to `failed`. Exposed on
+      `RunResponse`/`RunDetailResponse` (so both the dashboard list and
+      the run-detail page get it), threaded through
+      `pipelineNodeState(status, nodeId, failedAtStatus)` and both call
+      sites (`RunCard`/`PipelineProgress`, `app/runs/[id]/page.tsx`/
+      `AgentGraph`). The run-detail page also re-fetches the run on the
+      SSE `error` event (mirroring what it already did on `complete`),
+      since the backend commits `failed_at_status` before emitting that
+      event — so a run watched failing live shows the correct node
+      without needing a reload. Runs that failed before this migration
+      (`failed_at_status` still `null`) fall back to the old all-idle
+      rendering rather than guessing. Covered by
+      `test_set_status_records_stage_a_run_failed_at`,
+      `test_set_status_failed_twice_keeps_first_failure_stage`, and
+      `test_run_detail_exposes_failed_at_status` in
+      `backend/tests/test_runs.py`; verified visually via Playwright
+      screenshots of both the dashboard list and the run-detail graph.
 - [x] Verify contrast: primary text ≥ 7:1, secondary ≥ 4.5:1 on every surface.
       Computed WCAG ratios for every text/surface pair. `text-primary`
       (14.8–17.4:1) and `text-secondary` (6.65–7.79:1) clear their targets

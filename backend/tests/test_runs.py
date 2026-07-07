@@ -151,3 +151,66 @@ async def test_run_detail_citations_empty_when_no_metrics(client, auth_as, db_se
     assert resp.status_code == 200
     assert resp.json()["citations"] == []
 
+
+@pytest.mark.asyncio
+async def test_set_status_records_stage_a_run_failed_at(db_session):
+    """_set_status must capture the last active stage into failed_at_status
+    when transitioning to failed, so the UI can show *where* a run failed
+    instead of every pipeline node going blank (RunStatus.failed has no
+    ordinal position of its own in RUN_STATUS_MAP)."""
+    from services.run_service import _set_status
+
+    run = Run(user_id="stage-user@example.com", topic="t", format="report", doc_paths=[])
+    db_session.add(run)
+    await db_session.commit()
+
+    await _set_status(run, RunStatus.researching, db_session)
+    assert run.failed_at_status is None
+
+    await _set_status(run, RunStatus.failed, db_session)
+    assert run.status == RunStatus.failed
+    assert run.failed_at_status == RunStatus.researching
+
+
+@pytest.mark.asyncio
+async def test_set_status_failed_twice_keeps_first_failure_stage(db_session):
+    """A second _set_status(..., failed, ...) call (e.g. a retry path) must not
+    clobber failed_at_status with RunStatus.failed itself."""
+    from services.run_service import _set_status
+
+    run = Run(user_id="stage-user-2@example.com", topic="t", format="report", doc_paths=[])
+    db_session.add(run)
+    await db_session.commit()
+
+    await _set_status(run, RunStatus.writing, db_session)
+    await _set_status(run, RunStatus.failed, db_session)
+    await _set_status(run, RunStatus.failed, db_session)
+
+    assert run.failed_at_status == RunStatus.writing
+
+
+@pytest.mark.asyncio
+async def test_run_detail_exposes_failed_at_status(client, auth_as, db_session):
+    uid = "failed-stage-user@example.com"
+    auth_as(uid)
+    run = Run(
+        user_id=uid,
+        topic="Failure point test",
+        format="report",
+        status=RunStatus.failed,
+        failed_at_status=RunStatus.analyzing,
+        doc_paths=[],
+    )
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(run)
+
+    resp = await client.get(f"/runs/{run.id}")
+    assert resp.status_code == 200
+    assert resp.json()["failed_at_status"] == "analyzing"
+
+    list_resp = await client.get("/runs")
+    assert list_resp.status_code == 200
+    listed = next(r for r in list_resp.json() if r["id"] == str(run.id))
+    assert listed["failed_at_status"] == "analyzing"
+

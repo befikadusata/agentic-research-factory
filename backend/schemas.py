@@ -53,6 +53,7 @@ class RunResponse(BaseModel):
     topic: str
     format: str
     status: RunStatus
+    failed_at_status: Optional[RunStatus] = None
     workspace_id: Optional[UUID]
     vertical: Optional[str] = None
     vertical_inputs: dict[str, Any] = Field(default_factory=dict)

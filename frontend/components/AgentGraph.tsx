@@ -43,11 +43,12 @@ const STATE_GLYPH: Partial<Record<AgentState, string>> = {
 
 interface Props {
   status: RunStatus;
+  failedAtStatus?: RunStatus | null;
   onNodeClick?: (nodeId: string) => void;
 }
 
-function nodeFor(n: (typeof PIPELINE)[number], i: number, status: RunStatus): Node {
-  const state = pipelineNodeState(status, n.id);
+function nodeFor(n: (typeof PIPELINE)[number], i: number, status: RunStatus, failedAtStatus?: RunStatus | null): Node {
+  const state = pipelineNodeState(status, n.id, failedAtStatus);
   return {
     id: n.id,
     position: { x: i * 160, y: 60 },
@@ -57,9 +58,9 @@ function nodeFor(n: (typeof PIPELINE)[number], i: number, status: RunStatus): No
   };
 }
 
-export function AgentGraph({ status, onNodeClick }: Props) {
+export function AgentGraph({ status, failedAtStatus, onNodeClick }: Props) {
   const initialNodes: Node[] = useMemo(
-    () => PIPELINE.map((n, i) => nodeFor(n, i, status)),
+    () => PIPELINE.map((n, i) => nodeFor(n, i, status, failedAtStatus)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
@@ -68,8 +69,8 @@ export function AgentGraph({ status, onNodeClick }: Props) {
   const [edges, , onEdgesChange] = useEdgesState(EDGES);
 
   useEffect(() => {
-    setNodes(PIPELINE.map((n, i) => nodeFor(n, i, status)));
-  }, [status, setNodes]);
+    setNodes(PIPELINE.map((n, i) => nodeFor(n, i, status, failedAtStatus)));
+  }, [status, failedAtStatus, setNodes]);
 
   return (
     <div style={{ height: 180 }} className="rounded-xl border border-border-subtle overflow-hidden bg-surface-2">

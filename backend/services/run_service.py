@@ -54,6 +54,8 @@ async def _log_token_usages(run_id: str, token_usages: list):
 
 
 async def _set_status(run: Run, status: RunStatus, db: AsyncSession):
+    if status == RunStatus.failed and run.status != RunStatus.failed:
+        run.failed_at_status = run.status
     run.status = status
     run.updated_at = datetime.now(timezone.utc)
     db.add(run)

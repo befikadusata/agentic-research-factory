@@ -138,6 +138,8 @@ export interface Run {
   topic: string;
   format: OutputFormat;
   status: RunStatus;
+  /** Last active stage before the run failed. Only set when status is "failed". */
+  failed_at_status?: RunStatus | null;
   vertical?: Vertical | null;
   vertical_inputs?: Record<string, string>;
   created_at: string;
@@ -222,12 +224,27 @@ export function statusBadgeClass(status: RunStatus): string {
   return AGENT_STATE_BADGE[STATUS_TO_AGENT_STATE[status]];
 }
 
-/** Derives a pipeline node's visual state from the run's overall status. */
-export function pipelineNodeState(status: RunStatus, nodeId: string): AgentState {
+/**
+ * Derives a pipeline node's visual state from the run's overall status.
+ * `failedAtStatus` (Run.failed_at_status) pinpoints which stage was active when
+ * a "failed" run actually failed — without it, the failure point is unknown
+ * (e.g. runs that failed before this field existed) and every node stays idle.
+ */
+export function pipelineNodeState(
+  status: RunStatus,
+  nodeId: string,
+  failedAtStatus?: RunStatus | null
+): AgentState {
   const order = PIPELINE.map((n) => n.id) as string[];
   const idx = order.indexOf(nodeId);
+  if (status === "failed") {
+    if (!failedAtStatus) return "idle";
+    const failedIdx = RUN_STATUS_MAP[failedAtStatus] ?? 0;
+    if (idx < failedIdx) return "complete";
+    if (idx === failedIdx) return "error";
+    return "idle";
+  }
   const activeIdx = RUN_STATUS_MAP[status] ?? 0;
-  if (status === "failed") return idx <= activeIdx ? "error" : "idle";
   if (idx < activeIdx) return "complete";
   if (idx === activeIdx) return STATUS_TO_AGENT_STATE[status];
   return "idle";

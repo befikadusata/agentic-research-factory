@@ -82,6 +82,7 @@ export default function RunPage() {
       } else if (parsed.type === "error") {
           setStatus("failed");
           setRunError(parsed.data.message ?? null);
+          getRun(id).then(setRun);
       }
     };
 
@@ -169,7 +170,7 @@ export default function RunPage() {
         </div>
       )}
 
-      {status !== null && <AgentGraph status={status} />}
+      {status !== null && <AgentGraph status={status} failedAtStatus={run.failed_at_status} />}
 
       <AgentLog logs={logs} />
 

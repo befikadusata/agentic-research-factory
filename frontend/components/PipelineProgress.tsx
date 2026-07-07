@@ -10,8 +10,8 @@ const STATE_BAR_CLASS: Record<AgentState, string> = {
 };
 
 /** Compact, per-run pipeline progress — one segment per stage. See docs/design/factotum-implementation.md §7.2. */
-export function PipelineProgress({ status }: { status: RunStatus }) {
-  const activeIdx = Math.max(RUN_STATUS_MAP[status] ?? 0, 0);
+export function PipelineProgress({ status, failedAtStatus }: { status: RunStatus; failedAtStatus?: RunStatus | null }) {
+  const activeIdx = Math.max(RUN_STATUS_MAP[status === "failed" ? (failedAtStatus ?? status) : status] ?? 0, 0);
 
   return (
     <div
@@ -23,7 +23,7 @@ export function PipelineProgress({ status }: { status: RunStatus }) {
       aria-valuemax={PIPELINE.length - 1}
     >
       {PIPELINE.map((n) => {
-        const state = pipelineNodeState(status, n.id);
+        const state = pipelineNodeState(status, n.id, failedAtStatus);
         return (
           <span
             key={n.id}
