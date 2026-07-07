@@ -1,6 +1,7 @@
 import { AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, VERTICALS, statusBadgeClass } from "@/lib/types";
 import type { Run } from "@/lib/types";
 import Link from "next/link";
+import { PipelineProgress } from "@/components/PipelineProgress";
 
 export function RunCard({ run }: { run: Run }) {
   const vDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) : null;
@@ -21,7 +22,10 @@ export function RunCard({ run }: { run: Run }) {
           {run.status.replaceAll("_", " ")}
         </span>
       </div>
-      <div className="flex items-center justify-between mt-4">
+      <div className="mt-4">
+        <PipelineProgress status={run.status} />
+      </div>
+      <div className="flex items-center justify-between mt-3">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-content-muted text-xs">
             {new Date(run.created_at).toLocaleDateString()}

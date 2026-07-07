@@ -222,3 +222,14 @@ export function statusBadgeClass(status: RunStatus): string {
   return AGENT_STATE_BADGE[STATUS_TO_AGENT_STATE[status]];
 }
 
+/** Derives a pipeline node's visual state from the run's overall status. */
+export function pipelineNodeState(status: RunStatus, nodeId: string): AgentState {
+  const order = PIPELINE.map((n) => n.id) as string[];
+  const idx = order.indexOf(nodeId);
+  const activeIdx = RUN_STATUS_MAP[status] ?? 0;
+  if (status === "failed") return idx <= activeIdx ? "error" : "idle";
+  if (idx < activeIdx) return "complete";
+  if (idx === activeIdx) return STATUS_TO_AGENT_STATE[status];
+  return "idle";
+}
+

@@ -698,11 +698,25 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
       wiring `--font-sans` / `--font-mono`.
 - [~] Build components 7.1–7.8 against semantic/component tokens only.
       Done for the specs with a real counterpart in this app: 7.1 Agent
-      node → `AgentGraph.tsx`, 7.3 HITL checkpoint → `HitlModal.tsx`, 7.4
-      Log stream → `AgentLog.tsx`, 7.5 Playbook selector →
-      `VerticalSelector.tsx`/`FormatSelector.tsx`. 7.2 (progress bar), 7.6
+      node → `AgentGraph.tsx`, 7.2 Pipeline progress bar →
+      `PipelineProgress.tsx` (wired into `RunCard.tsx` on the dashboard;
+      node-state derivation shared with `AgentGraph.tsx` via the new
+      `pipelineNodeState()` helper in `lib/types.ts`), 7.3 HITL checkpoint
+      → `HitlModal.tsx`, 7.4 Log stream → `AgentLog.tsx`, 7.5 Playbook
+      selector → `VerticalSelector.tsx`/`FormatSelector.tsx`. 7.6
       (citation pill), 7.7 (cost widget), 7.8 (tenant switcher) have no
       existing component to retrofit — not built, not needed yet.
+
+      Note found while visually verifying 7.2 (Playwright screenshot
+      across all run statuses): for `status: "failed"` runs, every
+      segment renders idle instead of marking the failure point, because
+      `RUN_STATUS_MAP.failed = -1` and `pipelineNodeState`'s `idx <=
+      activeIdx` check can never be true. This is a pre-existing quirk
+      inherited unchanged from `AgentGraph.tsx` (same logic, just moved
+      into the shared helper) — not introduced by 7.2, and not fixed
+      here since it's out of scope for this pass. The ✕ FAILED badge is
+      currently the only failure signal; the bar/graph itself gives no
+      indication of where the run failed.
 - [x] Verify contrast: primary text ≥ 7:1, secondary ≥ 4.5:1 on every surface.
       Computed WCAG ratios for every text/surface pair. `text-primary`
       (14.8–17.4:1) and `text-secondary` (6.65–7.79:1) clear their targets

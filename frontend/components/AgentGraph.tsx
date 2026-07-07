@@ -11,7 +11,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { RunStatus } from "@/lib/types";
-import { RUN_STATUS_MAP, PIPELINE, STATUS_TO_AGENT_STATE, type AgentState } from "@/lib/types";
+import { PIPELINE, pipelineNodeState, type AgentState } from "@/lib/types";
 
 const EDGES: Edge[] = PIPELINE.slice(0, -1).map((n, i) => ({
   id: `e${i}`,
@@ -19,16 +19,6 @@ const EDGES: Edge[] = PIPELINE.slice(0, -1).map((n, i) => ({
   target: PIPELINE[i + 1].id,
   style: { stroke: "var(--node-edge-idle)" },
 }));
-
-function nodeStateFromStatus(status: RunStatus, nodeId: string): AgentState {
-  const order = PIPELINE.map(n => n.id) as string[];
-  const idx = order.indexOf(nodeId);
-  const activeIdx = RUN_STATUS_MAP[status] ?? 0;
-  if (status === "failed") return idx <= activeIdx ? "error" : "idle";
-  if (idx < activeIdx)  return "complete";
-  if (idx === activeIdx) return STATUS_TO_AGENT_STATE[status];
-  return "idle";
-}
 
 const STATE_STYLES: Record<AgentState, React.CSSProperties> = {
   idle:     { background: "var(--color-surface-2)", border: "1px solid var(--node-idle-border)", color: "var(--text-muted)" },
@@ -57,7 +47,7 @@ interface Props {
 }
 
 function nodeFor(n: (typeof PIPELINE)[number], i: number, status: RunStatus): Node {
-  const state = nodeStateFromStatus(status, n.id);
+  const state = pipelineNodeState(status, n.id);
   return {
     id: n.id,
     position: { x: i * 160, y: 60 },
