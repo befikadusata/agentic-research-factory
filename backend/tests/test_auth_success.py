@@ -60,3 +60,32 @@ async def test_malformed_bearer_token_returns_401(client):
 async def test_missing_authorization_header_returns_401(client):
     r = await client.get("/runs")
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_bearer_scheme_is_case_insensitive(client):
+    token = _make_token({"sub": "user"})
+    for scheme in ("Bearer", "bearer", "BEARER"):
+        r = await client.get("/runs", headers={"Authorization": f"{scheme} {token}"})
+        assert r.status_code == 200, f"scheme {scheme!r} should authenticate"
+
+
+@pytest.mark.asyncio
+async def test_token_without_bearer_prefix_returns_401(client):
+    # A bare token with no scheme must be rejected (RFC 6750 requires "Bearer").
+    token = _make_token({"sub": "user"})
+    r = await client.get("/runs", headers={"Authorization": token})
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_wrong_scheme_returns_401(client):
+    token = _make_token({"sub": "user"})
+    r = await client.get("/runs", headers={"Authorization": f"Basic {token}"})
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_bearer_without_token_returns_401(client):
+    r = await client.get("/runs", headers={"Authorization": "Bearer"})
+    assert r.status_code == 401

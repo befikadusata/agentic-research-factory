@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Enum as SAEnum, JSON, ForeignKey, Integer, Float
+from sqlalchemy import Column, String, DateTime, Text, Enum as SAEnum, JSON, ForeignKey, Integer, Float, func, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 import uuid, enum
@@ -86,16 +86,18 @@ class Run(Base):
     status          = Column(SAEnum(RunStatus), default=RunStatus.pending, nullable=False)
     failed_at_status = Column(SAEnum(RunStatus), nullable=True)
     vertical        = Column(String, nullable=True, index=True)
-    vertical_inputs = Column(JSON, default=dict)
-    doc_paths       = Column(JSON, default=list)
+    vertical_inputs = Column(JSON, default=dict, server_default=text("'{}'::json"))
+    doc_paths       = Column(JSON, default=list, server_default=text("'[]'::json"))
     research_output = Column(Text)
     analysis_output = Column(Text)
     final_output    = Column(Text)
-    logs            = Column(JSON, default=list)
+    logs            = Column(JSON, default=list, server_default=text("'[]'::json"))
     error_message   = Column(Text, nullable=True)
-    metrics         = Column(JSON, default=dict)  # { latency_ms, eval_scores, citation_count }
+    metrics         = Column(JSON, default=dict, server_default=text("'{}'::json"))  # { latency_ms, eval_scores, citation_count }
     costs           = relationship("RunCost", backref="run")
-    created_at      = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at      = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                             server_default=func.now())
     updated_at      = Column(DateTime(timezone=True),
                              default=lambda: datetime.now(timezone.utc),
-                             onupdate=lambda: datetime.now(timezone.utc))
+                             onupdate=lambda: datetime.now(timezone.utc),
+                             server_default=func.now())

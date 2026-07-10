@@ -9,8 +9,10 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> str:
     """Extract user_id from backend bearer token."""
     if not authorization:
         raise HTTPException(401, "Missing auth token")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(401, "Invalid auth token")
     try:
-        token = authorization.replace("Bearer ", "")
         payload = pyjwt.decode(token, settings.BACKEND_JWT_SECRET, algorithms=["HS256"])
         user_id = payload.get("sub") or payload.get("email")
         if not user_id:
