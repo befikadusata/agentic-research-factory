@@ -10,9 +10,15 @@ let cachedAuth: { token: string; expiresAt: number } | null = null;
 const TOKEN_REFRESH_MARGIN = 30 * 1000; // refresh this long before actual expiry
 
 function decodeJwtExpiry(token: string): number {
-  const payload = token.split(".")[1];
-  const { exp } = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-  return exp * 1000;
+  try {
+    const payload = token.split(".")[1];
+    const { exp } = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    return exp * 1000;
+  } catch {
+    // Token isn't a decodable JWT — don't cache it (expire immediately) so the
+    // next call re-fetches, rather than crashing every authenticated request.
+    return 0;
+  }
 }
 
 export async function authHeaders(): Promise<Record<string, string>> {
