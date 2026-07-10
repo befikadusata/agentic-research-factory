@@ -744,11 +744,27 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
       now 4.27–5.01:1 — used for real content like log timestamps, not
       decorative) and `agent-idle` badge text (was 3.20:1, now 4.74:1).
       Light-mode surfaces re-checked too; light `text-muted` bumped from
-      `gray-400` to `gray-500` (was 3.6–4.05:1, now 5.33–5.99:1). Note:
-      light-mode `agent-thinking`/`agent-complete`/`agent-error` text
-      colors were never re-themed for light surfaces and measure badly
-      (1.86–3.06:1) — deferred to the light-mode task since fixing them
-      means adding new base palette shades, not just re-measuring.
+      `gray-400` to `gray-500` (was 3.6–4.05:1, now 5.33–5.99:1). The
+      light-mode `agent-thinking`/`agent-complete`/`agent-error` hues are
+      not used as real text — `AGENT_STATE_BADGE` and the run-detail
+      banners render neutral `text-content` with the hue only as a `/10`
+      tint + `/40` border (decorative, colour never the sole signal), so
+      their sub-4.5:1 measurement never applied to readable text.
+
+      One genuine light-mode gap remained and is now fixed:
+      `--color-primary` (cyan) is *real* text via `text-primary` (nav link,
+      "Create your first run" link, the required-field asterisk) and it
+      measured only 2.89–3.25:1 on light surfaces — and light mode never
+      overrode `--color-primary-hover`/`-press`, so link/button hover fell
+      back to the dark-mode `cyan-300` (#7FF3FB), near-invisible on white.
+      Fixed at the semantic layer: added base cyan-800/850/900 dark-teal
+      shades and re-pointed light `--color-primary`/`-hover`/`-press` to
+      them, flipping light `--color-on-primary` to white so button labels
+      still read on the darkened fill (a dark obsidian label would fail on
+      it). Measured in a real browser engine (Playwright, reading the
+      computed cascade with `.light` applied): link on surface-0 4.92:1
+      (was 2.89:1), button label-on-fill 5.28:1, hover 6.42:1; dark mode
+      unchanged at 12.98:1.
 - [x] Confirm every status has a non-colour glyph (colour-blind safe).
       `AGENT_STATE_GLYPH` in `lib/types.ts` (◐ ✓ ✕ ▮▮), verified live via
       Playwright screenshots.

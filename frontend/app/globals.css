@@ -29,6 +29,9 @@
   --base-cyan-500: #14C6D9;
   --base-cyan-600: #0C9DB0;
   --base-cyan-700: #0A7C8C;
+  --base-cyan-800: #0A7383;   /* light-mode primary-as-text: 4.92:1 on surface-0, white label 5.28:1 (cyan-600 measured 2.89–3.25:1) */
+  --base-cyan-850: #086573;   /* light-mode primary hover: 5.99:1 on surface-0 */
+  --base-cyan-900: #06424C;   /* light-mode primary press: 9.88:1 on surface-0 */
 
   /* ── BASE: Violet — agent activity ─────────────────────── */
   --base-violet-300: #C9B8FF;
@@ -214,7 +217,14 @@
   --text-muted:     #556575;   /* gray-400 measured 4.05:1 on white, fails AA; gray-500 gives 5.99:1 */
   --text-inverse:   #F7FAFC;
 
-  --color-primary:        var(--base-cyan-600);
+  /* Cyan-600 is only 2.89–3.25:1 as text on light surfaces — fails AA where
+     --color-primary is real text (nav/link/asterisk via text-primary). Deepen to
+     dark teal, which clears 4.5:1 as text AND, as a button fill, pairs with a
+     white --color-on-primary below (dark obsidian label would fail on it). */
+  --color-primary:        var(--base-cyan-800);
+  --color-primary-hover:  var(--base-cyan-850);   /* darkens on hover; dark-mode fallback (cyan-300) is near-invisible on white */
+  --color-primary-press:  var(--base-cyan-900);
+  --color-on-primary:     #F7FAFC;                 /* white label on the darkened teal fill */
   --color-agent-active:   var(--base-cyan-600);
   --color-agent-thinking: var(--base-violet-600);
   --color-agent-complete: var(--base-mint-600);
