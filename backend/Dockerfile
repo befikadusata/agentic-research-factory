@@ -10,9 +10,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install dependencies using uv
+# Install the EXACT locked versions (from uv.lock), not a fresh pyproject
+# resolve. A fresh resolve picks an older crewai (dragged down by
+# crewai-tools==0.14.0) that breaks Pydantic tool-schema generation at runtime;
+# exporting the lock keeps the image identical to the tested dev environment.
 COPY pyproject.toml uv.lock ./
-RUN uv pip install --system --no-cache -r pyproject.toml
+RUN uv export --frozen --no-dev --no-emit-project --no-hashes -o /tmp/requirements.txt && \
+    uv pip install --system --no-cache -r /tmp/requirements.txt
 
 COPY . .
 

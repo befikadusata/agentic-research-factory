@@ -69,9 +69,14 @@ services:
 
   celery:
     build: ./backend
-    command: celery -A celery_app worker --loglevel=info --concurrency=1
+    # -Q default: celery_app routes execute_run_task/ingest_doc_task to the
+    # "default" queue, so the worker must consume it (not just the "celery" one).
+    command: celery -A celery_app worker --loglevel=info --concurrency=1 -Q default
     env_file: ./backend/.env
     environment:
+      # The `celery` CLI puts its own bin dir on sys.path (not /app), so the
+      # task's `from services…` import fails without this.
+      - PYTHONPATH=/app
       - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/research_factory
       - REDIS_URL=redis://redis:6379/0
       - SEARXNG_URL=http://searxng:8080
