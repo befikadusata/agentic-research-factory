@@ -3,6 +3,7 @@ import uuid
 import re
 import httpx
 from typing import Optional
+from tenacity import retry, stop_after_attempt, wait_exponential
 from config import settings
 from logger import logger
 from services.query_rewriter import generate_sub_queries
@@ -37,6 +38,7 @@ def _reranker():
         _reranker_model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return _reranker_model
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _gemini_embed(text: str) -> list[float]:
     if not settings.GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not configured")
@@ -64,11 +66,15 @@ def _gemini_embed(text: str) -> list[float]:
     return values
 
 def _embed(texts: list[str]) -> list[list[float]]:
+    # The embedder is chosen by config ALONE, never by runtime success. A per-call
+    # fallback from Gemini to the local model would store vectors from two
+    # different models in the same 384-dim collection — query and document vectors
+    # would no longer be comparable, silently degrading retrieval. So: if Gemini
+    # is configured, it is the ONLY embedder (with retries above); a hard failure
+    # raises loudly rather than quietly switching models. The local model is used
+    # only when Gemini is not configured at all.
     if settings.GEMINI_API_KEY:
-        try:
-            return [_gemini_embed(text) for text in texts]
-        except Exception as e:
-            logger.warning("gemini_embedding_failed", error=str(e))
+        return [_gemini_embed(text) for text in texts]
 
     model = _embedder()
     return model.encode(texts).tolist()

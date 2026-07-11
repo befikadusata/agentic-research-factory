@@ -88,3 +88,54 @@ def test_rag_fanout_deduplicates_chunks(mock_collection):
 
     pairs_passed = reranker_mock.predict.call_args[0][0]
     assert len(pairs_passed) == 2
+
+
+def test_embed_uses_gemini_when_key_configured():
+    """With a Gemini key set, _embed must use Gemini and never the local model."""
+    import tools.rag as rag
+
+    with patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
+         patch("tools.rag._gemini_embed", return_value=[0.2] * 384) as gemini, \
+         patch("tools.rag._embedder") as local:
+        result = rag._embed(["a", "b"])
+
+    assert gemini.call_count == 2
+    local.assert_not_called()
+    assert result == [[0.2] * 384, [0.2] * 384]
+
+
+def test_embed_raises_instead_of_falling_back_to_local_model():
+    """A Gemini failure must raise (not silently switch models and mix vectors)."""
+    import tools.rag as rag
+
+    with patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
+         patch("tools.rag._gemini_embed", side_effect=RuntimeError("gemini 429")), \
+         patch("tools.rag._embedder") as local:
+        with pytest.raises(RuntimeError):
+            rag._embed(["a"])
+
+    local.assert_not_called()
+
+
+def test_embed_uses_local_model_when_no_gemini_key():
+    """Without a Gemini key, _embed falls to the local sentence-transformers model."""
+    import tools.rag as rag
+
+    model = MagicMock()
+    model.encode.return_value = _FakeArray([[0.3] * 384])
+    with patch.object(rag.settings, "GEMINI_API_KEY", None), \
+         patch("tools.rag._gemini_embed") as gemini, \
+         patch("tools.rag._embedder", return_value=model):
+        result = rag._embed(["a"])
+
+    gemini.assert_not_called()
+    assert result == [[0.3] * 384]
+
+
+class _FakeArray:
+    """Mimics the numpy array returned by SentenceTransformer.encode()."""
+    def __init__(self, data):
+        self._data = data
+
+    def tolist(self):
+        return self._data
