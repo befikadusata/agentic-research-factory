@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     BACKEND_URL: str = "http://localhost:8000"
 
+    # Outbound email (verification links). If SMTP_HOST is unset, emails are
+    # logged instead of sent — fine for local/dev.
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM: str = "no-reply@research-factory.local"
+    SMTP_STARTTLS: bool = True
+
     # V2 — 14.1 Persistent Vector DB
     SUPABASE_URL: str | None = None
     SUPABASE_KEY: str | None = None

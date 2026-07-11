@@ -89,3 +89,14 @@ async def test_wrong_scheme_returns_401(client):
 async def test_bearer_without_token_returns_401(client):
     r = await client.get("/runs", headers={"Authorization": "Bearer"})
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_email_verification_token_is_not_an_api_credential(client):
+    # A token minted for email verification shares the signing secret but must
+    # never authenticate to the API (it travels through email/URLs/logs).
+    from auth import create_email_verification_token
+
+    token = create_email_verification_token("attacker@example.com")
+    r = await client.get("/runs", headers=_auth_header(token))
+    assert r.status_code == 401

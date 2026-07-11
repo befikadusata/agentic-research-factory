@@ -19,19 +19,28 @@ class AddMemberRequest(BaseModel):
     role: str = Field(default="viewer", pattern="^(viewer|operator|admin)$")
 
 
+def _ws_dict(ws: Workspace) -> dict:
+    return {"id": str(ws.id), "name": ws.name, "owner_id": ws.owner_id}
+
+
+async def _create_workspace(db: AsyncSession, name: str, owner_id: str) -> Workspace:
+    ws = Workspace(name=name, owner_id=owner_id)
+    db.add(ws)
+    await db.flush()  # populate ws.id before referencing it in WorkspaceMember
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=owner_id, role="admin"))
+    await db.commit()
+    await db.refresh(ws)
+    return ws
+
+
 @router.post("", status_code=201)
 async def create_workspace(
     body: CreateWorkspaceRequest,
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    ws = Workspace(name=body.name, owner_id=user_id)
-    db.add(ws)
-    await db.flush()  # ensure ws.id is populated before referencing it in WorkspaceMember
-    db.add(WorkspaceMember(workspace_id=ws.id, user_id=user_id, role="admin"))
-    await db.commit()
-    await db.refresh(ws)
-    return {"id": str(ws.id), "name": ws.name, "owner_id": ws.owner_id}
+    ws = await _create_workspace(db, body.name, user_id)
+    return _ws_dict(ws)
 
 
 @router.get("")
@@ -44,8 +53,27 @@ async def list_workspaces(
         .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
         .where(WorkspaceMember.user_id == user_id)
     )
-    return [{"id": str(ws.id), "name": ws.name, "owner_id": ws.owner_id}
-            for ws in result.scalars().all()]
+    workspaces = result.scalars().all()
+    # Every user needs at least one workspace for the UI to have an active tenant.
+    if not workspaces:
+        workspaces = [await _create_workspace(db, "Personal", user_id)]
+    return [_ws_dict(ws) for ws in workspaces]
+
+
+@router.get("/{workspace_id}/members")
+async def list_members(
+    workspace_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
+):
+    # Any member may see the roster; non-members get a 404 (don't reveal existence).
+    caller = await db.get(WorkspaceMember, (workspace_id, user_id))
+    if not caller:
+        raise HTTPException(404, "Workspace not found")
+    result = await db.execute(
+        select(WorkspaceMember).where(WorkspaceMember.workspace_id == workspace_id)
+    )
+    return [{"user_id": m.user_id, "role": m.role} for m in result.scalars().all()]
 
 
 @router.post("/{workspace_id}/members", status_code=201)
@@ -58,8 +86,14 @@ async def add_member(
     ws = await db.get(Workspace, workspace_id)
     if not ws or ws.owner_id != user_id:
         raise HTTPException(403, "Only the workspace owner can add members")
-    member = WorkspaceMember(workspace_id=workspace_id, user_id=body.user_id, role=body.role)
-    db.add(member)
+    # Idempotent: re-adding an existing member updates their role instead of
+    # crashing on the (workspace_id, user_id) primary key.
+    member = await db.get(WorkspaceMember, (workspace_id, body.user_id))
+    if member:
+        member.role = body.role
+    else:
+        member = WorkspaceMember(workspace_id=workspace_id, user_id=body.user_id, role=body.role)
+        db.add(member)
     await db.commit()
     return {"workspace_id": str(workspace_id), "user_id": body.user_id, "role": body.role}
 
@@ -74,6 +108,8 @@ async def remove_member(
     ws = await db.get(Workspace, workspace_id)
     if not ws or ws.owner_id != user_id:
         raise HTTPException(403, "Only the workspace owner can remove members")
+    if member_user_id == ws.owner_id:
+        raise HTTPException(400, "The workspace owner cannot be removed")
     member = await db.get(WorkspaceMember, (workspace_id, member_user_id))
     if member:
         await db.delete(member)

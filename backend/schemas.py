@@ -6,6 +6,49 @@ from models import RunStatus
 from typing import Optional, Any
 from configs.verticals import VALID_VERTICALS, VERTICALS
 
+class RegisterRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    # bcrypt only uses the first 72 bytes; cap length so nothing is silently ignored.
+    password: str = Field(..., min_length=8, max_length=72)
+    name: Optional[str] = Field(default=None, max_length=255)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=72)
+
+
+class UserResponse(BaseModel):
+    email: str
+    name: Optional[str] = None
+
+
+class RegisterResponse(BaseModel):
+    email: str
+    name: Optional[str] = None
+    verification_required: bool = True
+    # Only populated in development so the flow is testable without real email.
+    dev_verification_url: Optional[str] = None
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=1)
+
+
+class VerifyEmailResponse(BaseModel):
+    email: str
+    verified: bool
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+
+
+class SimpleStatusResponse(BaseModel):
+    status: str = "ok"
+    dev_verification_url: Optional[str] = None
+
+
 class CreateRunRequest(BaseModel):
     topic: str = Field(..., min_length=3, max_length=500)
     format: str = Field(..., pattern="^(report|linkedin|summary)$")

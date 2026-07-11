@@ -104,6 +104,59 @@ async def test_remove_member_non_owner_forbidden(client, auth_as, db_session):
 
 
 @pytest.mark.asyncio
+async def test_list_workspaces_auto_provisions_personal(client, mock_user):
+    # A user with no workspaces gets a "Personal" one created on first list.
+    r = await client.get("/workspaces")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "Personal"
+    assert data[0]["owner_id"] == mock_user
+
+
+@pytest.mark.asyncio
+async def test_list_members_returns_roster(client, mock_user):
+    ws_id = (await client.post("/workspaces", json={"name": "Team"})).json()["id"]
+    await client.post(f"/workspaces/{ws_id}/members", json={"user_id": "member-x", "role": "operator"})
+    r = await client.get(f"/workspaces/{ws_id}/members")
+    assert r.status_code == 200
+    roster = {m["user_id"]: m["role"] for m in r.json()}
+    assert roster[mock_user] == "admin"
+    assert roster["member-x"] == "operator"
+
+
+@pytest.mark.asyncio
+async def test_list_members_non_member_gets_404(client, auth_as, db_session):
+    ws = Workspace(name="Secret", owner_id="owner-9")
+    db_session.add(ws)
+    await db_session.flush()
+    db_session.add(WorkspaceMember(workspace_id=ws.id, user_id="owner-9", role="admin"))
+    await db_session.commit()
+
+    auth_as("stranger")
+    r = await client.get(f"/workspaces/{ws.id}/members")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_member_is_idempotent_and_updates_role(client, mock_user):
+    ws_id = (await client.post("/workspaces", json={"name": "WS"})).json()["id"]
+    first = await client.post(f"/workspaces/{ws_id}/members", json={"user_id": "m", "role": "viewer"})
+    second = await client.post(f"/workspaces/{ws_id}/members", json={"user_id": "m", "role": "operator"})
+    assert first.status_code == 201
+    assert second.status_code == 201  # no PK-conflict crash
+    roster = {m["user_id"]: m["role"] for m in (await client.get(f"/workspaces/{ws_id}/members")).json()}
+    assert roster["m"] == "operator"
+
+
+@pytest.mark.asyncio
+async def test_owner_cannot_be_removed(client, mock_user):
+    ws_id = (await client.post("/workspaces", json={"name": "WS"})).json()["id"]
+    r = await client.delete(f"/workspaces/{ws_id}/members/{mock_user}")
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_list_verticals_returns_all(client):
     r = await client.get("/verticals")
     assert r.status_code == 200

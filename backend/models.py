@@ -30,6 +30,26 @@ class RunStatus(str, enum.Enum):
     failed                     = "failed"
 
 
+class User(Base):
+    """Credential store for the email/password auth provider.
+
+    Identity across the app is the email string (see `user_id` everywhere), so
+    this table only holds what password login needs — it does not replace or
+    change the existing email-as-principal model. Google users never get a row
+    here; they authenticate entirely through NextAuth/Google.
+    """
+    __tablename__ = "users"
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email            = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash    = Column(String(255), nullable=False)
+    name             = Column(String(255), nullable=True)
+    # NULL until the user clicks the verification link; login is gated on this.
+    email_verified_at = Column(DateTime(timezone=True), nullable=True)
+    created_at       = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                              server_default=func.now())
+
+
 class Workspace(Base):
     __tablename__ = "workspaces"
 
