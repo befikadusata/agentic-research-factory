@@ -15,6 +15,13 @@ celery_app.conf.update(
     enable_utc=True,
     task_soft_time_limit=600,   # SIGTERM after 10 min; task can clean up
     task_time_limit=660,         # SIGKILL after 11 min if still running
+    # Each task runs its own event loop via asyncio.run(). The module-level
+    # async SQLAlchemy engine (database.py) binds its asyncpg pool to the first
+    # task's loop, so a second task reusing the same worker child fails with
+    # "got Future attached to a different loop". Recycle the child after every
+    # task so each run gets a fresh process → fresh loop → fresh engine. The
+    # fork cost is negligible next to a multi-minute research run.
+    worker_max_tasks_per_child=1,
     task_routes={
         "execute_run_task": {"queue": "default"},
         "ingest_doc_task":  {"queue": "default"},
