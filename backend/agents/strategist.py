@@ -1,6 +1,6 @@
 from crewai import Agent, Task
 from configs.prompt_loader import get_prompt
-from services.llm_router import get_model
+from services.llm_router import get_llm
 
 def strategist_agent() -> Agent:
     prompt = get_prompt("strategist")
@@ -9,7 +9,7 @@ def strategist_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        llm=get_model("strategist"),
+        llm=get_llm("strategist"),
         verbose=True,
     )
 

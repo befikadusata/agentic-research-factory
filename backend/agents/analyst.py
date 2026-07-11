@@ -1,6 +1,6 @@
 from crewai import Agent, Task
 from configs.prompt_loader import get_prompt
-from services.llm_router import get_model
+from services.llm_router import get_llm
 
 def analyst_agent() -> Agent:
     prompt = get_prompt("analyst")
@@ -9,7 +9,7 @@ def analyst_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        llm=get_model("analyst"),
+        llm=get_llm("analyst"),
         verbose=True,
         max_iter=5,
     )

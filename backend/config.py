@@ -18,16 +18,27 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
 
-    # Default router targets. These can be overridden per environment.
+    # Default router targets (each agent's PRIMARY model; llm_router derives a
+    # cross-provider fallback from it). Load is deliberately spread across two
+    # free tiers so neither daily budget is the sole bottleneck:
+    #   - Light, high-frequency calls → Groq 8B-instant: fast and a very high
+    #     token/day ceiling, so it shrugs off the volume.
+    #   - Core reasoning/writing path → Groq 70B-versatile: fast and reliable
+    #     (its 100K tokens/day cap is the tight one, so only the stages that most
+    #     need quality+reliability sit here).
+    #   - Analysis / QA / eval → OpenRouter free 70B: request-count-limited
+    #     rather than token-limited, so its big single calls are cheap on quota,
+    #     and offloading these keeps the Groq 70B budget for the core path.
+    # The `openrouter/` prefix is explicit so litellm routes it correctly.
     STRATEGIST_MODEL: str = "groq/llama-3.1-8b-instant"
-    RESEARCHER_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
-    LEAD_INTEL_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
     QUERY_REWRITER_MODEL: str = "groq/llama-3.1-8b-instant"
-    ANALYST_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
-    WRITER_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
-    EDITOR_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
-    REVIEWER_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
-    EVAL_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
+    RESEARCHER_MODEL: str = "groq/llama-3.3-70b-versatile"
+    WRITER_MODEL: str = "groq/llama-3.3-70b-versatile"
+    EDITOR_MODEL: str = "groq/llama-3.3-70b-versatile"
+    LEAD_INTEL_MODEL: str = "groq/llama-3.3-70b-versatile"
+    ANALYST_MODEL: str = "openrouter/meta-llama/llama-3.3-70b-instruct:free"
+    REVIEWER_MODEL: str = "openrouter/meta-llama/llama-3.3-70b-instruct:free"
+    EVAL_MODEL: str = "openrouter/meta-llama/llama-3.3-70b-instruct:free"
 
     # Gemini embeddings for RAG.
     EMBEDDING_MODEL: str = "gemini-embedding-2"

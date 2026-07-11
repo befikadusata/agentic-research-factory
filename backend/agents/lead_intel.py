@@ -2,7 +2,7 @@ from crewai import Agent, Task
 from tools.search import tavily_search_tool
 from tools.scraper import firecrawl_tool
 from configs.prompt_loader import get_prompt
-from services.llm_router import get_model
+from services.llm_router import get_llm
 
 
 def lead_intel_agent() -> Agent:
@@ -12,7 +12,7 @@ def lead_intel_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[tavily_search_tool, firecrawl_tool],
-        llm=get_model("lead_intel"),
+        llm=get_llm("lead_intel"),
         verbose=True,
         max_iter=10,
     )

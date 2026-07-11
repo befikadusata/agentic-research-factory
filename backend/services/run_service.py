@@ -426,7 +426,14 @@ async def execute_run(run_id: UUID):
                 await _set_status(run_obj, RunStatus.failed, db)
         error_msg = str(e)
         await emit(rid, "error", {"message": f"Run failed: {error_msg[:200]}"})
-        raise
+        # The failure is already fully handled above (DB marked failed + SSE error
+        # emitted) and logged with a full traceback via log.exception. We still
+        # re-raise so Celery records the task as FAILED — but NOT the original
+        # exception: tenacity's RetryError embeds a concurrent.futures.Future,
+        # which is unpickleable, so Celery's result backend crashed with
+        # UnpickleableExceptionWrapper while serializing it. Raise a plain
+        # RuntimeError and drop the unpickleable cause chain (`from None`).
+        raise RuntimeError(f"Run {rid} failed: {error_msg[:500]}") from None
 
 async def approve_hitl(run_id: str, instruction: str | None = None):
     redis_client = await get_redis_client()

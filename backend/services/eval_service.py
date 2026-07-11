@@ -30,6 +30,7 @@ Respond ONLY with valid JSON:
         model=llm.model,
         api_key=llm.api_key,
         base_url=llm.base_url,
+        fallbacks=list(llm.fallbacks),
         messages=[{"role": "user", "content": prompt}],
         max_tokens=500,
         timeout=60,
