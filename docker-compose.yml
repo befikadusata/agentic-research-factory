@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -55,8 +54,9 @@ services:
         condition: service_completed_successfully
       searxng:
         condition: service_healthy
-      firecrawl-api:
-        condition: service_healthy
+      # NOTE: no firecrawl-api dependency — scraping is optional (behind the
+      # "scraping" profile) and the scraper degrades gracefully when it's down,
+      # so the app must not block startup on the heavy Firecrawl stack.
     ports:
       - "8000:8000"
     volumes:
@@ -83,8 +83,7 @@ services:
         condition: service_healthy
       searxng:
         condition: service_healthy
-      firecrawl-api:
-        condition: service_healthy
+      # No firecrawl-api dependency — see the backend service note above.
     volumes:
       - ./backend:/app
 
@@ -116,7 +115,11 @@ services:
     restart: unless-stopped
 
   # --- Self-hosted scraping (Firecrawl alternative) ---
+  # Opt-in: this is a heavy 5-container stack (api, redis, rabbitmq, postgres,
+  # playwright) that a plain `docker compose up` skips. Enable it only when you
+  # need web scraping:  docker compose --profile scraping up
   firecrawl-redis:
+    profiles: ["scraping"]
     image: redis:7-alpine
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -126,6 +129,7 @@ services:
     restart: unless-stopped
 
   firecrawl-rabbitmq:
+    profiles: ["scraping"]
     image: rabbitmq:3-management
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
@@ -135,6 +139,7 @@ services:
     restart: unless-stopped
 
   firecrawl-postgres:
+    profiles: ["scraping"]
     image: ghcr.io/firecrawl/nuq-postgres:latest
     environment:
       - POSTGRES_USER=postgres
@@ -150,6 +155,7 @@ services:
     restart: unless-stopped
 
   firecrawl-playwright:
+    profiles: ["scraping"]
     image: ghcr.io/firecrawl/playwright-service:latest
     environment:
       - PORT=3000
@@ -162,6 +168,7 @@ services:
     restart: unless-stopped
 
   firecrawl-api:
+    profiles: ["scraping"]
     image: ghcr.io/firecrawl/firecrawl:latest
     environment:
       - HOST=0.0.0.0
