@@ -5,7 +5,9 @@ import jwt from "jsonwebtoken";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
-  const userId = session?.user?.email;
+  // Use the provider-namespaced id (e.g. "google:alice@x.com"), not the raw
+  // email, so the backend principal can't be spoofed across providers.
+  const userId = session?.user?.id;
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

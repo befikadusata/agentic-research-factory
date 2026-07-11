@@ -1,4 +1,4 @@
-import type { Run, RunDetail } from "./types";
+import type { Run, RunDetail, Workspace, WorkspaceMember } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
@@ -37,6 +37,7 @@ export async function createRun(payload: {
   topic: string;
   format: string;
   doc_ids: string[];
+  workspace_id?: string;
   vertical?: string;
   vertical_inputs?: Record<string, string>;
 }): Promise<{ id: string }> {
@@ -48,20 +49,22 @@ export async function createRun(payload: {
   });
   if (!res.ok) throw new Error(await res.text());
   // Invalidate runs list cache on new run
-  cache.delete("runs");
+  cache.clear();
   return res.json();
 }
 
-export async function getRuns(): Promise<Run[]> {
-  const cached = cache.get("runs");
+export async function getRuns(workspaceId?: string): Promise<Run[]> {
+  const key = `runs:${workspaceId ?? "personal"}`;
+  const cached = cache.get(key);
   if (cached && cached.expires > Date.now()) return cached.data as Run[];
 
   const headers = await authHeaders();
-  const res = await fetch(`${BASE}/runs`, { headers });
+  const qs = workspaceId ? `?workspace_id=${workspaceId}` : "";
+  const res = await fetch(`${BASE}/runs${qs}`, { headers });
   if (!res.ok) throw new Error(await res.text());
-  
+
   const data = await res.json();
-  cache.set("runs", { data, expires: Date.now() + CACHE_TTL });
+  cache.set(key, { data, expires: Date.now() + CACHE_TTL });
   return data;
 }
 
@@ -83,13 +86,67 @@ export async function approveHitl(id: string, instruction?: string) {
   return res.json();
 }
 
-export async function uploadFile(file: File): Promise<{ doc_id: string }> {
+export async function uploadFile(file: File, workspaceId: string): Promise<{ doc_id: string }> {
   const headers = await authHeaders();
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/upload`, { method: "POST", headers, body: form });
+  const res = await fetch(`${BASE}/upload?workspace_id=${workspaceId}`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+// --- Workspaces -----------------------------------------------------------
+
+export async function getWorkspaces(): Promise<Workspace[]> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/workspaces`, { headers });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createWorkspace(name: string): Promise<Workspace> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/workspaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/workspaces/${workspaceId}/members`, { headers });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function addWorkspaceMember(
+  workspaceId: string,
+  userId: string,
+  role: string,
+): Promise<void> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/workspaces/${workspaceId}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ user_id: userId, role }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function removeWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/workspaces/${workspaceId}/members/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers,
+  });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 export async function downloadOutput(

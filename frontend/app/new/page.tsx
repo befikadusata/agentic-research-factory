@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { createRun } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
 import { FormatSelector } from "@/components/FormatSelector";
 import { FileUpload } from "@/components/FileUpload";
 import { VerticalSelector } from "@/components/VerticalSelector";
@@ -13,6 +14,7 @@ import type { Vertical, OutputFormat } from "@/lib/types";
 export default function NewRunPage() {
   const router = useRouter();
   const { data: session, status: authStatus } = useSession();
+  const { activeId } = useWorkspace();
   const verticals = useVerticals();
   const [vertical, setVertical] = useState<Vertical | null>(null);
   const [verticalInputs, setVerticalInputs] = useState<Record<string, string>>({});
@@ -68,6 +70,7 @@ export default function NewRunPage() {
         topic: topic.trim(),
         format,
         doc_ids: docIds,
+        workspace_id: activeId ?? undefined,
         vertical: vertical ?? undefined,
         vertical_inputs: Object.keys(verticalInputs).length ? verticalInputs : undefined,
       });
@@ -182,6 +185,7 @@ export default function NewRunPage() {
           </label>
           <FileUpload
             key={vertical ?? "general"}
+            workspaceId={activeId}
             onUploaded={handleUploaded}
             onRemoved={handleRemoved}
           />

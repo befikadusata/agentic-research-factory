@@ -5,11 +5,12 @@ import { useDropzone } from "react-dropzone";
 import { uploadFile } from "@/lib/api";
 
 interface Props {
+  workspaceId: string | null;
   onUploaded: (docId: string, filename: string) => void;
   onRemoved?: () => void;
 }
 
-export function FileUpload({ onUploaded, onRemoved }: Props) {
+export function FileUpload({ workspaceId, onUploaded, onRemoved }: Props) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
@@ -17,10 +18,14 @@ export function FileUpload({ onUploaded, onRemoved }: Props) {
   const onDrop = useCallback(async (accepted: File[]) => {
     const file = accepted[0];
     if (!file) return;
+    if (!workspaceId) {
+      setError("Select a workspace before uploading.");
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
-      const { doc_id } = await uploadFile(file);
+      const { doc_id } = await uploadFile(file, workspaceId);
       setUploadedFileName(file.name);
       onUploaded(doc_id, file.name);
     } catch (e) {
@@ -28,7 +33,7 @@ export function FileUpload({ onUploaded, onRemoved }: Props) {
     } finally {
       setUploading(false);
     }
-  }, [onUploaded]);
+  }, [onUploaded, workspaceId]);
 
   function handleRemove() {
     setUploadedFileName(null);

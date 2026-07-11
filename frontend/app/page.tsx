@@ -1,46 +1,36 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSession, signIn } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { getRuns } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
 import { RunCard } from "@/components/RunCard";
 import type { Run } from "@/lib/types";
 
 export default function Dashboard() {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
+  const { activeId, active } = useWorkspace();
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (status !== "authenticated") return;
-    getRuns()
+    if (status !== "authenticated" || !activeId) return;
+    setLoading(true);
+    setError(null);
+    getRuns(activeId)
       .then(setRuns)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [status]);
-
-  if (status === "loading") return <p className="text-content-muted p-8">Loading…</p>;
-
-  if (!session) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-        <h1 className="text-4xl font-bold mb-4 text-content">Research Factory</h1>
-        <p className="text-content-secondary mb-8 max-w-md">Autonomous research powered by intelligent agents. Sign in to get started.</p>
-        <button
-          onClick={() => signIn("google")}
-          className="bg-primary hover:bg-primary-hover text-primary-on font-medium px-8 py-3 rounded-md transition-colors duration-base"
-        >
-          Sign in with Google
-        </button>
-      </div>
-    );
-  }
+  }, [status, activeId]);
 
   return (
     <div className="max-w-4xl">
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold text-content">Recent Runs</h1>
+        <div>
+          <h1 className="text-3xl font-bold text-content">Recent Runs</h1>
+          {active && <p className="text-sm text-content-muted mt-1">{active.name}</p>}
+        </div>
         <a
           href="/new"
           className="bg-primary hover:bg-primary-hover text-primary-on text-sm font-medium px-5 py-2.5 rounded-md transition-colors duration-base flex items-center gap-2"

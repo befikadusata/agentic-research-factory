@@ -159,6 +159,19 @@ export interface LogEntry {
   ts: string;
 }
 
+export type WorkspaceRole = "viewer" | "operator" | "admin";
+
+export interface Workspace {
+  id: string;
+  name: string;
+  owner_id: string;
+}
+
+export interface WorkspaceMember {
+  user_id: string;
+  role: WorkspaceRole;
+}
+
 export const PIPELINE = [
   { id: "input",      label: "Input" },
   { id: "researcher", label: "Researcher" },
