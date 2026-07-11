@@ -12,6 +12,14 @@ def test_calculate_cost_known_model():
     assert cost == (0.0025 * 1) + (0.01 * 1)
 
 
+def test_calculate_cost_groq_70b_default_is_priced():
+    # The pipeline's default LLM_MODEL (groq/llama-3.3-70b-versatile) must be
+    # priced, or /analytics/costs reports $0 for every real run.
+    cost = calculate_cost("groq/llama-3.3-70b-versatile", 1000, 1000)
+    assert cost == (0.00059 * 1) + (0.00079 * 1)
+    assert cost > 0
+
+
 def test_calculate_cost_free_model_is_zero():
     assert calculate_cost("meta-llama/llama-3.3-70b-instruct:free", 5000, 5000) == 0.0
 

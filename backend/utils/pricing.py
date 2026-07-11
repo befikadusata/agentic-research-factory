@@ -18,6 +18,7 @@ _PRICING_PER_1K: dict[str, tuple[float, float]] = {
     # Defaults in llm_router._DEFAULT_MODELS
     "meta-llama/llama-3.3-70b-instruct:free": (0.0, 0.0),
     "groq/llama-3.1-8b-instant": (0.00005, 0.00008),
+    "groq/llama-3.3-70b-versatile": (0.00059, 0.00079),
     # Common paid overrides via *_MODEL env vars / LLM_MODEL legacy mode
     "openrouter/openai/gpt-4o": (0.0025, 0.01),
     "openrouter/openai/gpt-4o-mini": (0.00015, 0.0006),
