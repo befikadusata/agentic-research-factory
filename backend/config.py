@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     FIRECRAWL_API_URL: str | None = None
 
     DATABASE_URL: str
+    # Under pytest (TESTING=1) the suite drops/recreates every table, so it must
+    # never point at DATABASE_URL. Left unset, config auto-derives a `<db>_test`
+    # sibling database; set this to override where the test schema lives.
+    TEST_DATABASE_URL: str | None = None
     REDIS_URL: str = "redis://localhost:6379/0"
     BACKEND_JWT_SECRET: str
     NEXTAUTH_SECRET: str
@@ -76,6 +80,22 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# When running under pytest, redirect every DB consumer (database.py's engine,
+# service-layer AsyncSessionLocal, and the test fixtures alike) to an isolated
+# test database. The suite drop_all/create_all's on connect, so pointing it at
+# the app DB wipes real data — this guarantees it can't. conftest.py sets
+# TESTING=1 before importing this module.
+if os.environ.get("TESTING") == "1":
+    _target = settings.TEST_DATABASE_URL
+    if not _target:
+        from sqlalchemy.engine import make_url
+        _u = make_url(settings.DATABASE_URL)
+        # str(url) masks the password as '***'; render_as_string keeps it intact.
+        _target = _u.set(database=f"{_u.database}_test").render_as_string(hide_password=False)
+    if _target == settings.DATABASE_URL:
+        raise RuntimeError("TEST_DATABASE_URL must differ from DATABASE_URL")
+    settings.DATABASE_URL = _target
 
 _PROD_REQUIRED = ["TAVILY_API_KEY", "FIRECRAWL_API_KEY", "LLAMA_CLOUD_API_KEY"]
 
