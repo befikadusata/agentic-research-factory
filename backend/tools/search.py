@@ -37,8 +37,11 @@ class SearxngSearchTool(BaseTool):
         try:
             results = self._execute_search(query)
             output = []
-            for r in results.get("results", [])[:8]:
-                output.append(f"- [{r.get('title', '')}]({r.get('url', '')})\n  {r.get('content', '')[:300]}")
+            # 4 results × 150-char snippets (was 8 × 300): search output persists
+            # in the researcher's ReAct context across iterations, so trimming it
+            # here compounds — keeps the pass under Groq's free 12K tokens/min.
+            for r in results.get("results", [])[:4]:
+                output.append(f"- [{r.get('title', '')}]({r.get('url', '')})\n  {r.get('content', '')[:150]}")
             return "\n".join(output) or "No search results found for this query."
         except Exception as e:
             logger.warning("searxng_search_failed", query=query, error=str(e))

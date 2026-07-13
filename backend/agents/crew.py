@@ -107,14 +107,21 @@ def node_research(state: ResearchState, config: RunnableConfig) -> dict:
     collection = state.get("collection_name") or "default_workspace"
     custom_rag = RAGTool(collection_name=collection, vertical=state.get("vertical"))
 
-    tools = [tavily_search_tool, custom_rag, firecrawl_tool, batch_scrape_tool]
+    # web_search + RAG only. Each tool's JSON schema is re-sent on every ReAct
+    # iteration, so the 2 scraper tools (optional in this stack) inflated every
+    # researcher call past Groq's free 12K tokens/min. Dropping them keeps a full
+    # pass under the ceiling.
+    tools = [tavily_search_tool, custom_rag]
 
     agent = researcher_agent(tools=tools)
     
-    # Enrich topic with plan if available
+    # Enrich topic with plan if available. The plan is re-sent on every ReAct
+    # iteration, so cap it — the full plan pushed each researcher call over
+    # Groq's free 12K tokens/min ceiling. The first ~1200 chars carry the intent.
     topic = state["topic"]
     if state.get("plan_output"):
-        topic = f"{topic}\n\n**RESEARCH PLAN**:\n{state['plan_output']}"
+        plan = state["plan_output"][:1200]
+        topic = f"{topic}\n\n**RESEARCH PLAN**:\n{plan}"
     
     # NEW: Add feedback if available
     if state.get("user_feedback"):

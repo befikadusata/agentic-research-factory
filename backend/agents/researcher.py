@@ -15,9 +15,16 @@ def researcher_agent(tools: list = None) -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=tools,
-        llm=get_llm("researcher"),
+        # max_tokens caps the (token-heavy) synthesis call so a full pass stays
+        # under Groq's free 12K tokens/min ceiling — see get_llm docstring.
+        llm=get_llm("researcher", max_tokens=900),
         verbose=True,
-        max_iter=10,
+        # Capped at 2 (was 10): each ReAct iteration re-sends the whole
+        # accumulating context AND its actual tokens count against Groq's rolling
+        # free 12K tokens/min window. Deeper loops pushed the accumulated usage so
+        # high that the final synthesis call 429'd. 2 iterations (≈1 search + 1
+        # synthesis) leaves room for a full brief under the ceiling.
+        max_iter=2,
     )
 
 def research_task(agent: Agent, topic: str, context_docs: str) -> Task:

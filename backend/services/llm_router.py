@@ -80,16 +80,24 @@ def get_fallbacks(agent_name: str) -> list[str]:
     return []  # gemini/unknown: no cross-provider peer to fall back to
 
 
-def get_llm(agent_name: str):
+def get_llm(agent_name: str, max_tokens: int | None = None):
     """Build a CrewAI LLM for an agent, wired with its cross-provider fallback.
 
     Agents pass this to `Agent(llm=...)`. Keys are read from the environment
     (config.py exports GROQ/OPENROUTER keys), so both the primary and the
     fallback leg authenticate without any per-call key wiring here.
+
+    max_tokens caps the completion length. It's used to keep token-heavy agents
+    (the researcher) under Groq's free 12K tokens/min ceiling: a smaller
+    completion reservation means each call requests fewer tokens, so a full pass
+    fits inside one rate-limit window instead of 429-ing mid-run.
     """
     from crewai import LLM
 
-    return LLM(model=get_model(agent_name), fallbacks=get_fallbacks(agent_name))
+    kwargs = {}
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    return LLM(model=get_model(agent_name), fallbacks=get_fallbacks(agent_name), **kwargs)
 
 
 def _provider_from_model(model: str) -> str | None:

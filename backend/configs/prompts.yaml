@@ -11,11 +11,10 @@ agent_prompts:
     task_description: |
       Execute the research for: **{topic}**
 
-      Think step-by-step:
-      1. **Initial Recon**: Use Tavily to get a broad landscape. Identify the 5 most promising URLs.
-      2. **Deep Dive**: Use 'batch_scrape_webpages' to concurrently scrape the top 3-5 sources.
-      3. **Internal Check**: If internal documents are mentioned, query them for proprietary context or specific alignment.
-      4. **Synthesis**: Correlate findings. Identify contradictions and resolve them with a third source if needed.
+      Work efficiently (you have a limited number of tool calls):
+      1. **Recon**: Run 1-2 focused web_search queries to map the landscape and gather key facts with sources.
+      2. **Internal Check**: If internal documents are mentioned, query them once for proprietary context.
+      3. **Synthesis**: Correlate findings, note contradictions, and write the summary below. Be concise.
 
       Output format (strict):
       ## Research Summary: {topic}
