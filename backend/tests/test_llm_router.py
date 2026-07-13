@@ -21,7 +21,7 @@ def test_groq_primary_falls_back_to_openrouter(monkeypatch):
 
     fallbacks = get_fallbacks("researcher")
 
-    assert fallbacks == ["openrouter/meta-llama/llama-3.3-70b-instruct:free"]
+    assert fallbacks == ["openrouter/tencent/hy3:free"]
 
 
 def test_openrouter_primary_falls_back_to_groq(monkeypatch):

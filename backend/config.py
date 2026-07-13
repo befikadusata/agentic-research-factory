@@ -26,9 +26,12 @@ class Settings(BaseSettings):
     #   - Core reasoning/writing path → Groq 70B-versatile: fast and reliable
     #     (its 100K tokens/day cap is the tight one, so only the stages that most
     #     need quality+reliability sit here).
-    #   - Analysis / QA / eval → OpenRouter free 70B: request-count-limited
-    #     rather than token-limited, so its big single calls are cheap on quota,
-    #     and offloading these keeps the Groq 70B budget for the core path.
+    #   - Analysis / QA / eval → OpenRouter free (Tencent Hunyuan hy3): a
+    #     reasoning model that's request-count-limited rather than token-limited,
+    #     so its big single calls are cheap on quota and keep the Groq 70B budget
+    #     for the core path. These agents are single-shot (no tool-use ReAct), so
+    #     a reasoning model's chain-of-thought helps quality and its non-standard
+    #     tool-call format doesn't matter here.
     # The `openrouter/` prefix is explicit so litellm routes it correctly.
     STRATEGIST_MODEL: str = "groq/llama-3.1-8b-instant"
     QUERY_REWRITER_MODEL: str = "groq/llama-3.1-8b-instant"
@@ -36,9 +39,9 @@ class Settings(BaseSettings):
     WRITER_MODEL: str = "groq/llama-3.3-70b-versatile"
     EDITOR_MODEL: str = "groq/llama-3.3-70b-versatile"
     LEAD_INTEL_MODEL: str = "groq/llama-3.3-70b-versatile"
-    ANALYST_MODEL: str = "openrouter/meta-llama/llama-3.3-70b-instruct:free"
-    REVIEWER_MODEL: str = "openrouter/meta-llama/llama-3.3-70b-instruct:free"
-    EVAL_MODEL: str = "openrouter/meta-llama/llama-3.3-70b-instruct:free"
+    ANALYST_MODEL: str = "openrouter/tencent/hy3:free"
+    REVIEWER_MODEL: str = "openrouter/tencent/hy3:free"
+    EVAL_MODEL: str = "openrouter/tencent/hy3:free"
 
     # Gemini embeddings for RAG.
     EMBEDDING_MODEL: str = "gemini-embedding-2"

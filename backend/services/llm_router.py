@@ -20,7 +20,9 @@ class LLMSelection:
 # provider's key from the env vars config.py already exports, so no per-call key
 # wiring is needed for the fallback leg.
 _GROQ_FALLBACK = "groq/llama-3.3-70b-versatile"
-_OPENROUTER_FALLBACK = "openrouter/meta-llama/llama-3.3-70b-instruct:free"
+# Tencent Hunyuan hy3 (free): currently the reliably-available OpenRouter free
+# model — the meta-llama :free slug is frequently 429 "rate-limited upstream".
+_OPENROUTER_FALLBACK = "openrouter/tencent/hy3:free"
 
 
 _DEFAULT_MODELS: dict[str, str] = {
