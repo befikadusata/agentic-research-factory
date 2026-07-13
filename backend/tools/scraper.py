@@ -6,6 +6,7 @@ from pydantic import Field
 from tenacity import retry, stop_after_attempt, wait_exponential
 from logger import logger
 from utils.cache import tool_cache
+from tools.untrusted import wrap_untrusted
 from typing import List, Dict
 
 class FirecrawlTool(BaseTool):
@@ -40,7 +41,7 @@ class FirecrawlTool(BaseTool):
         try:
             result = self._execute_scrape(url)
             content = result.get("markdown", "")
-            return content[:6000] if content else "No content extracted from this page."
+            return wrap_untrusted(content[:6000]) if content else "No content extracted from this page."
         except Exception as e:
             logger.warning("firecrawl_scrape_failed", url=url, error=str(e))
             return (
@@ -118,7 +119,7 @@ class BatchScrapeTool(BaseTool):
         output = []
         for res in results:
             output.append(f"### Content from {res['url']}\n\n{res['content']}\n")
-        return "\n---\n".join(output) or "No content extracted."
+        return wrap_untrusted("\n---\n".join(output)) if output else "No content extracted."
 
 firecrawl_tool = FirecrawlTool()
 batch_scrape_tool = BatchScrapeTool()

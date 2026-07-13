@@ -1,6 +1,6 @@
-import json
 from litellm import acompletion
 from services.llm_router import get_completion_settings
+from utils.json_parse import parse_json
 
 
 async def evaluate_output(content: str, research: str, topic: str) -> dict:
@@ -35,10 +35,4 @@ Respond ONLY with valid JSON:
         max_tokens=500,
         timeout=60,
     )
-    raw = response.choices[0].message.content.strip()
-    # Strip markdown code fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw)
+    return parse_json(response.choices[0].message.content)

@@ -43,6 +43,7 @@ from contextlib import nullcontext
 from crewai import Crew, Process
 from services.llm_router import resolve_actual_model, reset_actual_model
 from utils.langfuse_utils import get_langfuse
+from utils.pricing import calculate_cost
 
 def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: RunnableConfig, result_key: str, agent_key: str) -> dict:
     lf = get_langfuse()
@@ -80,22 +81,36 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
             if span is not None:
                 span.update(level="ERROR", status_message="crew_kickoff_failed")
             raise
+        usage = result.token_usage
+        # Model that actually served this call — the configured primary, or the
+        # fallback slug if litellm spilled over during a provider outage (H4).
+        # Pricing keys off this, so a fallback leg is costed correctly instead of
+        # being priced against a primary that never ran.
+        model = resolve_actual_model(agent_key)
+        prompt_tokens     = usage.prompt_tokens     if usage else 0
+        completion_tokens = usage.completion_tokens if usage else 0
         if span is not None:
-            span.update(output=str(result))
+            # L1: correlate the Langfuse trace with the DB run and its cost rows.
+            # Tag the span with the run id (the graph thread_id) plus the exact
+            # model / token / cost that run_service also writes to run_costs, so a
+            # trace lines up with the run and the spend it produced.
+            rid = (config.get("configurable") or {}).get("thread_id")
+            span.update(
+                output=str(result),
+                model=model,
+                metadata={"run_id": rid, "agent": agent_key},
+                usage_details={"input": prompt_tokens, "output": completion_tokens},
+                cost_details={"total": calculate_cost(model, prompt_tokens, completion_tokens)},
+            )
 
     logger.info("crew_node_complete", node=result_key)
-    usage = result.token_usage
     return {
         result_key: str(result),
         "token_usages": [{
             "agent_name":        result_key,
-            # Model that actually served this call — the configured primary, or
-            # the fallback slug if litellm spilled over during a provider outage
-            # (H4). Pricing keys off this, so a fallback leg is costed correctly
-            # instead of being priced against a primary that never ran.
-            "model":             resolve_actual_model(agent_key),
-            "prompt_tokens":     (usage.prompt_tokens     if usage else 0),
-            "completion_tokens": (usage.completion_tokens if usage else 0),
+            "model":             model,
+            "prompt_tokens":     prompt_tokens,
+            "completion_tokens": completion_tokens,
         }],
     }
 

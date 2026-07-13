@@ -1,6 +1,6 @@
-import json
 from litellm import completion
 from services.llm_router import get_completion_settings
+from utils.json_parse import parse_json
 from logger import logger
 
 
@@ -52,8 +52,7 @@ def generate_sub_queries(original_query: str, n: int = 3) -> list[str]:
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
         )
-        raw = response.choices[0].message.content.strip()
-        sub_queries = json.loads(raw)
+        sub_queries = parse_json(response.choices[0].message.content)
         if isinstance(sub_queries, list) and sub_queries:
             return [str(q) for q in sub_queries]
         return [original_query]

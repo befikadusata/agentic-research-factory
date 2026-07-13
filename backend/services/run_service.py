@@ -38,8 +38,10 @@ async def emit(run_id: str, event_type: str, data: dict):
                 run.logs = logs
                 flag_modified(run, "logs")
                 await db.commit()
-    except Exception:
-        pass  # DB persistence is best-effort; Redis publish is authoritative for live streaming
+    except Exception as e:
+        # DB persistence is best-effort (Redis publish below is authoritative for
+        # live streaming), but swallowing it silently hid real log-write failures.
+        logger.warning("emit_log_persist_failed", run_id=run_id, event=event_type, error=str(e))
     redis_client = await get_redis_client()
     await redis_client.publish(f"{LOG_CHANNEL_PREFIX}{run_id}", json.dumps({"type": event_type, "data": data}))
 
@@ -58,8 +60,15 @@ async def _log_token_usages(run_id: str, token_usages: list):
                     completion_tokens,
                     cost,
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            # A dropped cost row silently under-reports spend — at least make the
+            # loss observable instead of vanishing.
+            logger.warning(
+                "cost_row_persist_failed",
+                run_id=run_id,
+                agent_name=usage.get("agent_name"),
+                error=str(e),
+            )
 
 
 async def _set_status(run: Run, status: RunStatus, db: AsyncSession):

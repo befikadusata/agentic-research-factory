@@ -6,6 +6,7 @@ from pydantic import Field
 from tenacity import retry, stop_after_attempt, wait_exponential
 from logger import logger
 from utils.cache import tool_cache
+from tools.untrusted import wrap_untrusted
 
 class SearxngSearchTool(BaseTool):
     name: str = "web_search"
@@ -42,7 +43,7 @@ class SearxngSearchTool(BaseTool):
             # here compounds — keeps the pass under Groq's free 12K tokens/min.
             for r in results.get("results", [])[:4]:
                 output.append(f"- [{r.get('title', '')}]({r.get('url', '')})\n  {r.get('content', '')[:150]}")
-            return "\n".join(output) or "No search results found for this query."
+            return wrap_untrusted("\n".join(output)) if output else "No search results found for this query."
         except Exception as e:
             logger.warning("searxng_search_failed", query=query, error=str(e))
             return (
@@ -85,7 +86,7 @@ class TavilySearchTool(BaseTool):
                 output.append(f"**Summary:** {results['answer']}\n")
             for r in results.get("results", []):
                 output.append(f"- [{r['title']}]({r['url']})\n  {r.get('content', '')[:300]}")
-            return "\n".join(output) or "No search results found for this query."
+            return wrap_untrusted("\n".join(output)) if output else "No search results found for this query."
         except Exception as e:
             logger.warning("tavily_search_failed", query=query, error=str(e))
             return (

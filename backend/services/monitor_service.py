@@ -8,7 +8,6 @@ Diffing successive runs and sending change alerts are not implemented here yet â
 this module only handles the scheduling half.
 """
 import asyncio
-import json
 import httpx
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
@@ -22,6 +21,7 @@ from database import AsyncSessionLocal
 from models import Monitor, Run, RunStatus
 from services.run_dispatch import build_run
 from services.llm_router import get_completion_settings
+from utils.json_parse import parse_json
 from utils.email import send_email
 from celery_app import execute_run_task
 from logger import logger
@@ -164,12 +164,7 @@ If nothing material changed, respond {{"changed": false, "summary": "No material
             max_tokens=500,
             timeout=60,
         )
-        raw = response.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw)
+        return parse_json(response.choices[0].message.content)
     except Exception as e:
         logger.warning("monitor_diff_failed", error=str(e))
         return {"changed": False, "summary": "Change detection unavailable.", "error": str(e)}
