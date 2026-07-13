@@ -41,7 +41,7 @@ const DIMENSIONS: { key: keyof EvalScores; label: string }[] = [
 ];
 
 export function ConfidenceBadge({ scores, vertical }: Props) {
-  // eval runs after completion and can fail (LLM judge exception → {}).
+  // eval runs at each stage (and on completion) and can fail (LLM judge exception → {}).
   if (!scores || typeof scores.overall !== "number") {
     return (
       <div className="border border-border-subtle rounded-lg bg-surface-2 px-4 py-3">
@@ -63,7 +63,7 @@ export function ConfidenceBadge({ scores, vertical }: Props) {
           <h2 className="font-semibold text-content">AI Confidence</h2>
           <span
             className="text-xs text-content-muted cursor-help"
-            title="LLM-judged quality estimate scored after the run completes. A heuristic signal, not a guarantee."
+            title="LLM-judged quality estimate. Updates at each stage as the run progresses and is finalized on completion. A heuristic signal, not a guarantee."
           >
             ⓘ
           </span>
