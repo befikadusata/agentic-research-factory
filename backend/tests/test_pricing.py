@@ -24,6 +24,22 @@ def test_calculate_cost_free_model_is_zero():
     assert calculate_cost("meta-llama/llama-3.3-70b-instruct:free", 5000, 5000) == 0.0
 
 
+def test_calculate_cost_routed_free_openrouter_model_is_priced():
+    # openrouter/tencent/hy3:free is the live analyst/reviewer/eval model; it used
+    # to be absent from the table and log unknown_model_pricing on every call.
+    # Sourced from MODEL_REGISTRY now, it prices to $0 (free) — not "unknown".
+    assert calculate_cost("openrouter/tencent/hy3:free", 5000, 5000) == 0.0
+
+
+def test_calculate_cost_matches_registry_price():
+    # Registry is the single source of truth for routed-model pricing.
+    from services.llm_router import MODEL_REGISTRY
+
+    prompt_price, completion_price = MODEL_REGISTRY["groq/llama-3.1-8b-instant"]["price"]
+    cost = calculate_cost("groq/llama-3.1-8b-instant", 1000, 1000)
+    assert cost == prompt_price + completion_price
+
+
 def test_calculate_cost_unknown_model_falls_back_to_zero():
     assert calculate_cost("some/unpriced-model", 1000, 1000) == 0.0
 

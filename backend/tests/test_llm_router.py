@@ -1,6 +1,22 @@
+import pytest
+
 from config import settings
 import services.llm_router as lr
 from services.llm_router import get_completion_settings, get_fallbacks, get_model
+
+
+def _routed(monkeypatch, groq=True, openrouter=True, gemini=False):
+    """Put the router in routed mode with an explicit set of available provider
+    keys and no per-agent overrides, so capability resolution is deterministic
+    regardless of what the ambient .env sets."""
+    monkeypatch.setattr(settings, "LLM_MODEL", None)
+    monkeypatch.setattr(settings, "JUDGE_MODEL", None)
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "groq-key" if groq else "")
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "or-key" if openrouter else "")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "gem-key" if gemini else "")
+    for name in ("STRATEGIST", "QUERY_REWRITER", "RESEARCHER", "WRITER", "EDITOR",
+                 "LEAD_INTEL", "ANALYST", "REVIEWER", "EVAL"):
+        monkeypatch.setattr(settings, f"{name}_MODEL", None)
 
 
 def test_get_model_uses_legacy_override(monkeypatch):
@@ -113,12 +129,14 @@ def test_completion_settings_carries_fallbacks(monkeypatch):
 
 
 def test_get_completion_settings_uses_provider_key(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_MODEL", None)
+    _routed(monkeypatch, groq=False, openrouter=True, gemini=False)
     monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "openrouter-test-key")
 
     llm = get_completion_settings("analyst")
 
-    assert llm.model == settings.ANALYST_MODEL
+    # analyst (reasoning) routes to the only available provider's model, and the
+    # settings carry that provider's key.
+    assert llm.model == "openrouter/tencent/hy3:free"
     assert llm.api_key == "openrouter-test-key"
 
 
@@ -178,3 +196,79 @@ def test_resolve_actual_model_unknown_served_degrades_to_primary(monkeypatch):
     lr._capture_actual_model({}, _Resp("some-unrelated-model"), 0, 0)
 
     assert lr.resolve_actual_model("researcher") == "groq/llama-3.3-70b-versatile"
+
+
+# ── Capability-based routing: per-role tiering, single-provider-safe ──────────
+# Routing is keyed by each role's capability (llm_router.ROLE_CAPS) against a
+# model registry, ranked cost-first — replacing the old hardcoded per-agent
+# table that pinned analyst/reviewer/eval to OpenRouter and so failed-then-fell-
+# back on every call when only the Groq key was present.
+
+def test_routed_groq_and_openrouter_reproduces_current_mapping(monkeypatch):
+    # With both keys (the shipped setup) the resolver must reproduce the exact
+    # slugs the old hardcoded table produced — a behaviour-preservation guard.
+    _routed(monkeypatch, groq=True, openrouter=True, gemini=False)
+    expected = {
+        "strategist": "groq/llama-3.1-8b-instant",
+        "query_rewriter": "groq/llama-3.1-8b-instant",
+        "researcher": "groq/llama-3.3-70b-versatile",
+        "lead_intel": "groq/llama-3.3-70b-versatile",
+        "writer": "groq/llama-3.3-70b-versatile",
+        "editor": "groq/llama-3.3-70b-versatile",
+        "analyst": "openrouter/tencent/hy3:free",
+        "reviewer": "openrouter/tencent/hy3:free",
+        "eval": "openrouter/tencent/hy3:free",
+    }
+    for role, slug in expected.items():
+        assert get_model(role) == slug, role
+
+
+def test_routed_groq_only_keeps_per_role_tiering(monkeypatch):
+    # The core fix: with only the Groq key, light work still uses 8B and the
+    # reasoning/judge roles resolve to Groq 70B directly instead of pinning an
+    # absent OpenRouter model and eating a failing fallback round-trip.
+    _routed(monkeypatch, groq=True, openrouter=False, gemini=False)
+
+    assert get_model("strategist") == "groq/llama-3.1-8b-instant"
+    assert get_model("researcher") == "groq/llama-3.3-70b-versatile"
+    assert get_model("analyst") == "groq/llama-3.3-70b-versatile"
+    assert get_model("reviewer") == "groq/llama-3.3-70b-versatile"
+    assert get_model("eval") == "groq/llama-3.3-70b-versatile"
+    # No peer provider → no cross-provider fallback to fail against.
+    assert get_fallbacks("analyst") == []
+    assert get_fallbacks("reviewer") == []
+
+
+def test_cost_first_prefers_cheapest_qualifying_model(monkeypatch):
+    # analyst (reasoning): the free OpenRouter model is cheaper than Groq 70B, so
+    # it wins the primary slot and the pricier model becomes the derived fallback.
+    _routed(monkeypatch, groq=True, openrouter=True, gemini=False)
+
+    assert get_model("analyst") == "openrouter/tencent/hy3:free"
+    assert get_fallbacks("analyst") == ["groq/llama-3.3-70b-versatile"]
+
+
+def test_judge_prefers_model_distinct_from_generators(monkeypatch):
+    # Generalized M2: without JUDGE_MODEL, a judge still avoids the generators'
+    # model when an alternative qualifies, so it doesn't grade its own blind spots.
+    _routed(monkeypatch, groq=True, openrouter=True, gemini=False)
+
+    assert get_model("writer") == "groq/llama-3.3-70b-versatile"
+    assert get_model("reviewer") != get_model("writer")
+    assert get_model("reviewer") == "openrouter/tencent/hy3:free"
+
+
+def test_tool_use_primary_avoids_poor_tool_caller(monkeypatch):
+    # The researcher drives a ReAct tool loop, so its PRIMARY must be a good
+    # tool-caller (Groq 70B) even though the free model is cheaper — the free
+    # model is a poor tool-caller and only reachable as a fallback leg.
+    _routed(monkeypatch, groq=True, openrouter=True, gemini=False)
+
+    assert get_model("researcher") == "groq/llama-3.3-70b-versatile"
+
+
+def test_unknown_agent_raises(monkeypatch):
+    _routed(monkeypatch)
+
+    with pytest.raises(KeyError):
+        get_model("nonexistent")

@@ -28,16 +28,70 @@ _GROQ_FALLBACK = "groq/llama-3.3-70b-versatile"
 _OPENROUTER_FALLBACK = "openrouter/tencent/hy3:free"
 
 
-_DEFAULT_MODELS: dict[str, str] = {
-    "strategist": "groq/llama-3.1-8b-instant",
-    "researcher": "meta-llama/llama-3.3-70b-instruct:free",
-    "lead_intel": "meta-llama/llama-3.3-70b-instruct:free",
-    "query_rewriter": "groq/llama-3.1-8b-instant",
-    "analyst":  "meta-llama/llama-3.3-70b-instruct:free",
-    "writer":   "meta-llama/llama-3.3-70b-instruct:free",
-    "editor":   "meta-llama/llama-3.3-70b-instruct:free",
-    "reviewer": "meta-llama/llama-3.3-70b-instruct:free",
-    "eval":     "meta-llama/llama-3.3-70b-instruct:free",
+# ── Capability-based model registry (routed mode) ─────────────────────────────
+# Routed mode picks each agent's model from its *capability* need, not a
+# hardcoded per-agent slug. This makes per-role tiering work on a *single*
+# provider (e.g. Groq 8B for light work, Groq 70B for reasoning) instead of
+# collapsing to one model — the fix for the old design, where analyst/reviewer/
+# eval were pinned to an OpenRouter model and so failed-then-fell-back on every
+# call whenever only the Groq key was present. It also lets a model be added or
+# repriced in one place (utils.pricing reads price straight from here).
+#
+#   caps          — what the model is fit to be a PRIMARY for.
+#   tool_quality  — "good" models can drive the researcher's ReAct tool loop;
+#                   a "poor" (non-standard tool-call format) model must never be
+#                   a tool-use primary, though a provider-derived fallback leg
+#                   (get_fallbacks) may still reach it as a last resort.
+#   price         — (prompt_per_1k, completion_per_1k) USD; the single source of
+#                   truth consumed by utils.pricing.
+#   rate_limit    — informational: "token" tiers exhaust on tokens/day, "request"
+#                   tiers on request count (cheap for big single-shot calls).
+LIGHT, REASONING, WRITING, TOOL_USE, JUDGE = (
+    "light", "reasoning", "writing", "tool_use", "judge",
+)
+
+MODEL_REGISTRY: dict[str, dict] = {
+    "groq/llama-3.1-8b-instant": {
+        "provider": "groq",
+        "caps": {LIGHT},
+        "tool_quality": "poor",
+        "price": (0.00005, 0.00008),
+        "rate_limit": "token",
+    },
+    "groq/llama-3.3-70b-versatile": {
+        "provider": "groq",
+        "caps": {REASONING, WRITING, TOOL_USE, JUDGE},
+        "tool_quality": "good",
+        "price": (0.00059, 0.00079),
+        "rate_limit": "token",
+    },
+    "openrouter/tencent/hy3:free": {
+        "provider": "openrouter",
+        "caps": {REASONING, JUDGE},
+        "tool_quality": "poor",
+        "price": (0.0, 0.0),
+        "rate_limit": "request",
+    },
+    # NB: Gemini is deliberately NOT a routing citizen. GEMINI_API_KEY ships set
+    # for RAG embeddings (config.EMBEDDING_MODEL), and Gemini reasoning proved
+    # unusable under this pipeline's burst load; since Gemini Flash would be the
+    # cheapest tool-use/writing model, listing it here would let cost-first
+    # silently divert the core generation path onto it. Set a *_MODEL override
+    # explicitly if you ever want a Gemini reasoning model.
+}
+
+# Each agent/service's required capability. Also the valid-agent allowlist — an
+# unknown name raises KeyError (as _DEFAULT_MODELS did before it).
+ROLE_CAPS: dict[str, str] = {
+    "strategist": LIGHT,
+    "query_rewriter": LIGHT,
+    "researcher": TOOL_USE,
+    "lead_intel": TOOL_USE,
+    "writer": WRITING,
+    "editor": WRITING,
+    "analyst": REASONING,
+    "reviewer": JUDGE,
+    "eval": JUDGE,
 }
 
 
@@ -53,20 +107,64 @@ def _legacy_mode() -> bool:
     return settings.LLM_MODEL is not None and settings.LLM_MODEL != ""
 
 
+def _generator_reference_model() -> str | None:
+    """The model the generators resolve to, used to keep a judge off the same
+    model it grades. A generator role is never itself a judge, so this can't
+    recurse; any resolution failure just disables the decoupling preference."""
+    try:
+        return get_model("writer")
+    except (KeyError, RuntimeError, IndexError):
+        return None
+
+
+def _resolve(agent_name: str) -> list[str]:
+    """Routed-mode candidate models for an agent, best (primary) first.
+
+    Filters MODEL_REGISTRY to providers whose key is present and models fit for
+    the role's capability, then ranks cost-first (cheapest qualifying model wins,
+    matching the free-tier-first intent). A tool-use role additionally sinks poor
+    tool-callers below good ones for the *primary* slot. For a judge without
+    JUDGE_MODEL, a model distinct from the generators' is preferred — generalizing
+    the M2 judge/generator decoupling. get_model uses [0]; the full list is
+    returned for testability.
+    """
+    if agent_name not in ROLE_CAPS:
+        raise KeyError(f"Unknown agent name: {agent_name}")
+    need = ROLE_CAPS[agent_name]
+
+    quals = [
+        slug for slug, spec in MODEL_REGISTRY.items()
+        if _has_key(spec["provider"]) and need in spec["caps"]
+    ]
+    # Cheapest-qualifying first (cost-first policy). Python's sort is stable, so
+    # the tie-break below preserves this ordering within each quality group.
+    quals.sort(key=lambda s: sum(MODEL_REGISTRY[s]["price"]))
+
+    if need == TOOL_USE:
+        # A tool-use PRIMARY must drive the ReAct loop reliably; a poor
+        # tool-caller drops below the good ones.
+        quals.sort(key=lambda s: MODEL_REGISTRY[s]["tool_quality"] != "good")
+
+    if need == JUDGE and not (agent_name in _JUDGE_AGENTS and settings.JUDGE_MODEL):
+        gen = _generator_reference_model()
+        non_gen = [s for s in quals if s != gen]
+        if non_gen:  # keep the generator model only as a lower-priority option
+            quals = non_gen + [s for s in quals if s == gen]
+
+    return quals
+
+
 def get_model(agent_name: str) -> str:
     """
     Resolve the model slug for an agent or service.
 
-    Judge override:
-    - If JUDGE_MODEL is set, the reviewer and eval judge use it regardless of
-      mode, so they never collapse onto the generator model they're grading (M2).
-
-    Legacy behavior:
-    - If LLM_MODEL is set, every (non-judge) agent uses it.
-
-    Routed behavior:
-    - Otherwise, the per-agent defaults above are used and can be overridden in .env.
-    - Raw OpenRouter slugs like meta-llama/...:free are routed through OpenRouter.
+    Resolution order:
+    1. JUDGE_MODEL — the reviewer/eval judges use it in every mode, so they never
+       collapse onto the generator model they're grading (M2).
+    2. Legacy LLM_MODEL — if set, every (non-judge) agent uses it.
+    3. Explicit per-agent override — a set {AGENT}_MODEL env var wins over routing.
+    4. Routed default — the cheapest registry model fit for the agent's capability
+       (see _resolve), which works on a single provider too.
     """
     if agent_name in _JUDGE_AGENTS and settings.JUDGE_MODEL:
         return settings.JUDGE_MODEL
@@ -74,11 +172,18 @@ def get_model(agent_name: str) -> str:
     if _legacy_mode():
         return settings.LLM_MODEL or ""
 
-    if agent_name not in _DEFAULT_MODELS:
-        raise KeyError(f"Unknown agent name: {agent_name}")
-
     override = getattr(settings, f"{agent_name.upper()}_MODEL", None)
-    return override or _DEFAULT_MODELS[agent_name]
+    if override:
+        return override
+
+    candidates = _resolve(agent_name)
+    if not candidates:
+        raise RuntimeError(
+            f"No model available for '{agent_name}' (capability "
+            f"'{ROLE_CAPS[agent_name]}') — no provider key is configured for any "
+            "model that can serve it."
+        )
+    return candidates[0]
 
 
 def _has_key(provider: str | None) -> bool:

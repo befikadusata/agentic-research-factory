@@ -18,30 +18,29 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
 
-    # Default router targets (each agent's PRIMARY model; llm_router derives a
-    # cross-provider fallback from it). Load is deliberately spread across two
-    # free tiers so neither daily budget is the sole bottleneck:
-    #   - Light, high-frequency calls → Groq 8B-instant: fast and a very high
-    #     token/day ceiling, so it shrugs off the volume.
-    #   - Core reasoning/writing path → Groq 70B-versatile: fast and reliable
-    #     (its 100K tokens/day cap is the tight one, so only the stages that most
-    #     need quality+reliability sit here).
-    #   - Analysis / QA / eval → OpenRouter free (Tencent Hunyuan hy3): a
-    #     reasoning model that's request-count-limited rather than token-limited,
-    #     so its big single calls are cheap on quota and keep the Groq 70B budget
-    #     for the core path. These agents are single-shot (no tool-use ReAct), so
-    #     a reasoning model's chain-of-thought helps quality and its non-standard
-    #     tool-call format doesn't matter here.
-    # The `openrouter/` prefix is explicit so litellm routes it correctly.
-    STRATEGIST_MODEL: str = "groq/llama-3.1-8b-instant"
-    QUERY_REWRITER_MODEL: str = "groq/llama-3.1-8b-instant"
-    RESEARCHER_MODEL: str = "groq/llama-3.3-70b-versatile"
-    WRITER_MODEL: str = "groq/llama-3.3-70b-versatile"
-    EDITOR_MODEL: str = "groq/llama-3.3-70b-versatile"
-    LEAD_INTEL_MODEL: str = "groq/llama-3.3-70b-versatile"
-    ANALYST_MODEL: str = "openrouter/tencent/hy3:free"
-    REVIEWER_MODEL: str = "openrouter/tencent/hy3:free"
-    EVAL_MODEL: str = "openrouter/tencent/hy3:free"
+    # Per-agent model OVERRIDES. Unset (None) → the agent is routed by capability
+    # via llm_router.MODEL_REGISTRY / ROLE_CAPS, which picks the cheapest model
+    # fit for the role from whichever providers have keys. That routing works on
+    # a single provider (e.g. Groq 8B for light work, Groq 70B for reasoning),
+    # so it no longer collapses when only one provider key is set. Set one of
+    # these to pin a specific agent to a specific slug (it wins over routing);
+    # the `openrouter/` prefix is explicit so litellm routes it correctly.
+    #
+    # The old default routing is now expressed as capabilities in the registry:
+    #   - light (strategist, query_rewriter)        → Groq 8B-instant
+    #   - reasoning/writing/tool-use (core path)     → Groq 70B-versatile
+    #   - reasoning/judging, single-shot (analyst,   → OpenRouter free (Tencent
+    #     reviewer, eval)                              Hunyuan hy3), when its key
+    #                                                  is present; else Groq 70B.
+    STRATEGIST_MODEL: str | None = None
+    QUERY_REWRITER_MODEL: str | None = None
+    RESEARCHER_MODEL: str | None = None
+    WRITER_MODEL: str | None = None
+    EDITOR_MODEL: str | None = None
+    LEAD_INTEL_MODEL: str | None = None
+    ANALYST_MODEL: str | None = None
+    REVIEWER_MODEL: str | None = None
+    EVAL_MODEL: str | None = None
 
     # Quality judges (the reviewer's audit + the eval-confidence judge) should
     # not be the same model as the generators they grade — a model grading its
