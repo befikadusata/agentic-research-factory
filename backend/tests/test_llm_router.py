@@ -5,8 +5,40 @@ from services.llm_router import get_completion_settings, get_fallbacks, get_mode
 
 def test_get_model_uses_legacy_override(monkeypatch):
     monkeypatch.setattr(settings, "LLM_MODEL", "legacy/model")
+    monkeypatch.setattr(settings, "JUDGE_MODEL", None)
 
     assert get_model("researcher") == "legacy/model"
+
+
+# ── M2: the judges (reviewer + eval) can differ from the generators they grade ─
+# Otherwise, in legacy mode every agent collapses onto LLM_MODEL and a model
+# grades its own output, surfaced to the human as "AI Confidence."
+
+def test_judge_model_overrides_generators_in_legacy_mode(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MODEL", "groq/llama-3.3-70b-versatile")
+    monkeypatch.setattr(settings, "JUDGE_MODEL", "groq/llama-3.1-8b-instant")
+
+    # Generators stay on the legacy model; the judges diverge.
+    assert get_model("researcher") == "groq/llama-3.3-70b-versatile"
+    assert get_model("reviewer") == "groq/llama-3.1-8b-instant"
+    assert get_model("eval") == "groq/llama-3.1-8b-instant"
+
+
+def test_judge_model_overrides_in_routed_mode(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MODEL", None)
+    monkeypatch.setattr(settings, "JUDGE_MODEL", "groq/llama-3.1-8b-instant")
+    monkeypatch.setattr(settings, "REVIEWER_MODEL", "openrouter/tencent/hy3:free")
+
+    assert get_model("reviewer") == "groq/llama-3.1-8b-instant"
+
+
+def test_judges_follow_normal_resolution_when_judge_model_unset(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MODEL", "legacy/model")
+    monkeypatch.setattr(settings, "JUDGE_MODEL", None)
+
+    # Unset JUDGE_MODEL preserves the pre-M2 behavior: judges follow legacy too.
+    assert get_model("reviewer") == "legacy/model"
+    assert get_model("eval") == "legacy/model"
 
 
 # ── H1: the cross-provider fallback layer is live in legacy mode too ──────────

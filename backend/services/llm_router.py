@@ -41,6 +41,14 @@ _DEFAULT_MODELS: dict[str, str] = {
 }
 
 
+# The quality judges: the reviewer's audit and the eval-confidence judge. They
+# grade the generators' output, so pinning them to the same model as the
+# generators (as legacy mode otherwise does) means a model grades itself and its
+# blind spots surface to the human as "AI Confidence." JUDGE_MODEL decouples them
+# in every mode (see get_model — M2).
+_JUDGE_AGENTS = frozenset({"reviewer", "eval"})
+
+
 def _legacy_mode() -> bool:
     return settings.LLM_MODEL is not None and settings.LLM_MODEL != ""
 
@@ -49,13 +57,20 @@ def get_model(agent_name: str) -> str:
     """
     Resolve the model slug for an agent or service.
 
+    Judge override:
+    - If JUDGE_MODEL is set, the reviewer and eval judge use it regardless of
+      mode, so they never collapse onto the generator model they're grading (M2).
+
     Legacy behavior:
-    - If LLM_MODEL is set, every agent uses it.
+    - If LLM_MODEL is set, every (non-judge) agent uses it.
 
     Routed behavior:
     - Otherwise, the per-agent defaults above are used and can be overridden in .env.
     - Raw OpenRouter slugs like meta-llama/...:free are routed through OpenRouter.
     """
+    if agent_name in _JUDGE_AGENTS and settings.JUDGE_MODEL:
+        return settings.JUDGE_MODEL
+
     if _legacy_mode():
         return settings.LLM_MODEL or ""
 

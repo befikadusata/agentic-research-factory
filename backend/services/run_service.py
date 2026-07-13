@@ -9,7 +9,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from database import AsyncSessionLocal
 from models import Run, RunStatus
 from logger import logger
-from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
+from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential, before_sleep_log
 from configs.verticals import build_execution_brief, get_vertical
 from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_INSTRUCTION_KEY
 from utils.cost_tracker import log_cost
@@ -86,20 +86,30 @@ async def _claim_status(run_id: UUID, expected: RunStatus, new: RunStatus) -> bo
         return result.rowcount > 0
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-)
 async def _invoke_supervisor_with_retry(supervisor, state: dict | None, config: dict, recursion_limit: int = 25):
     """Run (or resume) the graph up to its next interrupt point or END.
 
     `state=None` resumes an in-progress thread (`config["configurable"]["thread_id"]`)
     from its last checkpoint instead of starting a fresh graph run.
+
+    On a *retry* we deliberately resume from the checkpoint (input=None) rather
+    than re-sending the original `state`. LangGraph checkpoints after every
+    super-step, so when a mid-graph node fails the nodes that already ran are
+    durably recorded; replaying the original input would restart from START and
+    overwrite those checkpointed channels with the stale entry values (e.g.
+    plan_output -> "" from the reconstructed state), throwing away completed work
+    and re-billing it. Resuming re-runs only the failed super-step. (M1)
     """
     call_config = {**config, "recursion_limit": recursion_limit}
-    call = asyncio.to_thread(supervisor.invoke, state, call_config)
-    return await asyncio.wait_for(call, timeout=LLM_STAGE_TIMEOUT_SEC)
+    async for attempt in AsyncRetrying(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+    ):
+        with attempt:
+            invoke_input = state if attempt.retry_state.attempt_number == 1 else None
+            call = asyncio.to_thread(supervisor.invoke, invoke_input, call_config)
+            return await asyncio.wait_for(call, timeout=LLM_STAGE_TIMEOUT_SEC)
 
 
 async def _resume_graph_at(supervisor, entry_state: dict, config: dict, recursion_limit: int = 25):

@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     REVIEWER_MODEL: str = "openrouter/tencent/hy3:free"
     EVAL_MODEL: str = "openrouter/tencent/hy3:free"
 
+    # Quality judges (the reviewer's audit + the eval-confidence judge) should
+    # not be the same model as the generators they grade — a model grading its
+    # own output shares its blind spots, and that self-assessment is surfaced to
+    # the human as "AI Confidence." When set, JUDGE_MODEL pins the judges to a
+    # distinct model in BOTH legacy and routed mode (in legacy mode every agent
+    # otherwise collapses onto the single LLM_MODEL). Unset → judges follow the
+    # normal resolution (legacy: LLM_MODEL; routed: REVIEWER_MODEL/EVAL_MODEL).
+    # A different model on the same provider (e.g. a second Groq model) is enough
+    # to break the shared blind spot without needing a second provider key. (M2)
+    JUDGE_MODEL: str | None = None
+
     # Gemini embeddings for RAG.
     EMBEDDING_MODEL: str = "gemini-embedding-2"
     EMBEDDING_DIMENSION: int = 384
