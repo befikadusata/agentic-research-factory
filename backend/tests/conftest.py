@@ -109,3 +109,62 @@ async def redis_pool():
     from utils.redis_client import init_redis_pool
     init_redis_pool()
     yield
+
+
+@pytest.fixture
+def run_driver(monkeypatch):
+    """Drive the segmented run state machine synchronously.
+
+    execute_run now runs one segment per Celery task and returns; the run
+    advances when the next segment is queued (by an operator approving, or by an
+    autonomous run auto-advancing). Both paths funnel through
+    run_service._dispatch_resume, which normally does execute_run_task.delay().
+    Here we replace that with an in-memory queue and pump it, so a test can drive
+    a full multi-gate run without a live Celery worker.
+
+    Returns an async `drive(run_id, *, approve=True, instruction=None,
+    observer=None, max_steps=30)`:
+      - approve=True: act as the operator, approving each HITL gate. approve=False
+        stops at the first gate (unless the run auto-advances itself, i.e. is a
+        monitor/autonomous run — those self-queue and complete with no approval).
+      - observer: optional `async (run) -> None` called at each gate, before
+        approving, so the test can capture the stage's persisted output.
+    """
+    from services import run_service
+
+    # (run_id, approved_gate) pairs, standing in for the Celery queue.
+    queue: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        run_service, "_dispatch_resume",
+        lambda rid, gate: queue.append((str(rid), gate)),
+    )
+
+    async def drive(run_id, *, approve=True, instruction=None, observer=None, max_steps=30):
+        from uuid import UUID
+        from database import AsyncSessionLocal
+        from models import Run, RunStatus
+
+        gates = {
+            RunStatus.awaiting_research_approval,
+            RunStatus.awaiting_analysis_approval,
+            RunStatus.awaiting_final_approval,
+        }
+        queue.clear()
+        queue.append((str(run_id), None))
+        steps = 0
+        while queue and steps < max_steps:
+            steps += 1
+            rid, gate = queue.pop(0)
+            await run_service.execute_run(UUID(rid), gate)
+            async with AsyncSessionLocal() as db:
+                run = await db.get(Run, UUID(rid))
+                status = run.status if run else None
+                if observer is not None and status in gates:
+                    await observer(run)
+            # A manual (non-autonomous) run parks at the gate without self-queuing;
+            # act as the operator. An autonomous run already re-queued itself.
+            if status in gates and not queue and approve:
+                await run_service.approve_hitl(rid, instruction, status.value)
+        return steps
+
+    return drive

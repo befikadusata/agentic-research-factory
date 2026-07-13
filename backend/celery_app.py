@@ -13,6 +13,12 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    # Each task now runs ONE pipeline segment (research / analyse / write /
+    # finalize) and returns — human-in-the-loop waits happen *between* tasks, not
+    # inside them (a paused run holds no worker; run_service persists an
+    # awaiting_* status and the next segment is queued on approval). So this limit
+    # bounds pure compute for a single segment, not a whole multi-gate run, and no
+    # longer has to exceed any HITL timeout.
     task_soft_time_limit=600,   # SIGTERM after 10 min; task can clean up
     task_time_limit=660,         # SIGKILL after 11 min if still running
     # Each task runs its own event loop via asyncio.run(). The module-level
@@ -40,11 +46,14 @@ celery_app.conf.update(
 )
 
 @celery_app.task(name="execute_run_task")
-def execute_run_task(run_id: str):
+def execute_run_task(run_id: str, approved_gate: str | None = None):
+    # Runs one pipeline segment. approved_gate is None for the initial start, or
+    # the awaiting_* status just approved — run_service uses it to advance exactly
+    # that gate and to no-op stale/duplicate resumes.
     import asyncio
     from uuid import UUID
     from services.run_service import execute_run
-    asyncio.run(execute_run(UUID(run_id)))
+    asyncio.run(execute_run(UUID(run_id), approved_gate))
 
 
 @celery_app.task(name="ingest_doc_task")

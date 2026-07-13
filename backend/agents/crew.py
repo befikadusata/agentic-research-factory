@@ -28,6 +28,12 @@ class ResearchState(TypedDict):
     user_feedback: Optional[str]
     retry_count: int
     token_usages: Annotated[list, operator.add]
+    # Set by run_service when resuming a durably-paused run in a *fresh* process
+    # (the InMemorySaver checkpoint doesn't survive Celery's per-task child
+    # recycling, so state is rebuilt from the DB and re-entered mid-graph). When
+    # present, route_entry sends START straight to this node instead of plan/
+    # research. Empty/absent for a normal first invoke.
+    _resume_from: Optional[str]
 
 
 # ── node helpers ────────────────────────────────────────────────────────────
@@ -207,11 +213,16 @@ def route_after_research(state: ResearchState) -> str:
 
 
 def route_entry(state: ResearchState) -> str:
-    # This only runs once, for the initial invoke() of a fresh thread — resuming
-    # after an interrupt (invoke(None, config)) continues from the paused node
-    # directly and never re-enters routing from START. It used to also sniff
-    # analysis_output/research_output to fake a "resume" by re-entering from
-    # START with hand-built state; that's now handled by the checkpointer.
+    # Runs on the initial invoke() of a fresh thread. Two cases:
+    #  1. Same-process resume after an interrupt (invoke(None, config)) continues
+    #     from the paused node directly and never re-enters routing from START.
+    #  2. Cross-process durable resume: run_service rebuilds state from the DB in
+    #     a brand-new worker child (the in-memory checkpoint is gone) and sets
+    #     `_resume_from` to re-enter mid-graph. interrupt_before still fires on
+    #     that node, so the first invoke pauses before it and invoke(None) runs it.
+    resume_from = state.get("_resume_from")
+    if resume_from:
+        return resume_from
     if state["task_type"] == "lead_intel":
         return "lead_intel"
     if state["task_type"] == "research_report":

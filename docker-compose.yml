@@ -71,6 +71,11 @@ services:
     build: ./backend
     # -Q default: celery_app routes execute_run_task/ingest_doc_task to the
     # "default" queue, so the worker must consume it (not just the "celery" one).
+    # --concurrency=1: runs still serialize, but HITL waits no longer hold a
+    # worker (each task runs one segment and returns; a paused run occupies no
+    # slot), so a human idling at an approval no longer blocks every other run.
+    # Raise this once off the shared Groq free-tier rate limit — parallel LLM
+    # calls would otherwise blow the 12K tokens/min ceiling.
     command: celery -A celery_app worker --loglevel=info --concurrency=1 -Q default
     env_file: ./backend/.env
     environment:

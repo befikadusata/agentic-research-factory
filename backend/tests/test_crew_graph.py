@@ -129,3 +129,48 @@ def test_full_resume_sequence_reaches_end(monkeypatch):
     assert graph.get_state(config).next == ()
 
     graph.checkpointer.delete_thread("t-full")
+
+
+def test_resume_from_marker_reenters_at_analyse_in_fresh_thread(monkeypatch):
+    """Cross-process durable resume: run_service rebuilds state from the DB in a
+    brand-new thread (the in-memory checkpoint is gone) and sets `_resume_from`.
+    interrupt_before must still fire, so the first invoke pauses *before* analyse
+    and invoke(None) runs analyse -> review -> pause before write — without
+    re-running plan/research."""
+    graph = _build_fake_graph(monkeypatch, ["PASS"])
+    config = {"configurable": {"thread_id": "t-resume-marker"}}
+
+    state = dict(BASE_STATE)
+    state["research_output"] = "RESEARCH"          # rebuilt from the Run row
+    state["_resume_from"] = "analyse"
+
+    out = graph.invoke(state, config)              # loads state, pauses before analyse
+    assert graph.get_state(config).next == ("analyse",)
+    assert out.get("analysis_output") == ""        # analyse has NOT run yet
+
+    out = graph.invoke(None, config)               # analyse -> review(PASS) -> pause before write
+    assert out.get("analysis_output") == "ANALYSIS"
+    assert graph.get_state(config).next == ("write",)
+
+    graph.checkpointer.delete_thread("t-resume-marker")
+
+
+def test_resume_from_marker_reenters_at_write_in_fresh_thread(monkeypatch):
+    """Same durable-resume path for the write segment: re-enter at `write` with
+    analysis rebuilt from the DB, run write -> edit -> END."""
+    graph = _build_fake_graph(monkeypatch, ["PASS"])
+    config = {"configurable": {"thread_id": "t-resume-write"}}
+
+    state = dict(BASE_STATE)
+    state["research_output"] = "RESEARCH"
+    state["analysis_output"] = "ANALYSIS"
+    state["_resume_from"] = "write"
+
+    graph.invoke(state, config)                    # pauses before write
+    assert graph.get_state(config).next == ("write",)
+
+    out = graph.invoke(None, config)               # write -> edit -> END
+    assert out.get("final_output") == "DRAFT-EDITED"
+    assert graph.get_state(config).next == ()
+
+    graph.checkpointer.delete_thread("t-resume-write")

@@ -27,5 +27,7 @@ async def approve(
         RunStatus.awaiting_final_approval,
     ]:
         raise HTTPException(400, f"Run is not awaiting HITL (status: {run.status})")
-    await approve_hitl(str(run_id), body.instruction)
+    # Pass the exact gate being approved so the resumed segment advances only
+    # that gate (and a stale/duplicate approval no-ops).
+    await approve_hitl(str(run_id), body.instruction, run.status.value)
     return {"status": "resumed"}

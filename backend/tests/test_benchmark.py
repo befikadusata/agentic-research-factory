@@ -9,10 +9,11 @@ crew.py (routing, checkpointer, interrupt_before) never ran — it couldn't have
 caught the HITL orchestration bug that the §5.1 fix addressed. It also mocked
 `evaluate_output` wholesale and asserted `eval_scores["overall"] >= 70` against
 `FAKE_EVAL_SCORES`, a constant defined in this same file, so the "quality bar"
-assertion could never fail. Now only `_wait_for_hitl` (an unavoidable external
-wait) and the eval LLM call boundary (`acompletion`) are faked; the real graph
-routing/interrupt/resume logic and the real `evaluate_output` JSON-parsing
-both execute for real.
+assertion could never fail. Now only the eval LLM call boundary (`acompletion`)
+is faked; the real graph routing/interrupt/resume logic and the real
+`evaluate_output` JSON-parsing both execute for real, and the run is driven
+across its segmented HITL gates via the `run_driver` fixture (operator approving
+each stage) rather than a single blocking execute_run call.
 """
 import json
 import uuid
@@ -88,13 +89,15 @@ def _fake_eval_completion(content: str):
 
 
 @pytest.mark.asyncio
-async def test_benchmark_smoke(redis_pool, monkeypatch):
+async def test_benchmark_smoke(redis_pool, monkeypatch, run_driver):
+    # run_driver drives the run via the module-level AsyncSessionLocal, whose
+    # pooled asyncpg connections don't survive a fresh event loop across test
+    # functions (pytest-asyncio uses a new loop per test). Dispose so the pool
+    # rebinds to this test's loop.
+    import database
+    await database.engine.dispose()
+
     _install_fake_graph(monkeypatch)
-
-    async def fake_wait_for_hitl(run_id, status, emit_event, summary):
-        return ""
-
-    monkeypatch.setattr("services.run_service._wait_for_hitl", fake_wait_for_hitl)
 
     eval_response = _fake_eval_completion(json.dumps(FAKE_EVAL_SCORES))
 
@@ -118,7 +121,7 @@ async def test_benchmark_smoke(redis_pool, monkeypatch):
             await db.commit()
 
             with patch("services.eval_service.acompletion", AsyncMock(return_value=eval_response)):
-                await execute_run(run_id)
+                await run_driver(run_id)
 
             async with AsyncSessionLocal() as db2:
                 run = await db2.get(Run, run_id)

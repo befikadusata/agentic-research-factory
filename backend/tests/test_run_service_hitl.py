@@ -1,15 +1,26 @@
 """
-Regression tests for run_service.execute_run actually gating each stage behind
-a human approval, instead of the pre-fix behavior where the graph ran research
--> analyse -> review -> write -> edit -> END in one shot and the "approve
-research" screen just showed already-finished work.
+Regression tests for the segmented HITL pipeline.
+
+execute_run now runs ONE segment per invocation and durably pauses at each
+human-in-the-loop gate (persisting an `awaiting_*` status and releasing the
+worker) instead of blocking a single task through the whole run. The state
+machine advances across separate tasks; `run_driver` pumps that in-process.
+
+These verify:
+  * each stage is gated behind an approval (no leaking finished downstream work
+    onto an earlier approval screen),
+  * a review-triggered research retry is re-surfaced for a second approval,
+  * token/cost rows are logged exactly once per agent across the segments,
+  * autonomous (monitor-spawned) runs complete WITHOUT any operator approval
+    and reach finalize_monitored_run (C2).
 """
 import uuid
 import pytest
+from datetime import datetime, timezone
 from sqlalchemy import select as sa_select
 import database
 from database import AsyncSessionLocal
-from models import Run, RunStatus, RunCost
+from models import Run, RunStatus, RunCost, Monitor
 from services.run_service import execute_run
 import agents.crew as crew_module
 
@@ -19,9 +30,8 @@ async def _fresh_engine_pool():
     """execute_run uses the module-level AsyncSessionLocal (not the per-test
     `db_session` fixture's engine), whose pooled asyncpg connections don't
     survive a fresh event loop across test functions (pytest-asyncio uses a new
-    loop per test) — the same class of bug as the pre-existing
-    get_redis_client() event-loop leak (utils/redis_client.py). Disposing the
-    pool here forces fresh connections bound to this test's loop."""
+    loop per test). Disposing the pool forces fresh connections bound to this
+    test's loop."""
     await database.engine.dispose()
     yield
 
@@ -72,47 +82,42 @@ def _install_fake_graph(monkeypatch, review_sequence):
     return fresh_graph
 
 
-async def _make_run(db) -> Run:
-    run = Run(
+async def _make_run(db, **overrides) -> Run:
+    fields = dict(
         id=uuid.uuid4(), user_id="test_user", topic="test topic", format="report",
-        vertical=None, doc_paths=[],
+        vertical=None, doc_paths=[], status=RunStatus.pending,
     )
+    fields.update(overrides)
+    run = Run(**fields)
     db.add(run)
     await db.commit()
     return run
 
 
 @pytest.mark.asyncio
-async def test_execute_run_gates_stages_and_reshows_retried_research(monkeypatch, redis_pool):
-    """Combines two scenarios in one test (rather than two test functions) because
+async def test_execute_run_gates_stages_and_reshows_retried_research(monkeypatch, redis_pool, run_driver):
+    """Combines two scenarios in one test (rather than two functions) because
     module-level AsyncSessionLocal's pooled asyncpg connections don't survive a
-    fresh event loop across separate test functions (pytest-asyncio uses a new
-    loop per test) — see the pre-existing get_redis_client() event-loop leak this
-    codebase already has for the same reason (utils/redis_client.py)."""
+    fresh event loop across separate test functions."""
 
-    # ── Scenario 1: PASS on first review — exactly 3 gates, no re-run leakage ──
+    # ── Scenario 1: PASS on first review — exactly 3 gates, no downstream leak ──
     _install_fake_graph(monkeypatch, review_sequence=["PASS"])
 
     seen = []
 
-    async def fake_wait_for_hitl(run_id, status, emit_event, summary):
-        async with AsyncSessionLocal() as db:
-            run = await db.get(Run, uuid.UUID(run_id))
-            seen.append({
-                "status": status,
-                "research_output": run.research_output,
-                "analysis_output": run.analysis_output,
-                "final_output": run.final_output,
-            })
-        return ""
-
-    monkeypatch.setattr("services.run_service._wait_for_hitl", fake_wait_for_hitl)
+    async def observer(run):
+        seen.append({
+            "status": run.status,
+            "research_output": run.research_output,
+            "analysis_output": run.analysis_output,
+            "final_output": run.final_output,
+        })
 
     async with AsyncSessionLocal() as db:
         run = await _make_run(db)
         run_id = run.id
 
-    await execute_run(run_id)
+    await run_driver(run_id, observer=observer)
 
     assert [s["status"] for s in seen] == [
         RunStatus.awaiting_research_approval,
@@ -134,27 +139,24 @@ async def test_execute_run_gates_stages_and_reshows_retried_research(monkeypatch
         costs = (
             await db.execute(sa_select(RunCost).where(RunCost.run_id == run_id))
         ).scalars().all()
-        # Each agent's usage is logged exactly once, despite token_usages accumulating
-        # across resumes in the checkpointed graph state.
+        # Each agent's usage is logged exactly once, despite the run spanning
+        # several segments/tasks.
         assert sorted(c.agent_name for c in costs) == ["analyst", "editor", "researcher", "writer"]
 
-    # ── Scenario 2: FAIL then PASS — retried research must be re-approved ──────
+    # ── Scenario 2: FAIL then PASS — retried research must be re-approved ────────
     _install_fake_graph(monkeypatch, review_sequence=["FAIL", "PASS"])
 
     research_summaries = []
 
-    async def fake_wait_for_hitl_retry(run_id, status, emit_event, summary):
-        if status == RunStatus.awaiting_research_approval:
-            research_summaries.append(summary)
-        return ""
-
-    monkeypatch.setattr("services.run_service._wait_for_hitl", fake_wait_for_hitl_retry)
+    async def observer_retry(run):
+        if run.status == RunStatus.awaiting_research_approval:
+            research_summaries.append(run.research_output)
 
     async with AsyncSessionLocal() as db:
         run = await _make_run(db)
         run_id = run.id
 
-    await execute_run(run_id)
+    await run_driver(run_id, observer=observer_retry)
 
     # A review-triggered research retry must be surfaced for a second approval,
     # not silently redone after the user already approved the first draft.
@@ -163,3 +165,65 @@ async def test_execute_run_gates_stages_and_reshows_retried_research(monkeypatch
     async with AsyncSessionLocal() as db:
         run = await db.get(Run, run_id)
         assert run.status == RunStatus.complete
+
+
+@pytest.mark.asyncio
+async def test_stale_approval_cannot_skip_a_gate(monkeypatch, redis_pool, run_driver):
+    """A duplicate/stale resume tagged with a gate the run has already left must
+    be a no-op — it must not advance the *next* gate without its own approval."""
+    _install_fake_graph(monkeypatch, review_sequence=["PASS"])
+
+    async with AsyncSessionLocal() as db:
+        run = await _make_run(db)
+        run_id = run.id
+
+    # Advance only through the research gate → run now parks at the analysis gate.
+    await run_driver(run_id, approve=False)          # start → awaiting_research_approval
+    await execute_run(run_id, RunStatus.awaiting_research_approval.value)  # → awaiting_analysis_approval
+
+    async with AsyncSessionLocal() as db:
+        run = await db.get(Run, run_id)
+        assert run.status == RunStatus.awaiting_analysis_approval
+
+    # A second (stale) approval of the *research* gate must not run the write
+    # segment / skip the analysis approval.
+    await execute_run(run_id, RunStatus.awaiting_research_approval.value)
+
+    async with AsyncSessionLocal() as db:
+        run = await db.get(Run, run_id)
+        assert run.status == RunStatus.awaiting_analysis_approval
+        assert not run.final_output
+
+
+@pytest.mark.asyncio
+async def test_autonomous_monitor_run_completes_without_approval(monkeypatch, redis_pool, run_driver):
+    """C2: a monitor-spawned run has no human at the gates. It must auto-advance
+    through every stage on its own and reach completion + finalize_monitored_run,
+    with NO operator approval (approve=False)."""
+    _install_fake_graph(monkeypatch, review_sequence=["PASS"])
+
+    async with AsyncSessionLocal() as db:
+        monitor = Monitor(
+            id=uuid.uuid4(), user_id="test_user", name="watch", topic="test topic",
+            format="report", interval_minutes=60,
+            next_run_at=datetime.now(timezone.utc),
+        )
+        db.add(monitor)
+        await db.commit()
+        monitor_id = monitor.id
+
+        run = await _make_run(db, monitor_id=monitor_id)
+        run_id = run.id
+
+    # approve=False: no operator ever approves. Only the autonomous self-advance
+    # can carry the run to completion.
+    steps = await run_driver(run_id, approve=False)
+
+    async with AsyncSessionLocal() as db:
+        run = await db.get(Run, run_id)
+        assert run.status == RunStatus.complete
+        assert run.final_output == "DRAFT-EDITED"
+        # finalize_monitored_run ran and recorded the baseline diff.
+        assert run.metrics.get("monitor_diff", {}).get("baseline") is True
+
+    assert steps > 1  # it genuinely advanced across multiple segments

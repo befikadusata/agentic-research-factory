@@ -148,48 +148,44 @@ async def test_create_run_invalid_select_field_rejected(client, mock_user):
 
 
 @pytest.mark.asyncio
-async def test_execute_run_task_routing():
-    """Verify task routing logic assigns correct task_type based on vertical."""
-    mock_run_lead = Run(
-        id=uuid.uuid4(),
-        topic="Stripe",
-        vertical="b2b_sales_lead_intel",
-        vertical_inputs={"company_url": "stripe.com"},
-        format="report"
-    )
-    
-    mock_run_report = Run(
-        id=uuid.uuid4(),
-        topic="Notion",
-        vertical="marketing_competitor_briefs",
-        vertical_inputs={"competitor_name": "Notion"},
-        format="report"
-    )
+async def test_execute_run_task_routing(engine, redis_pool):
+    """The start segment must derive task_type from the run's vertial: a
+    lead_intel vertical yields "lead_intel", a research vertical yields
+    "research_report". We capture the state handed to the graph on the first
+    invoke and stop the run right there (the gate is stubbed out)."""
+    import database
+    from database import AsyncSessionLocal
+    from models import RunStatus
 
-    with patch("services.run_service.AsyncSessionLocal") as MockSession:
-        session_instance = MagicMock()
-        MockSession.return_value.__aenter__ = AsyncMock(return_value=session_instance)
-        session_instance.commit = AsyncMock()
-        session_instance.refresh = AsyncMock()
-        session_instance.get = AsyncMock()
-        
-        with patch("services.run_service._invoke_supervisor_with_retry") as mock_invoke:
-            with patch("services.run_service._wait_for_hitl", new_callable=AsyncMock) as mock_hitl:
-                # Test lead_intel routing
-                session_instance.get.return_value = mock_run_lead
-                mock_invoke.side_effect = lambda s, state, config=None, **kwargs: {**(state or {}), "research_output": "Lead data", "analysis_output": "Analyzed", "final_output": "Done"}
-                mock_hitl.return_value = "continue"
-                
-                await execute_run(mock_run_lead.id)
-                
-                # Check the first call (Research stage)
-                first_call_state = mock_invoke.call_args_list[0][0][1]
-                assert first_call_state["task_type"] == "lead_intel"
-                
-                # Test research_report routing
-                mock_invoke.reset_mock()
-                session_instance.get.return_value = mock_run_report
-                
-                await execute_run(mock_run_report.id)
-                first_call_state = mock_invoke.call_args_list[0][0][1]
-                assert first_call_state["task_type"] == "research_report"
+    await database.engine.dispose()
+
+    async def _make(vertical, vertical_inputs):
+        async with AsyncSessionLocal() as db:
+            run = Run(
+                id=uuid.uuid4(), user_id="test_user", topic="X", format="report",
+                vertical=vertical, vertical_inputs=vertical_inputs,
+                status=RunStatus.pending, doc_paths=[],
+            )
+            db.add(run)
+            await db.commit()
+            return run.id
+
+    lead_id   = await _make("b2b_sales_lead_intel", {"company_url": "stripe.com"})
+    report_id = await _make("marketing_competitor_briefs", {"competitor_name": "Notion"})
+
+    with patch("services.run_service._invoke_supervisor_with_retry") as mock_invoke, \
+         patch("services.run_service._enter_gate", new_callable=AsyncMock), \
+         patch("services.run_service.evaluate_output", new_callable=AsyncMock, return_value={}), \
+         patch("services.run_service.emit", new_callable=AsyncMock):
+
+        mock_invoke.side_effect = lambda s, state, config=None, **kwargs: {
+            **(state or {}),
+            "research_output": "Lead data", "analysis_output": "Analyzed", "final_output": "Done",
+        }
+
+        await execute_run(lead_id)
+        assert mock_invoke.call_args_list[0][0][1]["task_type"] == "lead_intel"
+
+        mock_invoke.reset_mock()
+        await execute_run(report_id)
+        assert mock_invoke.call_args_list[0][0][1]["task_type"] == "research_report"
