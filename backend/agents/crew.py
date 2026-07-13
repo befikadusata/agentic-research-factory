@@ -6,6 +6,7 @@ task_type routing:
   "lead_intel"       → LeadIntel agent only
 """
 import operator
+import re
 from typing import TypedDict, Literal, Optional, List, Annotated
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
@@ -40,7 +41,7 @@ class ResearchState(TypedDict):
 
 from contextlib import nullcontext
 from crewai import Crew, Process
-from services.llm_router import get_model
+from services.llm_router import resolve_actual_model, reset_actual_model
 from utils.langfuse_utils import get_langfuse
 
 def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: RunnableConfig, result_key: str, agent_key: str) -> dict:
@@ -60,6 +61,9 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
     )
 
     logger.info("crew_node_start", node=result_key)
+    # H4: clear the captured served-model so resolve_actual_model() below reads
+    # only what *this* kickoff used (the primary, or a fallback if it spilled).
+    reset_actual_model()
     # Langfuse v4's client dropped the old .trace()/.span() object model in
     # favor of an OTEL-based context manager (start_as_current_observation);
     # nullcontext() keeps `span` as None so the tracing calls below can be
@@ -85,9 +89,11 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
         result_key: str(result),
         "token_usages": [{
             "agent_name":        result_key,
-            # Model actually used for this call, so run_service can look up
-            # real per-model pricing instead of hardcoding cost to $0 (§4.1).
-            "model":             get_model(agent_key),
+            # Model that actually served this call — the configured primary, or
+            # the fallback slug if litellm spilled over during a provider outage
+            # (H4). Pricing keys off this, so a fallback leg is costed correctly
+            # instead of being priced against a primary that never ran.
+            "model":             resolve_actual_model(agent_key),
             "prompt_tokens":     (usage.prompt_tokens     if usage else 0),
             "completion_tokens": (usage.completion_tokens if usage else 0),
         }],
@@ -133,8 +139,10 @@ def node_research(state: ResearchState, config: RunnableConfig) -> dict:
     if state.get("user_feedback"):
         topic = f"{topic}\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
 
-    # If we are retrying, add feedback
-    if state.get("review_output") and "FAIL" in state["review_output"]:
+    # If we are retrying (the reviewer's verdict was anything but PASS), fold the
+    # audit back in as retry feedback — read from the verdict field, not a bare
+    # "FAIL" substring (H2).
+    if state.get("review_output") and review_verdict(state["review_output"]) != "PASS":
         topic = f"{topic}\n\n**RETRY FEEDBACK**:\n{state['review_output']}"
 
     task = research_task(agent, topic, state.get("context_docs", ""))
@@ -230,17 +238,38 @@ def route_entry(state: ResearchState) -> str:
     return "research"
 
 
+# The reviewer emits a machine-readable verdict field ("VERDICT: PASS|FAIL") as
+# the first line of its report; failing that, the human-readable "Quality Audit:"
+# header. We read the verdict *only* from that dedicated field — never a bare
+# substring scan of the prose, where "passes accuracy but fails completeness"
+# would false-match "PASS" and skip a warranted retry (H2).
+_VERDICT_RE = re.compile(r"VERDICT\s*[:\-]\s*\[?\s*(PASS|FAIL)", re.IGNORECASE)
+_AUDIT_HEADER_RE = re.compile(r"Quality\s+Audit\s*[:\-]\s*\[?\s*(PASS|FAIL)", re.IGNORECASE)
+
+
+def review_verdict(review_output: str) -> Optional[str]:
+    """Extract the reviewer's binary verdict from its labeled field.
+
+    Returns "PASS"/"FAIL", or None if no verdict field is present/parseable
+    (an unparseable review is treated as not-a-pass by callers, so a malformed
+    audit spends a retry rather than being rubber-stamped through).
+    """
+    if not review_output:
+        return None
+    m = _VERDICT_RE.search(review_output) or _AUDIT_HEADER_RE.search(review_output)
+    return m.group(1).upper() if m else None
+
+
 def route_after_review(state: ResearchState) -> str:
-    # If PASS, go to write
-    if "PASS" in state.get("review_output", ""):
+    review_output = state.get("review_output", "")
+    if review_verdict(review_output) == "PASS":
         return "write"
-    
-    # If FAIL and we haven't hit the retry limit, go back to research
-    # Only retry if we actually have review output (indicating a failed review)
-    if state.get("review_output") and state.get("retry_count", 0) < 3:
+
+    # FAIL or unparseable: retry from research while the retry budget remains,
+    # else ship what we have rather than loop forever.
+    if review_output and state.get("retry_count", 0) < 3:
         return "research"
-    
-    # Otherwise, proceed anyway
+
     return "write"
 
 

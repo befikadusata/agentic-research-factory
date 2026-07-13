@@ -44,7 +44,9 @@ def test_run_crew_node_succeeds_with_real_langfuse_client(monkeypatch, real_lang
     assert result["research_output"] == "RESULT"
     assert result["token_usages"] == [{
         "agent_name": "research_output",
-        "model": crew_module.get_model("researcher"),
+        # No litellm call fired under the mock, so the served model resolves to
+        # the configured primary (see resolve_actual_model — H4).
+        "model": crew_module.resolve_actual_model("researcher"),
         "prompt_tokens": 10,
         "completion_tokens": 5,
     }]

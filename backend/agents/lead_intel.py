@@ -12,7 +12,9 @@ def lead_intel_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[tavily_search_tool, firecrawl_tool],
-        llm=get_llm("lead_intel"),
+        # H3: cap the completion (pipeline-wide token invariant); generous, since
+        # this single agent produces the whole lead dossier deliverable.
+        llm=get_llm("lead_intel", max_tokens=1800),
         verbose=True,
         max_iter=10,
     )

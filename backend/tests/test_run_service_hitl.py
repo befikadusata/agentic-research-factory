@@ -56,7 +56,10 @@ def _install_fake_graph(monkeypatch, review_sequence):
         }
 
     def fake_review(state):
-        return {"review_output": next(reviews), "retry_count": state.get("retry_count", 0) + 1}
+        # Emit the reviewer's real routing contract (a leading VERDICT field),
+        # not a bare "PASS"/"FAIL" token, so route_after_review parses it the
+        # same way it parses a live reviewer's output (H2).
+        return {"review_output": f"VERDICT: {next(reviews)}", "retry_count": state.get("retry_count", 0) + 1}
 
     def fake_write(state):
         return {

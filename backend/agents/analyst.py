@@ -9,7 +9,9 @@ def analyst_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        llm=get_llm("analyst"),
+        # H3: cap the completion (pipeline-wide token invariant) — this also
+        # bounds the analysis text that review/write re-feed downstream.
+        llm=get_llm("analyst", max_tokens=1400),
         verbose=True,
         max_iter=5,
     )

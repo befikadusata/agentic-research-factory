@@ -9,7 +9,9 @@ def editor_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        llm=get_llm("editor"),
+        # H3: cap the completion (pipeline-wide token invariant); generous, since
+        # the editor re-emits the full deliverable.
+        llm=get_llm("editor", max_tokens=2500),
         verbose=True,
         max_iter=3,
     )

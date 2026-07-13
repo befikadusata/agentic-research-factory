@@ -50,7 +50,9 @@ def _build_fake_graph(monkeypatch, review_sequence):
         return {"analysis_output": "ANALYSIS"}
 
     def fake_review(state):
-        return {"review_output": next(reviews), "retry_count": state.get("retry_count", 0) + 1}
+        # Emit the reviewer's real routing contract (a leading VERDICT field), so
+        # route_after_review parses it the way it parses live reviewer output (H2).
+        return {"review_output": f"VERDICT: {next(reviews)}", "retry_count": state.get("retry_count", 0) + 1}
 
     def fake_write(state):
         return {"final_output": "DRAFT"}
@@ -90,7 +92,7 @@ def test_resume_after_research_runs_only_analysis_and_review(monkeypatch):
     out = graph.invoke(None, config)
 
     assert out.get("analysis_output") == "ANALYSIS"
-    assert out.get("review_output") == "PASS"
+    assert crew_module.review_verdict(out.get("review_output")) == "PASS"
     assert out.get("final_output") == ""
     assert graph.get_state(config).next == ("write",)
 
@@ -111,7 +113,7 @@ def test_failed_review_retries_research_and_pauses_again(monkeypatch):
     assert graph.get_state(config).next == ("analyse",)
 
     out2 = graph.invoke(None, config)  # analyse -> review(PASS)
-    assert out2.get("review_output") == "PASS"
+    assert crew_module.review_verdict(out2.get("review_output")) == "PASS"
     assert graph.get_state(config).next == ("write",)
 
     graph.checkpointer.delete_thread("t-retry")

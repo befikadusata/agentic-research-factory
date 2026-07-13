@@ -220,6 +220,12 @@ agent_prompts:
       4. **Vertical Compliance**: Are the specific requirements of the playbook addressed?
 
       Output format:
+      The VERY FIRST line MUST be your machine-readable verdict, exactly one of:
+      VERDICT: PASS
+      VERDICT: FAIL
+      This line drives automated routing — do not add words to it, and never
+      write "VERDICT: PASS/FAIL" both. Then the human-readable report:
+
       ### Quality Audit: [PASS] or [FAIL]
 
       #### Critical Findings:
@@ -228,7 +234,7 @@ agent_prompts:
 
       #### Actionable Feedback for Improvement:
       [If FAIL, provide 2-3 specific steps to fix. If PASS, provide 1-2 ways to make it even stronger.]
-    expected_output: "A rigorous quality audit report with a binary PASS/FAIL decision and detailed findings."
+    expected_output: "A quality audit that starts with a `VERDICT: PASS` or `VERDICT: FAIL` line, followed by findings and actionable feedback."
 
   lead_intel:
     role: "Lead Intelligence Analyst"

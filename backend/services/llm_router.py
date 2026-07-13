@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import litellm
+
 from config import settings
 
 
@@ -9,7 +11,8 @@ class LLMSelection:
     api_key: str | None = None
     base_url: str | None = None
     # Cross-provider fallbacks tried by litellm (in order) when the primary call
-    # errors — e.g. a free-tier 429. Empty in legacy mode (single pinned model).
+    # errors — e.g. a free-tier 429. Derived from the primary's provider and
+    # gated on the peer provider's key being present (see get_fallbacks).
     fallbacks: tuple[str, ...] = ()
 
 
@@ -63,23 +66,43 @@ def get_model(agent_name: str) -> str:
     return override or _DEFAULT_MODELS[agent_name]
 
 
+def _has_key(provider: str | None) -> bool:
+    """Whether the credentials for a provider's fallback leg are actually set.
+
+    A fallback we can't authenticate is worse than none — it just adds a failing
+    round-trip on every error — so a cross-provider fallback is only offered when
+    that provider's key is configured.
+    """
+    if provider == "groq":
+        return bool(settings.GROQ_API_KEY)
+    if provider == "openrouter":
+        return bool(settings.OPENROUTER_API_KEY)
+    if provider in {"gemini", "google"}:
+        return bool(settings.GEMINI_API_KEY)
+    return False
+
+
 def get_fallbacks(agent_name: str) -> list[str]:
     """Cross-provider fallback model(s) for an agent, derived from its primary.
 
-    In legacy mode every agent is pinned to the one LLM_MODEL, so there is no
-    fallback (returning [] keeps that behavior a hard single-model choice). In
-    routed mode a Groq-primary agent falls back to OpenRouter free and vice
-    versa, so a free-tier 429 on one provider is absorbed by the other rather
-    than failing the whole run.
+    A Groq-primary agent falls back to OpenRouter free and vice versa, so a
+    free-tier 429 on one provider is absorbed by the other instead of failing the
+    whole run. This holds in *both* legacy (single pinned LLM_MODEL) and routed
+    mode — keyed off the primary's provider and gated on the peer provider having
+    a key. (Previously legacy mode hard-returned [], which disabled the entire
+    fallback layer in the one mode that actually ships — H1.)
+
+    A custom LLM_BASE_URL (a legacy openai-compatible endpoint) can't be sanely
+    spilled to a different provider, so no cross-provider fallback there.
     """
-    if _legacy_mode():
+    if _legacy_mode() and settings.LLM_BASE_URL:
         return []
     provider = _provider_from_model(get_model(agent_name))
-    if provider == "groq":
+    if provider == "groq" and _has_key("openrouter"):
         return [_OPENROUTER_FALLBACK]
-    if provider == "openrouter":
+    if provider == "openrouter" and _has_key("groq"):
         return [_GROQ_FALLBACK]
-    return []  # gemini/unknown: no cross-provider peer to fall back to
+    return []  # gemini/unknown, or the peer key is absent: no usable fallback
 
 
 def get_llm(agent_name: str, max_tokens: int | None = None):
@@ -128,6 +151,7 @@ def get_completion_settings(agent_name: str) -> LLMSelection:
             model=model,
             api_key=settings.LLM_API_KEY,
             base_url=settings.LLM_BASE_URL or None,
+            fallbacks=tuple(get_fallbacks(agent_name)),
         )
 
     fallbacks = tuple(get_fallbacks(agent_name))
@@ -140,3 +164,51 @@ def get_completion_settings(agent_name: str) -> LLMSelection:
         return LLMSelection(model=model, api_key=settings.GEMINI_API_KEY, fallbacks=fallbacks)
 
     return LLMSelection(model=model, fallbacks=fallbacks)
+
+
+# ── H4: attribute cost to the model that actually served the call ─────────────
+# On a fallback leg the served model differs from the configured primary, so
+# pricing the call against the primary is wrong exactly during a provider
+# outage. litellm reports the served model on every successful completion; we
+# capture it via a global success hook (a plain function, so CrewAI's own
+# callback wiring — which only de-dupes litellm callbacks by *type* — leaves it
+# in place) and reconcile it back to a known pricing slug.
+_actual_model_used: dict[str, str | None] = {"model": None}
+
+
+def _capture_actual_model(kwargs, response_obj, start_time, end_time) -> None:
+    model = getattr(response_obj, "model", None) or (kwargs or {}).get("model")
+    if model:
+        _actual_model_used["model"] = model
+
+
+if _capture_actual_model not in litellm.success_callback:
+    litellm.success_callback.append(_capture_actual_model)
+
+
+def reset_actual_model() -> None:
+    """Clear the captured served-model before a crew node runs, so a stale value
+    from a previous node can't leak into this one's cost attribution."""
+    _actual_model_used["model"] = None
+
+
+def resolve_actual_model(agent_name: str) -> str:
+    """The model that actually served this agent's call, as a *known* pricing
+    slug. Returns the configured primary unless litellm reported a different
+    served model (a fallback fired) that matches one of the agent's declared
+    fallback candidates. litellm reports the bare provider model name (no
+    ``groq/``/``openrouter/`` prefix), so we match on that. Anything
+    unrecognized degrades to the primary.
+
+    Relies on crew nodes running one at a time (Celery --concurrency=1, linear
+    graph), so the last captured model belongs to this node's kickoff.
+    """
+    primary = get_model(agent_name)
+    served = _actual_model_used["model"]
+    if not served:
+        return primary
+    for cand in (primary, *get_fallbacks(agent_name)):
+        bare = cand.split("/", 1)[1] if cand.startswith(("groq/", "openrouter/")) else cand
+        if served in (cand, bare) or bare.endswith(served) or served.endswith(bare):
+            return cand
+    return primary

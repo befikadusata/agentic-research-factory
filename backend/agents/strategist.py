@@ -9,7 +9,11 @@ def strategist_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        llm=get_llm("strategist"),
+        # H3: every agent caps its completion so no single call can breach the
+        # free-tier 12K-tok/min ceiling — and, because each stage's output is
+        # bounded, the uncapped upstream text every downstream node re-feeds is
+        # bounded too. The plan is short, so a tight cap suffices here.
+        llm=get_llm("strategist", max_tokens=700),
         verbose=True,
     )
 

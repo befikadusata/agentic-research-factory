@@ -1,4 +1,5 @@
 from config import settings
+import services.llm_router as lr
 from services.llm_router import get_completion_settings, get_fallbacks, get_model
 
 
@@ -8,9 +9,35 @@ def test_get_model_uses_legacy_override(monkeypatch):
     assert get_model("researcher") == "legacy/model"
 
 
-def test_legacy_mode_has_no_fallbacks(monkeypatch):
-    # A pinned single model must stay single — no silent cross-provider spillover.
+# ── H1: the cross-provider fallback layer is live in legacy mode too ──────────
+# It used to hard-return [] whenever LLM_MODEL was set — i.e. disabled in the one
+# mode that actually ships — so the resilience layer was dead code in production.
+
+def test_legacy_mode_derives_fallback_when_peer_key_present(monkeypatch):
     monkeypatch.setattr(settings, "LLM_MODEL", "groq/llama-3.3-70b-versatile")
+    monkeypatch.setattr(settings, "LLM_BASE_URL", None)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "or-key")
+
+    # A Groq-pinned legacy model spills to OpenRouter free on a 429.
+    assert get_fallbacks("researcher") == ["openrouter/tencent/hy3:free"]
+
+
+def test_legacy_mode_no_fallback_without_peer_key(monkeypatch):
+    # A fallback we can't authenticate is worse than none, so absent the peer
+    # provider's key the pinned model stays a hard single-model choice.
+    monkeypatch.setattr(settings, "LLM_MODEL", "groq/llama-3.3-70b-versatile")
+    monkeypatch.setattr(settings, "LLM_BASE_URL", None)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "")
+
+    assert get_fallbacks("researcher") == []
+
+
+def test_legacy_custom_base_url_stays_single_model(monkeypatch):
+    # A custom openai-compatible endpoint can't be sanely spilled to a different
+    # provider — no cross-provider fallback there regardless of keys.
+    monkeypatch.setattr(settings, "LLM_MODEL", "groq/llama-3.3-70b-versatile")
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "https://my-endpoint.example")
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "or-key")
 
     assert get_fallbacks("researcher") == []
 
@@ -18,6 +45,7 @@ def test_legacy_mode_has_no_fallbacks(monkeypatch):
 def test_groq_primary_falls_back_to_openrouter(monkeypatch):
     monkeypatch.setattr(settings, "LLM_MODEL", None)
     monkeypatch.setattr(settings, "RESEARCHER_MODEL", "groq/llama-3.3-70b-versatile")
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "or-key")
 
     fallbacks = get_fallbacks("researcher")
 
@@ -27,15 +55,25 @@ def test_groq_primary_falls_back_to_openrouter(monkeypatch):
 def test_openrouter_primary_falls_back_to_groq(monkeypatch):
     monkeypatch.setattr(settings, "LLM_MODEL", None)
     monkeypatch.setattr(settings, "ANALYST_MODEL", "openrouter/meta-llama/llama-3.3-70b-instruct:free")
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "groq-key")
 
     fallbacks = get_fallbacks("analyst")
 
     assert fallbacks == ["groq/llama-3.3-70b-versatile"]
 
 
+def test_fallback_suppressed_when_peer_key_missing(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MODEL", None)
+    monkeypatch.setattr(settings, "RESEARCHER_MODEL", "groq/llama-3.3-70b-versatile")
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "")
+
+    assert get_fallbacks("researcher") == []
+
+
 def test_completion_settings_carries_fallbacks(monkeypatch):
     monkeypatch.setattr(settings, "LLM_MODEL", None)
     monkeypatch.setattr(settings, "EVAL_MODEL", "openrouter/meta-llama/llama-3.3-70b-instruct:free")
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "groq-key")
 
     llm = get_completion_settings("eval")
 
@@ -61,3 +99,50 @@ def test_get_completion_settings_treats_raw_openrouter_slugs_as_openrouter(monke
 
     assert llm.model == "meta-llama/llama-3.3-70b-instruct:free"
     assert llm.api_key == "openrouter-test-key"
+
+
+# ── H4: cost is attributed to the model that actually served the call ─────────
+# litellm reports the served model on each success (the bare provider name, no
+# litellm prefix); resolve_actual_model reconciles it back to a known pricing
+# slug — the primary normally, the fallback slug when a fallback leg ran.
+
+class _Resp:
+    def __init__(self, model):
+        self.model = model
+
+
+def test_resolve_actual_model_defaults_to_primary_without_capture(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MODEL", None)
+    monkeypatch.setattr(settings, "ANALYST_MODEL", "openrouter/tencent/hy3:free")
+    lr.reset_actual_model()
+
+    assert lr.resolve_actual_model("analyst") == "openrouter/tencent/hy3:free"
+
+
+def test_resolve_actual_model_matches_primary_served(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MODEL", None)
+    monkeypatch.setattr(settings, "RESEARCHER_MODEL", "groq/llama-3.3-70b-versatile")
+    lr.reset_actual_model()
+    lr._capture_actual_model({}, _Resp("llama-3.3-70b-versatile"), 0, 0)
+
+    assert lr.resolve_actual_model("researcher") == "groq/llama-3.3-70b-versatile"
+
+
+def test_resolve_actual_model_maps_served_fallback_to_known_slug(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MODEL", None)
+    monkeypatch.setattr(settings, "RESEARCHER_MODEL", "groq/llama-3.3-70b-versatile")
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "or-key")
+    lr.reset_actual_model()
+    # The OpenRouter fallback fired; litellm reports the bare served model.
+    lr._capture_actual_model({}, _Resp("tencent/hy3:free"), 0, 0)
+
+    assert lr.resolve_actual_model("researcher") == "openrouter/tencent/hy3:free"
+
+
+def test_resolve_actual_model_unknown_served_degrades_to_primary(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MODEL", None)
+    monkeypatch.setattr(settings, "RESEARCHER_MODEL", "groq/llama-3.3-70b-versatile")
+    lr.reset_actual_model()
+    lr._capture_actual_model({}, _Resp("some-unrelated-model"), 0, 0)
+
+    assert lr.resolve_actual_model("researcher") == "groq/llama-3.3-70b-versatile"

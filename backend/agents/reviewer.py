@@ -9,7 +9,9 @@ def reviewer_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        llm=get_llm("reviewer"),
+        # H3: cap the completion (pipeline-wide token invariant); an audit report
+        # is concise, so a tight cap suffices.
+        llm=get_llm("reviewer", max_tokens=800),
         verbose=True,
     )
 

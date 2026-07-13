@@ -9,7 +9,10 @@ def writer_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        llm=get_llm("writer"),
+        # H3: cap the completion (pipeline-wide token invariant). This is the
+        # deliverable, so the cap is generous — enough for a full report while
+        # still keeping one call under the free-tier per-minute ceiling.
+        llm=get_llm("writer", max_tokens=2500),
         verbose=True,
         max_iter=3,
     )
