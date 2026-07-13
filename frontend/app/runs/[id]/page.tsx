@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
+import { Radar } from "lucide-react";
 import { createParser } from "eventsource-parser";
 import { getRun, authHeaders } from "@/lib/api";
 import { AgentLog } from "@/components/AgentLog";
 import { AgentGraph } from "@/components/AgentGraph";
 import { HitlModal } from "@/components/HitlModal";
 import { OutputPanel } from "@/components/OutputPanel";
+import { ConfidenceBadge } from "@/components/ConfidenceBadge";
+import { MonitorDiffPanel } from "@/components/MonitorDiffPanel";
 import type { RunDetail, LogEntry, RunStatus } from "@/lib/types";
 import { VERTICALS, AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, statusBadgeClass } from "@/lib/types";
 
@@ -195,7 +199,21 @@ export default function RunPage() {
       )}
 
       {status === "complete" && run.final_output && (
-        <OutputPanel content={run.final_output} runId={id} />
+        <>
+          <MonitorDiffPanel diff={run.metrics?.monitor_diff} />
+          <ConfidenceBadge scores={run.metrics?.eval_scores} vertical={run.vertical} />
+          {!run.monitor_id && (
+            <div className="flex justify-end">
+              <Link
+                href={`/monitors?topic=${encodeURIComponent(run.topic)}&format=${run.format}&name=${encodeURIComponent(run.topic.slice(0, 60))}`}
+                className="text-sm text-content-secondary hover:text-content border border-border-subtle hover:border-primary rounded-md px-4 py-2 flex items-center gap-2 transition-colors"
+              >
+                <Radar size={16} /> Save as monitor
+              </Link>
+            </div>
+          )}
+          <OutputPanel content={run.final_output} runId={id} />
+        </>
       )}
 
       {status === "failed" && (

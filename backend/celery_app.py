@@ -25,6 +25,17 @@ celery_app.conf.update(
     task_routes={
         "execute_run_task": {"queue": "default"},
         "ingest_doc_task":  {"queue": "default"},
+        "dispatch_due_monitors_task": {"queue": "default"},
+    },
+    # Celery-beat tick that drives continuous monitoring. It only *finds due
+    # monitors and enqueues their runs* — the heavy pipeline still runs in a
+    # separate execute_run_task child — so a 60s cadence is cheap. Each monitor
+    # fires at its own interval_minutes; this just checks who's due.
+    beat_schedule={
+        "dispatch-due-monitors": {
+            "task": "dispatch_due_monitors_task",
+            "schedule": 60.0,
+        },
     },
 )
 
@@ -42,3 +53,10 @@ def ingest_doc_task(doc_id: str):
     from uuid import UUID
     from services.ingest_service import ingest_doc
     asyncio.run(ingest_doc(UUID(doc_id)))
+
+
+@celery_app.task(name="dispatch_due_monitors_task")
+def dispatch_due_monitors_task():
+    import asyncio
+    from services.monitor_service import dispatch_due_monitors
+    asyncio.run(dispatch_due_monitors())

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { LayoutGrid, Plus, History } from "lucide-react";
+import { LayoutGrid, Plus, History, Radar } from "lucide-react";
 import { SidebarUser } from "@/components/SidebarUser";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
@@ -53,6 +53,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link href="/" className="text-content-secondary hover:text-content px-4 py-2 rounded-md flex items-center gap-3 transition-colors">
             <History size={18} />
             History
+          </Link>
+          <Link href="/monitors" className="text-content-secondary hover:text-content px-4 py-2 rounded-md flex items-center gap-3 transition-colors">
+            <Radar size={18} />
+            Monitors
           </Link>
         </nav>
         <div className="mt-auto flex flex-col gap-2">

@@ -7,7 +7,7 @@ from typing import Optional
 from database import get_db
 from schemas import CreateRunRequest, RunResponse, RunDetailResponse
 from models import Run, WorkspaceMember, RunStatus, Document
-from celery_app import execute_run_task
+from services.run_dispatch import enqueue_run
 from auth import get_current_user
 
 router = APIRouter()
@@ -34,7 +34,8 @@ async def create_run(
         if len(docs) != len(doc_uuids) or any(d.workspace_id != body.workspace_id for d in docs):
             raise HTTPException(403, "One or more documents are not accessible in this workspace")
 
-    run = Run(
+    run = await enqueue_run(
+        db,
         user_id=user_id,
         topic=body.topic,
         format=body.format,
@@ -43,10 +44,6 @@ async def create_run(
         vertical=body.vertical,
         vertical_inputs=body.vertical_inputs,
     )
-    db.add(run)
-    await db.commit()
-    await db.refresh(run)
-    execute_run_task.delay(str(run.id))
     return run
 
 

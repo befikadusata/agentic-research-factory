@@ -1,4 +1,4 @@
-import type { Run, RunDetail, Workspace, WorkspaceMember } from "./types";
+import type { Run, RunDetail, Workspace, WorkspaceMember, Monitor, CreateMonitorInput } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
@@ -146,6 +146,68 @@ export async function removeWorkspaceMember(workspaceId: string, userId: string)
     method: "DELETE",
     headers,
   });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+// --- Monitors -------------------------------------------------------------
+
+export async function getMonitors(workspaceId?: string): Promise<Monitor[]> {
+  const headers = await authHeaders();
+  const qs = workspaceId ? `?workspace_id=${workspaceId}` : "";
+  const res = await fetch(`${BASE}/monitors${qs}`, { headers });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getMonitor(id: string): Promise<Monitor> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/monitors/${id}`, { headers });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getMonitorRuns(id: string): Promise<Run[]> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/monitors/${id}/runs`, { headers });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createMonitor(payload: CreateMonitorInput): Promise<Monitor> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/monitors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateMonitor(
+  id: string,
+  patch: Partial<Pick<Monitor, "name" | "interval_minutes" | "enabled" | "notify_channel">>,
+): Promise<Monitor> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/monitors/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function runMonitorNow(id: string): Promise<{ id: string }> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/monitors/${id}/run`, { method: "POST", headers });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function deleteMonitor(id: string): Promise<void> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/monitors/${id}`, { method: "DELETE", headers });
   if (!res.ok) throw new Error(await res.text());
 }
 

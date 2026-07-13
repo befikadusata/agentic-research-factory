@@ -92,6 +92,23 @@ services:
     volumes:
       - ./backend:/app
 
+  # Celery-beat scheduler: fires dispatch_due_monitors_task every 60s so due
+  # monitors spawn runs. Runs as its own process (beat must be a singleton —
+  # never scale this to >1 replica or monitors would double-fire).
+  beat:
+    build: ./backend
+    command: celery -A celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    env_file: ./backend/.env
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/research_factory
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
   # --- Self-hosted web search (Tavily alternative) ---
   searxng:
     image: searxng/searxng:latest

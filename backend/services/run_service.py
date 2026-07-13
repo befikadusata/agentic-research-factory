@@ -15,6 +15,7 @@ from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_SIGNAL
 from utils.cost_tracker import log_cost
 from utils.pricing import calculate_cost
 from services.eval_service import evaluate_output
+from services.monitor_service import finalize_monitored_run
 
 LLM_STAGE_TIMEOUT_SEC = 300
 
@@ -285,6 +286,7 @@ async def execute_run(run_id: UUID):
                     flag_modified(run_obj, "metrics")
                     await _set_status(run_obj, RunStatus.complete, db)
                 await emit(rid, "complete", {"final_output": final_output[:500]})
+                await finalize_monitored_run(run_id)
                 return
 
             # ── RESEARCH REPORT: graph-native HITL ───────────────────────────
@@ -412,6 +414,7 @@ async def execute_run(run_id: UUID):
                 await _set_status(run_obj, RunStatus.complete, db)
 
             await emit(rid, "complete", {"final_output": final_output[:500]})
+            await finalize_monitored_run(run_id)
         finally:
             # Bound the checkpointer's memory to in-flight runs — it's a single
             # process-lifetime InMemorySaver shared across every run (see crew.py).

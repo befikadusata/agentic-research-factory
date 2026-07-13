@@ -143,6 +143,61 @@ export interface Run {
   vertical?: Vertical | null;
   vertical_inputs?: Record<string, string>;
   created_at: string;
+  monitor_id?: string | null;
+}
+
+/** LLM-judge quality scores (0–100 per dimension) computed once a run completes. */
+export interface EvalScores {
+  accuracy?: number;
+  relevance?: number;
+  completeness?: number;
+  writing_quality?: number;
+  overall?: number;
+  issues?: string[];
+}
+
+/** Change-detection result for a monitored run vs. the monitor's previous run. */
+export interface MonitorDiff {
+  changed: boolean;
+  summary: string;
+  highlights?: string[];
+  baseline?: boolean;
+}
+
+export interface RunMetrics {
+  eval_scores?: EvalScores;
+  latency_sec?: number;
+  citations?: unknown[];
+  monitor_diff?: MonitorDiff;
+}
+
+export interface Monitor {
+  id: string;
+  user_id: string;
+  workspace_id?: string | null;
+  name: string;
+  topic: string;
+  format: OutputFormat;
+  vertical?: Vertical | null;
+  vertical_inputs?: Record<string, string>;
+  interval_minutes: number;
+  enabled: boolean;
+  next_run_at: string;
+  last_run_id?: string | null;
+  last_run_at?: string | null;
+  notify_channel?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateMonitorInput {
+  name: string;
+  topic: string;
+  format: OutputFormat;
+  workspace_id?: string;
+  interval_minutes: number;
+  enabled: boolean;
+  notify_channel?: string | null;
 }
 
 export interface RunDetail extends Run {
@@ -151,6 +206,7 @@ export interface RunDetail extends Run {
   analysis_output: string | null;
   final_output: string | null;
   error_message?: string | null;
+  metrics?: RunMetrics;
 }
 
 export interface LogEntry {

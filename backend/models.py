@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Enum as SAEnum, JSON, ForeignKey, Integer, Float, func, text
+from sqlalchemy import Column, String, DateTime, Text, Enum as SAEnum, JSON, ForeignKey, Integer, Float, Boolean, func, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 import uuid, enum
@@ -101,6 +101,10 @@ class Run(Base):
     id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id         = Column(String, nullable=False, index=True)
     workspace_id    = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
+    # Set when this run was spawned by a scheduled Monitor rather than a manual
+    # request; NULL for ordinary one-off runs. Lets monitor_service diff a
+    # monitor's successive runs and lets the UI group them into a timeline.
+    monitor_id      = Column(UUID(as_uuid=True), ForeignKey("monitors.id"), nullable=True, index=True)
     topic           = Column(Text, nullable=False)
     format          = Column(String, nullable=False)
     status          = Column(SAEnum(RunStatus), default=RunStatus.pending, nullable=False)
@@ -121,3 +125,55 @@ class Run(Base):
                              default=lambda: datetime.now(timezone.utc),
                              onupdate=lambda: datetime.now(timezone.utc),
                              server_default=func.now())
+
+
+class Monitor(Base):
+    """A saved research request that re-runs on a schedule (continuous
+    market-surveillance mode). A Monitor is effectively a Run template plus a
+    cadence: the Celery-beat dispatcher periodically finds monitors whose
+    `next_run_at` is due, spawns a fresh Run (with `Run.monitor_id` set), and
+    advances `next_run_at`. Diffing successive runs and alerting live in
+    monitor_service (not yet wired here — this is the data foundation only).
+
+    Note: no ORM relationships are declared between Monitor and Run on purpose.
+    There are two FK paths between the tables (`Run.monitor_id` and
+    `Monitor.last_run_id`), so any relationship would need explicit
+    `foreign_keys=`; services query the columns directly instead.
+    """
+    __tablename__ = "monitors"
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id          = Column(String(255), nullable=False, index=True)
+    workspace_id     = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
+    name             = Column(String(255), nullable=False)  # human label for the watchlist entry
+    # ── Run template (mirrors the fields create_run reads) ──────────────
+    topic            = Column(Text, nullable=False)
+    format           = Column(String, nullable=False)
+    vertical         = Column(String, nullable=True)
+    vertical_inputs  = Column(JSON, default=dict, server_default=text("'{}'::json"))
+    doc_paths        = Column(JSON, default=list, server_default=text("'[]'::json"))
+    # ── Cadence & scheduling ────────────────────────────────────────────
+    interval_minutes = Column(Integer, nullable=False, default=1440)  # default: daily
+    enabled          = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    # When the dispatcher should next spawn a run. Advanced by interval_minutes
+    # each dispatch; the dispatcher selects monitors where next_run_at <= now().
+    next_run_at      = Column(DateTime(timezone=True), nullable=False,
+                              default=lambda: datetime.now(timezone.utc), index=True)
+    # use_alter: monitors↔runs is a mutual FK (Run.monitor_id points back here),
+    # so this side must be emitted as a separate ALTER — otherwise create_all/
+    # drop_all (used by the test suite) can't topologically order the two tables
+    # and raises CircularDependencyError.
+    last_run_id      = Column(UUID(as_uuid=True),
+                              ForeignKey("runs.id", use_alter=True,
+                                         name="fk_monitors_last_run_id_runs"),
+                              nullable=True)
+    last_run_at      = Column(DateTime(timezone=True), nullable=True)
+    # Where change alerts go (email address or webhook URL); NULL = no alerts.
+    notify_channel   = Column(String(512), nullable=True)
+    created_at       = Column(DateTime(timezone=True),
+                              default=lambda: datetime.now(timezone.utc),
+                              server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True),
+                              default=lambda: datetime.now(timezone.utc),
+                              onupdate=lambda: datetime.now(timezone.utc),
+                              server_default=func.now())
