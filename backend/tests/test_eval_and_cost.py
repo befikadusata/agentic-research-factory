@@ -70,6 +70,83 @@ async def test_evaluate_output_propagates_llm_exception():
             await evaluate_output("content", "research", "topic")
 
 
+@pytest.mark.asyncio
+async def test_evaluate_output_logs_cost_when_run_id_given():
+    """The gate eval judge used to be a direct litellm call counted nowhere.
+    With a run_id it now persists its cost under the given agent label."""
+    from services.eval_service import evaluate_output
+
+    raw = json.dumps(VALID_SCORES)
+    logged = AsyncMock()
+    with patch("services.eval_service.acompletion", AsyncMock(return_value=_make_completion_response(raw))), \
+         patch("services.eval_service.log_direct_call", logged):
+        await evaluate_output("c", "r", "t", run_id="run-1", agent_name="eval_research")
+
+    logged.assert_awaited_once()
+    args, kwargs = logged.call_args
+    assert args[0] == "run-1"
+    assert args[1] == "eval_research"
+    assert kwargs.get("routing_agent") == "eval"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_output_skips_cost_log_without_run_id():
+    from services.eval_service import evaluate_output
+
+    raw = json.dumps(VALID_SCORES)
+    logged = AsyncMock()
+    with patch("services.eval_service.acompletion", AsyncMock(return_value=_make_completion_response(raw))), \
+         patch("services.eval_service.log_direct_call", logged):
+        await evaluate_output("c", "r", "t")
+
+    logged.assert_not_awaited()
+
+
+# ── query_rewriter side-cost (in-crew direct call) ────────────────────────────
+
+def test_query_rewriter_records_side_cost():
+    """generate_sub_queries fires its own litellm call inside the researcher's
+    tool loop; it must buffer that cost so the crew node can persist it."""
+    from services import query_rewriter
+    from utils.cost_tracker import reset_side_costs, take_side_costs
+
+    reset_side_costs()
+    resp = _make_completion_response('["a", "b"]')
+    resp.usage = MagicMock(prompt_tokens=12, completion_tokens=7)
+    resp.model = "llama-3.1-8b-instant"
+
+    with patch("services.query_rewriter.completion", MagicMock(return_value=resp)), \
+         patch("services.query_rewriter.reconcile_served_model", return_value="groq/llama-3.1-8b-instant"):
+        out = query_rewriter.generate_sub_queries("q")
+
+    assert out == ["a", "b"]
+    side = take_side_costs()
+    assert len(side) == 1
+    assert side[0]["agent_name"] == "query_rewriter"
+    assert side[0]["model"] == "groq/llama-3.1-8b-instant"
+    assert side[0]["prompt_tokens"] == 12
+    assert side[0]["completion_tokens"] == 7
+
+
+@pytest.mark.asyncio
+async def test_run_cost_total_sums_rows(db_session, monkeypatch):
+    import utils.cost_tracker as ct
+
+    monkeypatch.setattr(ct, "AsyncSessionLocal", lambda: db_session_cm(db_session))
+    run = Run(
+        id=uuid.uuid4(), user_id="u4", topic="t", format="report",
+        status=RunStatus.pending, doc_paths=[],
+    )
+    db_session.add(run)
+    await db_session.commit()
+
+    await ct.log_cost(db_session, run.id, "researcher", 100, 50, 0.01)
+    await ct.log_cost(db_session, run.id, "analyst", 200, 100, 0.02)
+
+    total = await ct.run_cost_total(run.id)
+    assert abs(total - 0.03) < 1e-9
+
+
 # ── cost_tracker ─────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

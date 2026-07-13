@@ -120,7 +120,7 @@ async def finalize_monitored_run(run_id: UUID) -> None:
                 diff = {"baseline": True, "changed": False,
                         "summary": "Baseline run — no prior run to compare against."}
             else:
-                diff = await _diff_runs(previous.final_output or "", run.final_output or "", run.topic)
+                diff = await _diff_runs(previous.final_output or "", run.final_output or "", run.topic, run_id=run_id)
 
             # Capture what the alert needs before commit expires the ORM objects.
             notify_channel = monitor.notify_channel if monitor else None
@@ -136,9 +136,11 @@ async def finalize_monitored_run(run_id: UUID) -> None:
         logger.exception("monitor_finalize_failed", run_id=str(run_id))
 
 
-async def _diff_runs(previous: str, current: str, topic: str) -> dict:
+async def _diff_runs(previous: str, current: str, topic: str, run_id=None) -> dict:
     """LLM change-detection between two versions of a monitored brief. Returns a
-    safe fallback dict on any failure rather than raising."""
+    safe fallback dict on any failure rather than raising. This is a direct
+    litellm call on a beat schedule; when `run_id` is given its cost is logged to
+    run_costs so the monitor's ongoing spend is visible in /analytics/costs."""
     prompt = f"""You are tracking how a research brief on "{topic}" changes between runs.
 Compare the PREVIOUS and CURRENT versions and report only what MATERIALLY changed —
 new facts, reversals, added or removed findings. Ignore pure rewording.
@@ -164,6 +166,9 @@ If nothing material changed, respond {{"changed": false, "summary": "No material
             max_tokens=500,
             timeout=60,
         )
+        if run_id is not None:
+            from utils.cost_tracker import log_direct_call
+            await log_direct_call(run_id, "monitor_diff", response, routing_agent="eval")
         return parse_json(response.choices[0].message.content)
     except Exception as e:
         logger.warning("monitor_diff_failed", error=str(e))

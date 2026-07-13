@@ -61,6 +61,16 @@ class Settings(BaseSettings):
     # mistaken for a dead one. (M3)
     RUN_STUCK_TIMEOUT_MIN: int = 20
 
+    # Per-run LLM spend ceiling in USD. Once a run's accumulated cost (summed from
+    # its run_costs rows plus the in-flight segment) reaches this, the reviewer
+    # retry loop stops re-running the heavy research→analyse→review triad and the
+    # graph ships what it has (graceful degrade) instead of burning up to the full
+    # retry budget regardless of spend. On the free-tier default config every
+    # routed model prices to ~$0, so this never trips there; it exists so a
+    # paid-key deployment can't run away. Set to None or <= 0 to disable the
+    # ceiling entirely (the retry cap of 3 still bounds the loop).
+    RUN_COST_CEILING_USD: float | None = 1.0
+
     # Gemini embeddings for RAG.
     EMBEDDING_MODEL: str = "gemini-embedding-2"
     EMBEDDING_DIMENSION: int = 384

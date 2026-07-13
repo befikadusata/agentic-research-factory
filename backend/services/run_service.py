@@ -13,7 +13,7 @@ from logger import logger
 from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential, before_sleep_log
 from configs.verticals import build_execution_brief, get_vertical
 from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_INSTRUCTION_KEY
-from utils.cost_tracker import log_cost
+from utils.cost_tracker import log_cost, run_cost_total
 from utils.pricing import calculate_cost
 from services.eval_service import evaluate_output
 from services.monitor_service import finalize_monitored_run
@@ -429,6 +429,7 @@ async def _run_start_segment(run_id: UUID):
         "retry_count":     0,
         "user_feedback":   "",
         "_resume_from":    "",
+        "spent_usd":       0.0,
         "token_usages":    [],
     }
     config = _graph_config(rid, loop)
@@ -447,7 +448,7 @@ async def _run_start_segment(run_id: UUID):
 
         final_output    = final_state.get("final_output", "")
         final_citations = extract_citations(final_output or "")
-        eval_scores     = await _safe_eval(final_output, final_output, topic, log)
+        eval_scores     = await _safe_eval(final_output, final_output, topic, log, run_id=rid, agent_name="eval_lead_intel")
 
         async with AsyncSessionLocal() as db:
             run_obj = await db.get(Run, run_id)
@@ -479,7 +480,7 @@ async def _run_start_segment(run_id: UUID):
     # not a groundedness check. Overwriting eval_scores per gate lets the existing
     # ConfidenceBadge show the current stage's confidence; the write segment
     # replaces it with the final eval before the run reaches `complete`.
-    stage_scores = await _safe_eval(research_output, research_output, topic, log)
+    stage_scores = await _safe_eval(research_output, research_output, topic, log, run_id=rid, agent_name="eval_research")
     async with AsyncSessionLocal() as db:
         run_obj = await db.get(Run, run_id)
         run_obj.research_output = research_output
@@ -545,6 +546,7 @@ async def _run_analyse_segment(run_id: UUID):
         "retry_count":     stash.get("retry_count", 0),
         "user_feedback":   user_feedback,
         "_resume_from":    "analyse",
+        "spent_usd":       await run_cost_total(rid),
         "token_usages":    [],
     }
     config = _graph_config(rid, loop)
@@ -567,7 +569,7 @@ async def _run_analyse_segment(run_id: UUID):
         # redoing already-approved work.
         research_output = state.get("research_output", research_output)
         citations = _extract(research_output)
-        stage_scores = await _safe_eval(research_output, research_output, topic, log)  # M4
+        stage_scores = await _safe_eval(research_output, research_output, topic, log, run_id=rid, agent_name="eval_research")  # M4
         async with AsyncSessionLocal() as db:
             run_obj = await db.get(Run, run_id)
             run_obj.research_output = research_output
@@ -592,7 +594,7 @@ async def _run_analyse_segment(run_id: UUID):
     # M4: score the analysis before its approval gate. Unlike research, the
     # analysis has a real grounding artifact (the research it's derived from), so
     # this is a genuine groundedness check — are the analysis's claims supported.
-    stage_scores = await _safe_eval(analysis_output, research_output, topic, log)
+    stage_scores = await _safe_eval(analysis_output, research_output, topic, log, run_id=rid, agent_name="eval_analysis")
     async with AsyncSessionLocal() as db:
         run_obj = await db.get(Run, run_id)
         run_obj.analysis_output = analysis_output
@@ -653,6 +655,7 @@ async def _run_write_segment(run_id: UUID):
         "retry_count":     stash.get("retry_count", 0),
         "user_feedback":   user_feedback,
         "_resume_from":    "write",
+        "spent_usd":       await run_cost_total(rid),
         "token_usages":    [],
     }
     config = _graph_config(rid, loop)
@@ -666,7 +669,7 @@ async def _run_write_segment(run_id: UUID):
     await _log_token_usages(rid, state.get("token_usages", []))
 
     final_output    = state.get("final_output", "")
-    eval_scores     = await _safe_eval(final_output, research_output, topic, log)
+    eval_scores     = await _safe_eval(final_output, research_output, topic, log, run_id=rid, agent_name="eval_final")
     final_citations = _extract(final_output)
 
     async with AsyncSessionLocal() as db:
@@ -719,9 +722,12 @@ def _extract(text: str) -> list:
     return extract_citations(text or "")
 
 
-async def _safe_eval(content: str, research: str, topic: str, log) -> dict:
+async def _safe_eval(content: str, research: str, topic: str, log, run_id=None, agent_name: str = "eval") -> dict:
     try:
-        return await evaluate_output(content=content, research=research, topic=topic)
+        return await evaluate_output(
+            content=content, research=research, topic=topic,
+            run_id=run_id, agent_name=agent_name,
+        )
     except Exception as e:
         log.warning("eval_failed", error=str(e))
         return {}

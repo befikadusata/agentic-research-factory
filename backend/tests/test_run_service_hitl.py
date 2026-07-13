@@ -17,12 +17,14 @@ These verify:
 import uuid
 import pytest
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 from sqlalchemy import select as sa_select
 import database
 from database import AsyncSessionLocal
 from models import Run, RunStatus, RunCost, Monitor
 from services.run_service import execute_run
 import agents.crew as crew_module
+import services.run_service as run_service_module
 
 
 @pytest.fixture(autouse=True)
@@ -79,6 +81,11 @@ def _install_fake_graph(monkeypatch, review_sequence):
     monkeypatch.setattr(crew_module, "node_review", fake_review)
     monkeypatch.setattr(crew_module, "node_write", fake_write)
     monkeypatch.setattr(crew_module, "node_edit", fake_edit)
+
+    # The gate eval judge is a live litellm call; stub it so these machinery
+    # tests stay deterministic and offline. Its own cost tracking is covered in
+    # test_eval_and_cost.py — here we assert only the crew-node cost rows.
+    monkeypatch.setattr(run_service_module, "evaluate_output", AsyncMock(return_value={}))
 
     fresh_graph = crew_module.build_graph()
     monkeypatch.setattr(crew_module, "supervisor", fresh_graph)

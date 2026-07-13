@@ -1,7 +1,25 @@
 from litellm import completion
-from services.llm_router import get_completion_settings
+from services.llm_router import get_completion_settings, reconcile_served_model
+from utils.cost_tracker import record_side_cost
 from utils.json_parse import parse_json
 from logger import logger
+
+
+def _record_cost(response) -> None:
+    """Buffer this query_rewriter litellm call's cost so the enclosing researcher
+    crew node can fold it into its token accounting (the call fires inside the
+    node's sync tool loop, so it can't log cost the async way itself). Best-effort
+    — cost bookkeeping must never break the retrieval call it measures."""
+    try:
+        usage = getattr(response, "usage", None)
+        record_side_cost(
+            "query_rewriter",
+            reconcile_served_model("query_rewriter", getattr(response, "model", None)),
+            int(getattr(usage, "prompt_tokens", 0) or 0),
+            int(getattr(usage, "completion_tokens", 0) or 0),
+        )
+    except Exception as e:
+        logger.warning("query_rewriter_cost_record_failed", error=str(e))
 
 
 def rewrite_query(original_query: str) -> str:
@@ -25,6 +43,7 @@ def rewrite_query(original_query: str) -> str:
             messages=[{"role": "user", "content": prompt}],
             max_tokens=120,
         )
+        _record_cost(response)
         return response.choices[0].message.content.strip().strip("\"'")
     except Exception as e:
         logger.warning("query_rewriter_failed", error=str(e))
@@ -52,6 +71,7 @@ def generate_sub_queries(original_query: str, n: int = 3) -> list[str]:
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
         )
+        _record_cost(response)
         sub_queries = parse_json(response.choices[0].message.content)
         if isinstance(sub_queries, list) and sub_queries:
             return [str(q) for q in sub_queries]

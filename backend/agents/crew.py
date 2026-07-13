@@ -28,6 +28,11 @@ class ResearchState(TypedDict):
     review_output: str
     user_feedback: Optional[str]
     retry_count: int
+    # Run spend (USD) already persisted to run_costs *before* this graph
+    # invocation started — seeded by run_service from the DB so the budget check
+    # in route_after_review reflects the whole run, not just the current segment
+    # (each segment runs in a fresh process with a fresh token_usages).
+    spent_usd: float
     token_usages: Annotated[list, operator.add]
     # Set by run_service when resuming a durably-paused run in a *fresh* process
     # (the InMemorySaver checkpoint doesn't survive Celery's per-task child
@@ -41,7 +46,9 @@ class ResearchState(TypedDict):
 
 from contextlib import nullcontext
 from crewai import Crew, Process
+from config import settings
 from services.llm_router import resolve_actual_model, reset_actual_model
+from utils.cost_tracker import reset_side_costs, take_side_costs
 from utils.langfuse_utils import get_langfuse
 from utils.pricing import calculate_cost
 
@@ -65,6 +72,9 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
     # H4: clear the captured served-model so resolve_actual_model() below reads
     # only what *this* kickoff used (the primary, or a fallback if it spilled).
     reset_actual_model()
+    # Clear the side-cost buffer so we drain only the direct litellm calls (the
+    # RAG query_rewriter) fired during *this* node's kickoff.
+    reset_side_costs()
     # Langfuse v4's client dropped the old .trace()/.span() object model in
     # favor of an OTEL-based context manager (start_as_current_observation);
     # nullcontext() keeps `span` as None so the tracing calls below can be
@@ -104,15 +114,16 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
             )
 
     logger.info("crew_node_complete", node=result_key)
-    return {
-        result_key: str(result),
-        "token_usages": [{
-            "agent_name":        result_key,
-            "model":             model,
-            "prompt_tokens":     prompt_tokens,
-            "completion_tokens": completion_tokens,
-        }],
+    # Fold in any direct-litellm side calls (the RAG query_rewriter) made during
+    # this kickoff so their cost is persisted through the normal token path
+    # instead of vanishing.
+    node_usage = {
+        "agent_name":        result_key,
+        "model":             model,
+        "prompt_tokens":     prompt_tokens,
+        "completion_tokens": completion_tokens,
     }
+    return {"token_usages": [node_usage, *take_side_costs()], result_key: str(result)}
 
 
 # ── nodes ────────────────────────────────────────────────────────────────────
@@ -275,14 +286,46 @@ def review_verdict(review_output: str) -> Optional[str]:
     return m.group(1).upper() if m else None
 
 
+def _run_spend_usd(state: ResearchState) -> float:
+    """Run spend so far: the cost persisted before this graph invocation
+    (spent_usd, seeded from run_costs) plus the in-flight segment's token_usages."""
+    spent = float(state.get("spent_usd", 0.0) or 0.0)
+    for u in state.get("token_usages", []):
+        spent += calculate_cost(
+            u.get("model", ""), u.get("prompt_tokens", 0), u.get("completion_tokens", 0)
+        )
+    return spent
+
+
+def _over_budget(state: ResearchState) -> bool:
+    """True once the run's accumulated LLM spend reaches RUN_COST_CEILING_USD.
+    Disabled (always False) when the ceiling is None or <= 0 — the free-tier
+    default prices to ~$0, so this only ever bites a paid-key deployment."""
+    ceiling = settings.RUN_COST_CEILING_USD
+    if not ceiling or ceiling <= 0:
+        return False
+    spent = _run_spend_usd(state)
+    if spent >= ceiling:
+        logger.warning(
+            "run_cost_ceiling_reached",
+            spent_usd=round(spent, 4),
+            ceiling_usd=ceiling,
+            retry_count=state.get("retry_count", 0),
+        )
+        return True
+    return False
+
+
 def route_after_review(state: ResearchState) -> str:
     review_output = state.get("review_output", "")
     if review_verdict(review_output) == "PASS":
         return "write"
 
-    # FAIL or unparseable: retry from research while the retry budget remains,
-    # else ship what we have rather than loop forever.
-    if review_output and state.get("retry_count", 0) < 3:
+    # FAIL or unparseable: retry from research while BOTH the retry budget and the
+    # cost ceiling allow it. If we've spent the run's budget, ship what we have
+    # (graceful degrade) rather than burning the full retry allowance regardless
+    # of spend — the fix for a looping run with no cost input.
+    if review_output and state.get("retry_count", 0) < 3 and not _over_budget(state):
         return "research"
 
     return "write"

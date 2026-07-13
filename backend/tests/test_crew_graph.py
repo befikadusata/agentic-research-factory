@@ -157,6 +157,56 @@ def test_resume_from_marker_reenters_at_analyse_in_fresh_thread(monkeypatch):
     graph.checkpointer.delete_thread("t-resume-marker")
 
 
+# ── budget ceiling (gap #1): the reviewer retry loop must stop once the run's
+# accumulated LLM spend reaches RUN_COST_CEILING_USD, rather than burning the
+# full retry allowance regardless of cost. ──────────────────────────────────────
+
+def _fail_state(**over):
+    state = dict(BASE_STATE)
+    state.update(review_output="VERDICT: FAIL", retry_count=0, spent_usd=0.0, token_usages=[])
+    state.update(over)
+    return state
+
+
+def test_route_after_review_ships_partial_when_over_budget(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "RUN_COST_CEILING_USD", 1.0)
+    # A FAIL that would normally retry, but prior spend already exceeds the ceiling.
+    assert crew_module.route_after_review(_fail_state(spent_usd=2.0)) == "write"
+
+
+def test_route_after_review_retries_within_budget(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "RUN_COST_CEILING_USD", 100.0)
+    assert crew_module.route_after_review(_fail_state(spent_usd=0.0)) == "research"
+
+
+def test_route_after_review_counts_in_flight_tokens_toward_budget(monkeypatch):
+    from config import settings
+    # 70B priced at (0.00059, 0.00079)/1k → 1k+1k ≈ $0.00138, over a $0.001 ceiling.
+    monkeypatch.setattr(settings, "RUN_COST_CEILING_USD", 0.001)
+    state = _fail_state(token_usages=[{
+        "agent_name": "analyst", "model": "groq/llama-3.3-70b-versatile",
+        "prompt_tokens": 1000, "completion_tokens": 1000,
+    }])
+    assert crew_module.route_after_review(state) == "write"
+
+
+def test_route_after_review_ceiling_disabled_allows_retry(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "RUN_COST_CEILING_USD", None)
+    # Even with huge spend, a None ceiling disables the budget guard (retry cap
+    # of 3 still bounds the loop).
+    assert crew_module.route_after_review(_fail_state(spent_usd=999.0)) == "research"
+
+
+def test_route_after_review_retry_cap_still_bounds_loop(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "RUN_COST_CEILING_USD", None)
+    # retry_count exhausted → ship regardless of budget being disabled.
+    assert crew_module.route_after_review(_fail_state(retry_count=3)) == "write"
+
+
 def test_resume_from_marker_reenters_at_write_in_fresh_thread(monkeypatch):
     """Same durable-resume path for the write segment: re-enter at `write` with
     analysis rebuilt from the DB, run write -> edit -> END."""

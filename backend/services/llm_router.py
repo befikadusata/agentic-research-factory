@@ -312,19 +312,20 @@ def reset_actual_model() -> None:
     _actual_model_used["model"] = None
 
 
-def resolve_actual_model(agent_name: str) -> str:
-    """The model that actually served this agent's call, as a *known* pricing
-    slug. Returns the configured primary unless litellm reported a different
-    served model (a fallback fired) that matches one of the agent's declared
-    fallback candidates. litellm reports the bare provider model name (no
-    ``groq/``/``openrouter/`` prefix), so we match on that. Anything
-    unrecognized degrades to the primary.
+def reconcile_served_model(agent_name: str, served: str | None) -> str:
+    """Map a litellm-reported served model back to a *known* pricing slug for
+    `agent_name`, matching it against the agent's primary + fallback candidates.
+    litellm reports the bare provider model name (no ``groq/``/``openrouter/``
+    prefix), so we match on that; anything unrecognized (or empty) degrades to
+    the configured primary.
 
-    Relies on crew nodes running one at a time (Celery --concurrency=1, linear
-    graph), so the last captured model belongs to this node's kickoff.
+    Unlike resolve_actual_model this takes the served model *explicitly* (read
+    off the litellm response), so it's safe for direct calls that interleave
+    with other litellm traffic in the same process — e.g. the query_rewriter
+    firing inside the researcher's tool loop — where the process-global
+    success-hook capture would be clobbered.
     """
     primary = get_model(agent_name)
-    served = _actual_model_used["model"]
     if not served:
         return primary
     for cand in (primary, *get_fallbacks(agent_name)):
@@ -332,3 +333,15 @@ def resolve_actual_model(agent_name: str) -> str:
         if served in (cand, bare) or bare.endswith(served) or served.endswith(bare):
             return cand
     return primary
+
+
+def resolve_actual_model(agent_name: str) -> str:
+    """The model that actually served this agent's crew-node kickoff, as a known
+    pricing slug (the configured primary, or a fallback slug if litellm spilled).
+
+    Relies on crew nodes running one at a time (Celery --concurrency=1, linear
+    graph), so the last globally-captured served model belongs to this node's
+    kickoff. Direct (non-crew) callers should use reconcile_served_model with the
+    served model off their own response instead of this global.
+    """
+    return reconcile_served_model(agent_name, _actual_model_used["model"])

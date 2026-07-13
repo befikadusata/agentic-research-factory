@@ -1,12 +1,24 @@
 from litellm import acompletion
 from services.llm_router import get_completion_settings
+from utils.cost_tracker import log_direct_call
 from utils.json_parse import parse_json
 
 
-async def evaluate_output(content: str, research: str, topic: str) -> dict:
+async def evaluate_output(
+    content: str,
+    research: str,
+    topic: str,
+    run_id=None,
+    agent_name: str = "eval",
+) -> dict:
     """
     Score output on 4 dimensions (0-100 each).
     Returns: { accuracy, relevance, completeness, writing_quality, overall, issues }
+
+    This judge is a direct litellm call (not a crew node), so it runs at every
+    approval gate without being counted anywhere. When `run_id` is given its
+    cost is persisted to run_costs under `agent_name`, so /analytics/costs stops
+    under-reporting the judge traffic.
     """
     prompt = f"""You are a quality evaluator. Score this content on 4 dimensions (0-100):
 1. Accuracy: Are all claims supported by the research?
@@ -35,4 +47,6 @@ Respond ONLY with valid JSON:
         max_tokens=500,
         timeout=60,
     )
+    if run_id is not None:
+        await log_direct_call(run_id, agent_name, response, routing_agent="eval")
     return parse_json(response.choices[0].message.content)
