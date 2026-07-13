@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     # to break the shared blind spot without needing a second provider key. (M2)
     JUDGE_MODEL: str | None = None
 
+    # A run stuck in a non-terminal state (pending / researching / analyzing /
+    # writing, or an *autonomous* run parked at an approval gate) longer than
+    # this — with no segment task advancing it — is considered orphaned and
+    # reaped to `failed` by the beat-driven reaper. Must exceed the Celery hard
+    # task limit (~11 min) plus a margin, so a still-running segment is never
+    # mistaken for a dead one. (M3)
+    RUN_STUCK_TIMEOUT_MIN: int = 20
+
     # Gemini embeddings for RAG.
     EMBEDDING_MODEL: str = "gemini-embedding-2"
     EMBEDDING_DIMENSION: int = 384

@@ -1,11 +1,12 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import UUID
-from sqlalchemy import update as sa_update
+from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
+from config import settings
 from database import AsyncSessionLocal
 from models import Run, RunStatus
 from logger import logger
@@ -84,6 +85,77 @@ async def _claim_status(run_id: UUID, expected: RunStatus, new: RunStatus) -> bo
         )
         await db.commit()
         return result.rowcount > 0
+
+
+# ── orphaned-run reaper (M3) ──────────────────────────────────────────────────
+# States a live segment task is supposed to be actively advancing. A run left in
+# one of these long past the Celery time limit means its task was SIGKILLed (soft
+# limit) or its worker crashed — nothing will ever advance or fail it.
+_ACTIVE_STATES = (
+    RunStatus.pending,
+    RunStatus.researching,
+    RunStatus.analyzing,
+    RunStatus.writing,
+)
+_AWAITING_STATES = (
+    RunStatus.awaiting_research_approval,
+    RunStatus.awaiting_analysis_approval,
+    RunStatus.awaiting_final_approval,
+)
+_REAPABLE_STATES = (*_ACTIVE_STATES, *_AWAITING_STATES)
+
+
+async def reap_orphaned_runs() -> list[str]:
+    """Fail runs stuck in a non-terminal state with no live task advancing them.
+
+    Two orphan classes:
+      * a run in an *active* state (pending/researching/analyzing/writing) whose
+        segment task was SIGKILLed at the Celery time limit — or whose worker
+        crashed — so it will never advance or fail on its own; and
+      * an *autonomous* (monitor-spawned) run parked at an awaiting_* gate: those
+        auto-advance via _enter_gate's dispatch, so a lost dispatch leaves the run
+        hanging with no human to approve it.
+
+    Manual runs at an awaiting_* gate are legitimately waiting on a human and are
+    left untouched. Idempotent and race-safe: each transition is a guarded UPDATE
+    keyed on the same status + stale timestamp, so a run a live task advanced
+    between the scan and the write is skipped rather than clobbered.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.RUN_STUCK_TIMEOUT_MIN)
+    reaped: list[str] = []
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(Run.id, Run.status, Run.monitor_id).where(
+                    Run.status.in_(_REAPABLE_STATES),
+                    Run.updated_at < cutoff,
+                )
+            )
+        ).all()
+
+        for run_id, status, monitor_id in rows:
+            # A manual approval gate is a legitimate wait, not an orphan.
+            if status in _AWAITING_STATES and monitor_id is None:
+                continue
+            result = await db.execute(
+                sa_update(Run)
+                .where(Run.id == run_id, Run.status == status, Run.updated_at < cutoff)
+                .values(
+                    status=RunStatus.failed,
+                    failed_at_status=status,
+                    error_message="Run reaped: stuck with no worker progress past the timeout.",
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            if result.rowcount:
+                reaped.append(str(run_id))
+        await db.commit()
+
+    if reaped:
+        logger.warning("orphaned_runs_reaped", count=len(reaped))
+        for rid in reaped:
+            await emit(rid, "error", {"message": "Run timed out and was marked failed."})
+    return reaped
 
 
 async def _invoke_supervisor_with_retry(supervisor, state: dict | None, config: dict, recursion_limit: int = 25):
@@ -392,12 +464,20 @@ async def _run_start_segment(run_id: UUID):
 
     research_output = state.get("research_output", "")
     citations = extract_citations(research_output or "")
+    # M4: score the research before its approval gate so the operator isn't
+    # approving blind. Research has no separate grounding artifact, so (like
+    # lead-intel) it's scored against itself — an on-topic/completeness signal,
+    # not a groundedness check. Overwriting eval_scores per gate lets the existing
+    # ConfidenceBadge show the current stage's confidence; the write segment
+    # replaces it with the final eval before the run reaches `complete`.
+    stage_scores = await _safe_eval(research_output, research_output, topic, log)
     async with AsyncSessionLocal() as db:
         run_obj = await db.get(Run, run_id)
         run_obj.research_output = research_output
         run_obj.metrics = {
             **(run_obj.metrics or {}),
             "citations": citations,
+            "eval_scores": stage_scores,
             # plan_output/retry_count aren't Run columns but the analyse segment
             # (a separate task, fresh process) needs them to rebuild graph state.
             _GRAPH_KEY: {"plan_output": state.get("plan_output", ""), "retry_count": 0},
@@ -478,12 +558,14 @@ async def _run_analyse_segment(run_id: UUID):
         # redoing already-approved work.
         research_output = state.get("research_output", research_output)
         citations = _extract(research_output)
+        stage_scores = await _safe_eval(research_output, research_output, topic, log)  # M4
         async with AsyncSessionLocal() as db:
             run_obj = await db.get(Run, run_id)
             run_obj.research_output = research_output
             run_obj.metrics = {
                 **(run_obj.metrics or {}),
                 "citations": citations,
+                "eval_scores": stage_scores,
                 _GRAPH_KEY: {"plan_output": stash.get("plan_output", ""), "retry_count": retry_count},
             }
             flag_modified(run_obj, "metrics")
@@ -498,11 +580,16 @@ async def _run_analyse_segment(run_id: UUID):
         log.warning("unexpected_graph_pause", next_node=next_node)
 
     analysis_output = state.get("analysis_output", "")
+    # M4: score the analysis before its approval gate. Unlike research, the
+    # analysis has a real grounding artifact (the research it's derived from), so
+    # this is a genuine groundedness check — are the analysis's claims supported.
+    stage_scores = await _safe_eval(analysis_output, research_output, topic, log)
     async with AsyncSessionLocal() as db:
         run_obj = await db.get(Run, run_id)
         run_obj.analysis_output = analysis_output
         run_obj.metrics = {
             **(run_obj.metrics or {}),
+            "eval_scores": stage_scores,
             _GRAPH_KEY: {"plan_output": stash.get("plan_output", ""), "retry_count": retry_count},
         }
         flag_modified(run_obj, "metrics")

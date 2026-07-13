@@ -32,6 +32,7 @@ celery_app.conf.update(
         "execute_run_task": {"queue": "default"},
         "ingest_doc_task":  {"queue": "default"},
         "dispatch_due_monitors_task": {"queue": "default"},
+        "reap_orphaned_runs_task": {"queue": "default"},
     },
     # Celery-beat tick that drives continuous monitoring. It only *finds due
     # monitors and enqueues their runs* — the heavy pipeline still runs in a
@@ -41,6 +42,13 @@ celery_app.conf.update(
         "dispatch-due-monitors": {
             "task": "dispatch_due_monitors_task",
             "schedule": 60.0,
+        },
+        # Reap runs orphaned by a killed segment task / crashed worker (or an
+        # autonomous run whose auto-advance dispatch was lost), so they can't hang
+        # in a non-terminal state forever. Cheap scan; 5-min cadence is plenty.
+        "reap-orphaned-runs": {
+            "task": "reap_orphaned_runs_task",
+            "schedule": 300.0,
         },
     },
 )
@@ -69,3 +77,10 @@ def dispatch_due_monitors_task():
     import asyncio
     from services.monitor_service import dispatch_due_monitors
     asyncio.run(dispatch_due_monitors())
+
+
+@celery_app.task(name="reap_orphaned_runs_task")
+def reap_orphaned_runs_task():
+    import asyncio
+    from services.run_service import reap_orphaned_runs
+    asyncio.run(reap_orphaned_runs())
