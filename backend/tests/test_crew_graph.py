@@ -207,6 +207,41 @@ def test_route_after_review_retry_cap_still_bounds_loop(monkeypatch):
     assert crew_module.route_after_review(_fail_state(retry_count=3)) == "write"
 
 
+# ── researcher retry-budget escalation (gap #3): a re-run after a review FAIL
+# gets a deeper budget than the deliberately-shallow first pass, so it acts on the
+# feedback instead of re-failing the same undersized pass and re-billing it. ─────
+
+def test_researcher_budget_first_pass_uses_base(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "RESEARCHER_MAX_ITER", 2)
+    monkeypatch.setattr(settings, "RESEARCHER_MAX_TOKENS", 900)
+    monkeypatch.setattr(settings, "RESEARCHER_RETRY_TOKEN_STEP", 500)
+    assert crew_module._researcher_budget(0) == (2, 900)
+
+
+def test_researcher_budget_escalates_per_retry(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "RESEARCHER_MAX_ITER", 2)
+    monkeypatch.setattr(settings, "RESEARCHER_MAX_TOKENS", 900)
+    monkeypatch.setattr(settings, "RESEARCHER_RETRY_TOKEN_STEP", 500)
+    assert crew_module._researcher_budget(1) == (3, 1400)
+    assert crew_module._researcher_budget(2) == (4, 1900)
+
+
+def test_researcher_budget_is_monotonic_and_never_below_base(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "RESEARCHER_MAX_ITER", 2)
+    monkeypatch.setattr(settings, "RESEARCHER_MAX_TOKENS", 900)
+    monkeypatch.setattr(settings, "RESEARCHER_RETRY_TOKEN_STEP", 500)
+    # A negative/garbage retry_count clamps to the base pass, never smaller.
+    assert crew_module._researcher_budget(-1) == (2, 900)
+    prev = (0, 0)
+    for rc in range(0, 4):
+        cur = crew_module._researcher_budget(rc)
+        assert cur >= prev
+        prev = cur
+
+
 def test_resume_from_marker_reenters_at_write_in_fresh_thread(monkeypatch):
     """Same durable-resume path for the write segment: re-enter at `write` with
     analysis rebuilt from the DB, run write -> edit -> END."""

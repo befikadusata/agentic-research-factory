@@ -48,9 +48,26 @@ from contextlib import nullcontext
 from crewai import Crew, Process
 from config import settings
 from services.llm_router import resolve_actual_model, reset_actual_model
+from utils.context import compact_text
 from utils.cost_tracker import reset_side_costs, take_side_costs
 from utils.langfuse_utils import get_langfuse
 from utils.pricing import calculate_cost
+
+
+def _researcher_budget(retry_count: int) -> tuple[int, int]:
+    """(max_iter, max_tokens) for the researcher, escalating on retry.
+
+    The first pass (retry_count 0) keeps the free-tier-tuned base budget. Each
+    retry — which only happens after the reviewer FAILed the prior pass — gets one
+    more ReAct iteration and a larger synthesis reservation, so it can act on the
+    feedback instead of repeating the same undersized pass that already failed and
+    re-billing it. retry_count is naturally bounded (the route caps retries at 3),
+    so the escalation can't run away. (gap #3)
+    """
+    n = max(retry_count, 0)
+    max_iter = settings.RESEARCHER_MAX_ITER + n
+    max_tokens = settings.RESEARCHER_MAX_TOKENS + settings.RESEARCHER_RETRY_TOKEN_STEP * n
+    return max_iter, max_tokens
 
 def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: RunnableConfig, result_key: str, agent_key: str) -> dict:
     lf = get_langfuse()
@@ -151,25 +168,31 @@ def node_research(state: ResearchState, config: RunnableConfig) -> dict:
     # pass under the ceiling.
     tools = [tavily_search_tool, custom_rag]
 
-    agent = researcher_agent(tools=tools)
-    
+    # Deeper budget on a retry (gap #3): a re-run after a review FAIL gets more
+    # iterations + a larger synthesis reservation than the shallow first pass.
+    max_iter, max_tokens = _researcher_budget(state.get("retry_count", 0))
+    agent = researcher_agent(tools=tools, max_iter=max_iter, max_tokens=max_tokens)
+
     # Enrich topic with plan if available. The plan is re-sent on every ReAct
-    # iteration, so cap it — the full plan pushed each researcher call over
-    # Groq's free 12K tokens/min ceiling. The first ~1200 chars carry the intent.
+    # iteration, so cap it — the full plan pushed each researcher call over Groq's
+    # free 12K tokens/min ceiling. Head+tail keeps the intent up front and any
+    # closing constraints, rather than a blind head clip (gap #4).
     topic = state["topic"]
     if state.get("plan_output"):
-        plan = state["plan_output"][:1200]
+        plan = compact_text(state["plan_output"], 1200)
         topic = f"{topic}\n\n**RESEARCH PLAN**:\n{plan}"
-    
+
     # NEW: Add feedback if available
     if state.get("user_feedback"):
         topic = f"{topic}\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
 
     # If we are retrying (the reviewer's verdict was anything but PASS), fold the
     # audit back in as retry feedback — read from the verdict field, not a bare
-    # "FAIL" substring (H2).
+    # "FAIL" substring (H2). Bound it so a verbose audit can't balloon the retry
+    # prompt on the rate-limited retry path (gap #4).
     if state.get("review_output") and review_verdict(state["review_output"]) != "PASS":
-        topic = f"{topic}\n\n**RETRY FEEDBACK**:\n{state['review_output']}"
+        feedback = compact_text(state["review_output"], settings.CONTEXT_MAX_CHARS)
+        topic = f"{topic}\n\n**RETRY FEEDBACK**:\n{feedback}"
 
     task = research_task(agent, topic, state.get("context_docs", ""))
     return _run_crew_node([agent], [task], state, config, "research_output", "researcher")
@@ -202,7 +225,10 @@ def node_analyse(state: ResearchState, config: RunnableConfig) -> dict:
     
     task = analysis_task(agent, topic)
     task.context = []
-    task.description = f"Research summary:\n{state['research_output']}\n\n" + task.description
+    # Reference material for the analysis — bound it so an oversized research brief
+    # can't balloon this prompt (gap #4); normally under budget and unchanged.
+    research = compact_text(state["research_output"], settings.CONTEXT_MAX_CHARS)
+    task.description = f"Research summary:\n{research}\n\n" + task.description
     return _run_crew_node([agent], [task], state, config, "analysis_output", "analyst")
 
 
@@ -225,7 +251,11 @@ def node_write(state: ResearchState, config: RunnableConfig) -> dict:
     from agents.writer import writer_agent, write_task
     agent = writer_agent()
     task = write_task(agent, state["topic"], state["output_format"])
+    # Prior work is reference the writer draws from (not the deliverable itself),
+    # so bound it (gap #4). This hop is post-review, so trimming can't trigger a
+    # review retry; normally under budget and passed through unchanged.
     prior = state.get("analysis_output") or state.get("research_output", "")
+    prior = compact_text(prior, settings.CONTEXT_MAX_CHARS)
     task.description = f"Prior work:\n{prior}\n\n" + task.description
     if state.get("user_feedback"):
         task.description += f"\n\n**USER FEEDBACK**:\n{state['user_feedback']}"

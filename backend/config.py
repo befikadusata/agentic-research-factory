@@ -75,6 +75,25 @@ class Settings(BaseSettings):
     # ceiling entirely (the retry cap of 3 still bounds the loop).
     RUN_COST_CEILING_USD: float | None = 1.0
 
+    # Researcher pass budget. The first pass is deliberately shallow to fit Groq's
+    # free 12K tokens/min ceiling (see agents/researcher.py). On a *retry* — which
+    # only happens after the reviewer FAILed the prior pass — repeating that same
+    # undersized pass just re-fails and re-bills it, so the budget escalates per
+    # retry (more ReAct iterations + a larger synthesis reservation) to actually
+    # act on the reviewer's feedback. Raise the base values on a paid key where the
+    # per-minute ceiling isn't the binding constraint. (gap #3)
+    RESEARCHER_MAX_ITER: int = 2
+    RESEARCHER_MAX_TOKENS: int = 900
+    RESEARCHER_RETRY_TOKEN_STEP: int = 500
+
+    # Max characters of a *prior stage's* output re-fed as context into a later
+    # stage's prompt (analysis→write reference, research→analyse reference, the
+    # reviewer's retry feedback). Every stage is completion-capped, so these are
+    # normally under budget and pass through untouched; this only bounds an
+    # unusually large upstream output (big source docs, a verbose paid model) so
+    # the re-sent context can't balloon a downstream call. (gap #4)
+    CONTEXT_MAX_CHARS: int = 6000
+
     # Gemini embeddings for RAG.
     EMBEDDING_MODEL: str = "gemini-embedding-2"
     EMBEDDING_DIMENSION: int = 384

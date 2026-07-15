@@ -1,5 +1,6 @@
 from litellm import acompletion
 from services.llm_router import get_completion_settings
+from utils.context import compact_text
 from utils.cost_tracker import log_direct_call
 from utils.json_parse import parse_json
 
@@ -29,10 +30,10 @@ async def evaluate_output(
 Topic: {topic}
 
 Research Summary:
-{research[:2000]}
+{compact_text(research, 2000)}
 
 Content to Evaluate:
-{content[:3000]}
+{compact_text(content, 3000)}
 
 Respond ONLY with valid JSON:
 {{"accuracy": 85, "relevance": 90, "completeness": 78, "writing_quality": 88, "overall": 85, "issues": ["list any critical issues"]}}"""
