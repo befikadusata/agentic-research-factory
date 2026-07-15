@@ -26,12 +26,16 @@ class Settings(BaseSettings):
     # these to pin a specific agent to a specific slug (it wins over routing);
     # the `openrouter/` prefix is explicit so litellm routes it correctly.
     #
-    # The old default routing is now expressed as capabilities in the registry:
+    # The default routing is expressed as capabilities in the registry:
     #   - light (strategist, query_rewriter)        → Groq 8B-instant
     #   - reasoning/writing/tool-use (core path)     → Groq 70B-versatile
-    #   - reasoning/judging, single-shot (analyst,   → OpenRouter free (Tencent
-    #     reviewer, eval)                              Hunyuan hy3), when its key
-    #                                                  is present; else Groq 70B.
+    #   - reasoning/judging (analyst, reviewer,      → Groq 70B-versatile
+    #     eval)
+    # OpenRouter's free Tencent hy3 is a reasoning model that returns empty
+    # `content` under real crewai load (fails the stage), so it is NOT a routed
+    # primary — it stays only as the cross-provider *fallback* slug and for
+    # pricing (see services/llm_router.py). Set a *_MODEL override to pin a
+    # specific slug (e.g. a paid reasoning model for the judges).
     STRATEGIST_MODEL: str | None = None
     QUERY_REWRITER_MODEL: str | None = None
     RESEARCHER_MODEL: str | None = None

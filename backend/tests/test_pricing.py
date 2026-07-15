@@ -25,8 +25,8 @@ def test_calculate_cost_free_model_is_zero():
 
 
 def test_calculate_cost_routed_free_openrouter_model_is_priced():
-    # openrouter/tencent/hy3:free is the live analyst/reviewer/eval model; it used
-    # to be absent from the table and log unknown_model_pricing on every call.
+    # openrouter/tencent/hy3:free is the cross-provider fallback slug; it used to
+    # be absent from the table and log unknown_model_pricing on every call.
     # Sourced from MODEL_REGISTRY now, it prices to $0 (free) — not "unknown".
     assert calculate_cost("openrouter/tencent/hy3:free", 5000, 5000) == 0.0
 

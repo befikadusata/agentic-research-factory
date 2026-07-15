@@ -67,7 +67,18 @@ MODEL_REGISTRY: dict[str, dict] = {
     },
     "openrouter/tencent/hy3:free": {
         "provider": "openrouter",
-        "caps": {REASONING, JUDGE},
+        # NO primary caps. hy3 is a *reasoning* model: it spends its completion
+        # budget on an internal reasoning field and, under real pipeline load,
+        # returns an EMPTY `content` — which crewai's get_llm_response rejects
+        # with ValueError("Invalid response from LLM call - None or empty."),
+        # failing the whole stage (observed on the analyst, 2026-07-15; the same
+        # failure the researcher hit earlier). So it must never be a crewai
+        # PRIMARY. It stays a registry citizen only for (a) pricing (utils.pricing
+        # reads price from here) and (b) being the _OPENROUTER_FALLBACK slug. With
+        # empty caps, _resolve never selects it, so analyst/reviewer/eval route to
+        # Groq 70B (which carries REASONING/JUDGE) — reliable now that Groq's key
+        # is present.
+        "caps": set(),
         "tool_quality": "poor",
         "price": (0.0, 0.0),
         "rate_limit": "request",
