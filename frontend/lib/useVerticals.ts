@@ -17,7 +17,6 @@ export function useVerticals(): VerticalDefinition[] {
             key: v.key as Vertical,
             displayName: v.display_name as string,
             description: v.description as string,
-            icon: v.icon as string,
             defaultFormat: v.default_format as OutputFormat,
             accentClass: staticDef?.accentClass ?? "",
             inputSchema: Object.fromEntries(

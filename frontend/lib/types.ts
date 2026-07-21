@@ -36,7 +36,6 @@ export interface VerticalDefinition {
   key: Vertical;
   displayName: string;
   description: string;
-  icon: string;
   inputSchema: Record<string, VerticalFieldSchema>;
   defaultFormat: OutputFormat;
   accentClass: string;
@@ -48,7 +47,6 @@ export const VERTICALS: VerticalDefinition[] = [
     displayName: "B2B Sales Lead Intel",
     description:
       "Build a prospect dossier — company overview, decision makers, funding, tech stack, and fit score.",
-    icon: "🎯",
     defaultFormat: "report",
     accentClass: "text-content bg-category-sales/10 border-category-sales/40",
     inputSchema: {
@@ -77,7 +75,6 @@ export const VERTICALS: VerticalDefinition[] = [
     displayName: "Marketing Competitor Brief",
     description:
       "Analyze a competitor's positioning, content strategy, pricing, and differentiation gaps.",
-    icon: "📊",
     defaultFormat: "report",
     accentClass: "text-content bg-category-competitor/10 border-category-competitor/40",
     inputSchema: {
@@ -106,7 +103,6 @@ export const VERTICALS: VerticalDefinition[] = [
     displayName: "Founder Strategy Brief",
     description:
       "Get a strategic landscape analysis — market sizing, competition, timing, and entry points.",
-    icon: "🚀",
     defaultFormat: "summary",
     accentClass: "text-content bg-category-strategy/10 border-category-strategy/40",
     inputSchema: {
@@ -318,4 +314,3 @@ export function pipelineNodeState(
   if (idx === activeIdx) return STATUS_TO_AGENT_STATE[status];
   return "idle";
 }
-

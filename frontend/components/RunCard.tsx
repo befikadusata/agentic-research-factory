@@ -2,6 +2,7 @@ import { AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, VERTICALS, statusBadgeClass }
 import type { Run } from "@/lib/types";
 import Link from "next/link";
 import { PipelineProgress } from "@/components/PipelineProgress";
+import { PlaybookIcon } from "@/components/PlaybookIcon";
 
 export function RunCard({ run }: { run: Run }) {
   const vDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) : null;
@@ -31,8 +32,9 @@ export function RunCard({ run }: { run: Run }) {
             {new Date(run.created_at).toLocaleDateString()}
           </p>
           {vDef && (
-            <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-sm ${vDef.accentClass}`}>
-              {vDef.icon} {vDef.displayName}
+            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold border px-2 py-0.5 rounded-sm ${vDef.accentClass}`}>
+              <PlaybookIcon vertical={vDef.key} size={12} />
+              {vDef.displayName}
             </span>
           )}
         </div>

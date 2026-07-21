@@ -12,6 +12,7 @@ import { HitlModal } from "@/components/HitlModal";
 import { OutputPanel } from "@/components/OutputPanel";
 import { ConfidenceBadge } from "@/components/ConfidenceBadge";
 import { MonitorDiffPanel } from "@/components/MonitorDiffPanel";
+import { PlaybookIcon } from "@/components/PlaybookIcon";
 import type { RunDetail, LogEntry, RunStatus } from "@/lib/types";
 import { VERTICALS, AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, statusBadgeClass } from "@/lib/types";
 
@@ -183,8 +184,9 @@ export default function RunPage() {
             {status === null ? "…" : (STATUS_LABEL[status] ?? status)}
           </span>
           {verticalDef && (
-            <span className={`text-xs font-bold uppercase tracking-wider border px-3 py-1.5 rounded-sm ${verticalDef.accentClass}`}>
-              {verticalDef.icon} {verticalDef.displayName}
+            <span className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider border px-3 py-1.5 rounded-sm ${verticalDef.accentClass}`}>
+              <PlaybookIcon vertical={verticalDef.key} size={14} />
+              {verticalDef.displayName}
             </span>
           )}
         </div>

@@ -126,9 +126,10 @@ test.describe("Core Flow Smoke Tests", () => {
     await expect(summaryFormat).toHaveAttribute("aria-pressed", "true");
     await expect(generalFormat).toHaveAttribute("aria-pressed", "false");
 
-    const marketingPlaybook = page
-      .getByRole("group", { name: "Playbook" })
-      .getByRole("button", { name: /Marketing Competitor Brief/i });
+    const playbook = page.getByRole("group", { name: "Playbook" });
+    await expect(playbook.locator("svg")).toHaveCount(3);
+    await expect(playbook).not.toContainText(/[🎯📊🚀]/);
+    const marketingPlaybook = playbook.getByRole("button", { name: /Marketing Competitor Brief/i });
     await marketingPlaybook.click();
     await expect(marketingPlaybook).toHaveAttribute("aria-pressed", "true");
     await page.getByPlaceholder(/Competitive landscape for Notion/i).fill("Competitive landscape");

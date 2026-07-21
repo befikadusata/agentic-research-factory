@@ -2,7 +2,9 @@
 
 import { useVerticals } from "@/lib/useVerticals";
 import type { VerticalDefinition, Vertical } from "@/lib/types";
+import { PlaybookIcon } from "@/components/PlaybookIcon";
 import { clsx } from "clsx";
+import { Check } from "lucide-react";
 
 interface Props {
   value: Vertical | null;
@@ -29,9 +31,13 @@ export function VerticalSelector({ value, onChange }: Props) {
             )}
           >
             {selected && (
-              <span className="absolute top-3 right-3 text-agent-active" aria-hidden>✓</span>
+              <span className="absolute right-3 top-3 text-agent-active" aria-hidden>
+                <Check size={18} strokeWidth={2.5} />
+              </span>
             )}
-            <div className="text-2xl mb-2 text-primary">{v.icon}</div>
+            <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
+              <PlaybookIcon vertical={v.key} size={22} />
+            </div>
             <div
               className={clsx(
                 "text-sm font-semibold mb-1",
