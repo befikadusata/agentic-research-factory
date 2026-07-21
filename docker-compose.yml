@@ -257,7 +257,12 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      # Keep container-generated build artifacts out of the host bind mount.
+      # Rootless Docker may otherwise create host files owned by nobody:nogroup,
+      # which prevents local Next.js and Playwright processes from cleaning them.
+      - frontend_next:/app/.next
 
 volumes:
   pgdata:
   firecrawl_pgdata:
+  frontend_next:
