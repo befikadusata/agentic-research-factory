@@ -277,6 +277,14 @@
   }
 }
 
+/* One predictable keyboard-focus treatment across native controls, links,
+   Radix primitives, and custom interactive elements. Keep this outside a
+   Tailwind layer so component utilities cannot accidentally suppress it. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-border-focus) !important;
+  outline-offset: 3px;
+}
+
 /* ── Keyframes ─────────────────────────────────────────────── */
 @keyframes ftm-node-pulse {
   0%, 100% { box-shadow: 0 0 0 1px var(--base-cyan-400),

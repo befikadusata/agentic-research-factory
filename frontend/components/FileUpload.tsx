@@ -79,7 +79,7 @@ export function FileUpload({ workspaceId, onUploaded, onRemoved }: Props) {
           </p>
         </div>
       )}
-      {error && <p className="text-content text-sm mt-1">{error}</p>}
+      {error && <p role="alert" className="text-content text-sm mt-1">{error}</p>}
     </div>
   );
 }

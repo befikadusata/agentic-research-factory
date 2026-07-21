@@ -94,7 +94,7 @@ export function ManageMembersModal({
         <p className="text-sm text-content-muted mb-5">{workspace.name}</p>
 
         {error && (
-          <p className="text-sm text-feedback-error bg-feedback-error/10 border border-feedback-error/40 rounded-md px-3 py-2 mb-4">
+          <p role="alert" className="text-sm text-feedback-error bg-feedback-error/10 border border-feedback-error/40 rounded-md px-3 py-2 mb-4">
             {error}
           </p>
         )}

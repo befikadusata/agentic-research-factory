@@ -129,8 +129,8 @@ export default function RunPage() {
   return (
     <div className="space-y-8">
       <div className="pb-6 border-b border-border-subtle">
-        <h1 className="text-3xl font-bold text-content">{run.topic}</h1>
-        <div className="flex items-center gap-3 mt-4">
+        <h1 className="text-2xl font-bold text-content break-words sm:text-3xl">{run.topic}</h1>
+        <div className="flex flex-wrap items-center gap-3 mt-4">
           <span className="capitalize text-sm text-content-secondary font-medium bg-surface-2 border border-border-subtle px-3 py-1 rounded-sm">
             {run.format} Run
           </span>
@@ -163,7 +163,7 @@ export default function RunPage() {
       </div>
 
       {streamError && (
-        <div className="flex items-center justify-between gap-2 text-content text-sm bg-hitl/10 border border-hitl/40 rounded-lg px-4 py-3">
+        <div role="alert" className="flex flex-col items-start gap-3 text-content text-sm bg-hitl/10 border border-hitl/40 rounded-lg px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
           <span>⚠ {streamError}</span>
           <button
             onClick={() => setStreamError(null)}
@@ -192,7 +192,7 @@ export default function RunPage() {
       )}
 
       {resuming && (
-        <div className="flex items-center gap-3 text-content text-sm bg-agent-thinking/10 border border-agent-thinking/40 rounded-lg px-4 py-3">
+        <div role="status" className="flex items-center gap-3 text-content text-sm bg-agent-thinking/10 border border-agent-thinking/40 rounded-lg px-4 py-3">
           <span className="inline-block animate-spin">⟳</span>
           Pipeline resuming, waiting for the next stage to begin…
         </div>
@@ -217,7 +217,7 @@ export default function RunPage() {
       )}
 
       {status === "failed" && (
-        <div className="border border-feedback-error/40 bg-feedback-error/10 rounded-lg p-5 text-content font-medium">
+        <div role="alert" className="border border-feedback-error/40 bg-feedback-error/10 rounded-lg p-5 text-content font-medium">
           This run failed. Check the agent logs above for details.
           {(runError ?? run.error_message) && (
             <p className="mt-2 text-sm font-normal text-content-secondary">{runError ?? run.error_message}</p>

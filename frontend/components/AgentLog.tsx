@@ -40,13 +40,17 @@ export function AgentLog({ logs }: { logs: LogEntry[] }) {
     <div className="ftm-scanline relative bg-surface-1 rounded-lg border border-border-subtle p-4 h-96 flex flex-col font-mono text-sm">
       <div className="flex gap-2 mb-3">
         <button
+          type="button"
           onClick={() => setFilter("all")}
+          aria-pressed={filter === "all"}
           className={`text-xs px-2 py-1 rounded-sm transition-colors ${filter === "all" ? "bg-surface-3 text-content" : "text-content-muted hover:text-content-secondary"}`}
         >
           All
         </button>
         <button
+          type="button"
           onClick={() => setFilter("error")}
+          aria-pressed={filter === "error"}
           className={`text-xs px-2 py-1 rounded-sm transition-colors ${filter === "error" ? "bg-surface-3 text-content" : "text-content-muted hover:text-content-secondary"}`}
         >
           Errors

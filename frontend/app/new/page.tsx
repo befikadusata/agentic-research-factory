@@ -91,7 +91,7 @@ export default function NewRunPage() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-3xl font-bold mb-2 text-content">New Research Run</h1>
+      <h1 className="text-2xl font-bold mb-2 text-content sm:text-3xl">New Research Run</h1>
       <p className="text-content-secondary text-sm mb-8">
         Choose a playbook or start general research.
       </p>
@@ -191,7 +191,7 @@ export default function NewRunPage() {
           />
         </div>
 
-        {error && <p className="text-content text-sm bg-feedback-error/10 border border-feedback-error/40 p-3 rounded-md">{error}</p>}
+        {error && <p role="alert" className="text-content text-sm bg-feedback-error/10 border border-feedback-error/40 p-3 rounded-md">{error}</p>}
 
         <button
           type="submit"

@@ -70,7 +70,7 @@ export default function MonitorsPage() {
 
   return (
     <div className="max-w-4xl">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col items-start gap-4 mb-8 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-content">Monitors</h1>
           <p className="text-sm text-content-muted mt-1">
@@ -79,14 +79,14 @@ export default function MonitorsPage() {
         </div>
         <button
           onClick={() => setShowForm((s) => !s)}
-          className="bg-primary hover:bg-primary-hover text-primary-on text-sm font-medium px-5 py-2.5 rounded-md transition-colors duration-base"
+          className="min-h-11 bg-primary hover:bg-primary-hover text-primary-on text-sm font-medium px-5 py-2.5 rounded-md transition-colors duration-base"
         >
           {showForm ? "Cancel" : "New Monitor"}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={submit} className="bg-surface-2 border border-border-subtle rounded-lg p-6 mb-8 space-y-5">
+        <form onSubmit={submit} className="bg-surface-2 border border-border-subtle rounded-lg p-4 mb-8 space-y-5 sm:p-6">
           <div>
             <label className="block text-sm font-medium text-content-secondary mb-1">Name</label>
             <input
@@ -142,7 +142,7 @@ export default function MonitorsPage() {
             </div>
           </div>
           {formError && (
-            <p className="text-content text-sm bg-feedback-error/10 border border-feedback-error/40 rounded-md px-3 py-2">
+            <p role="alert" className="text-content text-sm bg-feedback-error/10 border border-feedback-error/40 rounded-md px-3 py-2">
               {formError}
             </p>
           )}
@@ -157,9 +157,9 @@ export default function MonitorsPage() {
       )}
 
       {loading && <p className="text-content-muted">Loading monitors…</p>}
-      {error && <p className="text-content bg-feedback-error/10 border border-feedback-error/40 p-4 rounded-lg">{error}</p>}
+      {error && <p role="alert" className="text-content bg-feedback-error/10 border border-feedback-error/40 p-4 rounded-lg">{error}</p>}
       {!loading && !error && monitors.length === 0 && !showForm && (
-        <div className="border-2 border-dashed border-border-subtle rounded-lg p-16 text-center text-content-muted">
+        <div className="border-2 border-dashed border-border-subtle rounded-lg px-6 py-12 text-center text-content-muted sm:p-16">
           <p className="text-lg mb-4">No monitors yet.</p>
           <button onClick={() => setShowForm(true)} className="text-primary hover:text-primary-hover font-medium">
             Create your first monitor →

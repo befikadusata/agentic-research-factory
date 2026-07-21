@@ -12,7 +12,7 @@ interface Props {
 export function VerticalSelector({ value, onChange }: Props) {
   const verticals = useVerticals();
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="group" aria-label="Playbook">
       {verticals.map((v: VerticalDefinition) => {
         const selected = value === v.key;
         return (
@@ -20,6 +20,7 @@ export function VerticalSelector({ value, onChange }: Props) {
             key={v.key}
             type="button"
             onClick={() => onChange(v.key)}
+            aria-pressed={selected}
             className={clsx(
               "relative text-left rounded-lg border p-4 transition-all duration-base ease-standard focus:outline-none focus:ring-2 focus:ring-border-focus",
               selected

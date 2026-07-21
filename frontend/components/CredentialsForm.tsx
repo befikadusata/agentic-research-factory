@@ -115,12 +115,12 @@ export function CredentialsForm() {
       />
 
       {error && (
-        <p className="text-sm text-feedback-error bg-feedback-error/10 border border-feedback-error/40 rounded-md px-3 py-2">
+        <p role="alert" className="text-sm text-feedback-error bg-feedback-error/10 border border-feedback-error/40 rounded-md px-3 py-2">
           {error}
         </p>
       )}
       {notice && (
-        <p className="text-sm text-content bg-agent-thinking/10 border border-agent-thinking/40 rounded-md px-3 py-2">
+        <p role="status" className="text-sm text-content bg-agent-thinking/10 border border-agent-thinking/40 rounded-md px-3 py-2">
           {notice}
         </p>
       )}

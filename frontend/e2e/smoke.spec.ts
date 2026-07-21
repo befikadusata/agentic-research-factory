@@ -62,6 +62,80 @@ function mockBackendToken(page: import("@playwright/test").Page) {
 }
 
 test.describe("Core Flow Smoke Tests", () => {
+  test("adapts the application shell across mobile, tablet, and desktop", async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+    await page.route("**/runs", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+    });
+    await createSessionCookie(page);
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto("/new");
+
+    await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible();
+    await expect(page.locator("aside")).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "History" })).toBeVisible();
+    await page.getByRole("button", { name: "Close navigation" }).click();
+    await expect(page.getByRole("dialog", { name: "Application navigation" })).not.toBeVisible();
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 667, height: 375 });
+    await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible();
+    await expect(page.locator("aside")).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(667);
+
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible();
+    await expect(page.locator("aside")).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(768);
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await expect(page.getByRole("button", { name: "Open navigation" })).toBeHidden();
+    await expect(page.locator("aside")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
+  });
+
+  test("exposes keyboard focus, current navigation, selector state, and errors", async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+    await page.route("**/verticals", async (route) => {
+      await route.abort();
+    });
+    await createSessionCookie(page);
+    await page.goto("/new");
+
+    await page.keyboard.press("Tab");
+    const skipLink = page.getByRole("link", { name: "Skip to main content" });
+    await expect(skipLink).toBeFocused();
+    expect(await skipLink.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#main-content")).toBeFocused();
+
+    await expect(page.getByRole("link", { name: "New Run" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { name: "History" })).not.toHaveAttribute("aria-current");
+
+    const generalFormat = page.getByRole("button", { name: /Full Report/i });
+    const summaryFormat = page.getByRole("button", { name: /Executive Summary/i });
+    await expect(generalFormat).toHaveAttribute("aria-pressed", "true");
+    await summaryFormat.click();
+    await expect(summaryFormat).toHaveAttribute("aria-pressed", "true");
+    await expect(generalFormat).toHaveAttribute("aria-pressed", "false");
+
+    const marketingPlaybook = page
+      .getByRole("group", { name: "Playbook" })
+      .getByRole("button", { name: /Marketing Competitor Brief/i });
+    await marketingPlaybook.click();
+    await expect(marketingPlaybook).toHaveAttribute("aria-pressed", "true");
+    await page.getByPlaceholder(/Competitive landscape for Notion/i).fill("Competitive landscape");
+    await page.getByRole("button", { name: /Start Marketing/i }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Competitor Name" })).toBeVisible();
+  });
+
   test("creates run with vertical payload and redirects to run detail", async ({ page }) => {
     await mockAuthenticatedSession(page);
     await mockBackendToken(page);

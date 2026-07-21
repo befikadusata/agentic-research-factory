@@ -71,15 +71,15 @@ export default function MonitorDetailPage() {
     }
   }
 
-  if (error && !monitor) return <p className="text-content p-8">{error}</p>;
+  if (error && !monitor) return <p role="alert" className="text-content p-8">{error}</p>;
   if (!monitor) return <p className="text-content-muted p-8">Loading monitor…</p>;
 
   return (
     <div className="max-w-4xl space-y-8">
       <div className="pb-6 border-b border-border-subtle">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between sm:gap-4">
           <div className="min-w-0">
-            <h1 className="text-3xl font-bold text-content">{monitor.name}</h1>
+            <h1 className="text-2xl font-bold text-content sm:text-3xl">{monitor.name}</h1>
             <p className="text-content-secondary mt-2">{monitor.topic}</p>
           </div>
           <span
@@ -130,14 +130,14 @@ export default function MonitorDetailPage() {
           <button
             onClick={remove}
             disabled={busy}
-            className="ml-auto text-feedback-error hover:bg-feedback-error/10 text-sm font-medium px-3 py-2 rounded-md flex items-center gap-2 transition-colors disabled:opacity-50"
+            className="text-feedback-error hover:bg-feedback-error/10 text-sm font-medium px-3 py-2 rounded-md flex items-center gap-2 transition-colors disabled:opacity-50 sm:ml-auto"
           >
             <Trash2 size={16} /> Delete
           </button>
         </div>
 
         {error && (
-          <p className="text-content text-sm bg-feedback-error/10 border border-feedback-error/40 rounded-md px-3 py-2 mt-4">
+          <p role="alert" className="text-content text-sm bg-feedback-error/10 border border-feedback-error/40 rounded-md px-3 py-2 mt-4">
             {error}
           </p>
         )}
@@ -146,7 +146,7 @@ export default function MonitorDetailPage() {
       <div>
         <h2 className="text-lg font-semibold text-content mb-4">Run history</h2>
         {runs.length === 0 ? (
-          <div className="border-2 border-dashed border-border-subtle rounded-lg p-12 text-center text-content-muted">
+          <div className="border-2 border-dashed border-border-subtle rounded-lg px-6 py-10 text-center text-content-muted sm:p-12">
             No runs yet. The first run establishes a baseline; later runs are compared against it.
           </div>
         ) : (

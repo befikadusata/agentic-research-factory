@@ -10,9 +10,9 @@ export function RunCard({ run }: { run: Run }) {
   return (
     <Link
       href={`/runs/${run.id}`}
-      className="block bg-surface-2 border border-border-subtle rounded-lg p-5 hover:border-primary transition-all duration-base"
+      className="block bg-surface-2 border border-border-subtle rounded-lg p-4 hover:border-primary transition-all duration-base sm:p-5"
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between sm:gap-4">
         <div className="min-w-0">
           <p className="font-semibold text-content truncate">{run.topic}</p>
           <p className="text-content-secondary text-sm mt-1 capitalize">{run.format} Run</p>
@@ -25,7 +25,7 @@ export function RunCard({ run }: { run: Run }) {
       <div className="mt-4">
         <PipelineProgress status={run.status} failedAtStatus={run.failed_at_status} />
       </div>
-      <div className="flex items-center justify-between mt-3">
+      <div className="flex flex-col items-start gap-2 mt-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-content-muted text-xs">
             {new Date(run.created_at).toLocaleDateString()}

@@ -15,12 +15,13 @@ interface Props {
 
 export function FormatSelector({ value, onChange }: Props) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="group" aria-label="Output format">
       {OPTIONS.map((opt) => (
         <button
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
+          aria-pressed={value === opt.value}
           className={`text-left p-4 rounded-lg border transition-colors duration-base
             ${value === opt.value
               ? "border-agent-active bg-surface-2 shadow-active"

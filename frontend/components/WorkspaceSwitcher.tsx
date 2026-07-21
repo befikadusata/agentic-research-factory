@@ -40,7 +40,10 @@ export function WorkspaceSwitcher() {
   return (
     <div className="relative">
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls="workspace-options"
         className="w-full flex items-center justify-between gap-2 bg-surface-2 hover:bg-surface-3 border border-border-subtle rounded-md px-3 py-2 text-sm text-content transition-colors"
       >
         <span className="truncate font-medium">{active.name}</span>
@@ -50,12 +53,14 @@ export function WorkspaceSwitcher() {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setCreating(false); }} />
-          <div className="absolute z-20 mt-1 w-full bg-surface-1 border border-border-subtle rounded-md shadow-lg py-1">
+          <div id="workspace-options" className="absolute z-20 mt-1 w-full bg-surface-1 border border-border-subtle rounded-md shadow-lg py-1">
             <div className="max-h-56 overflow-y-auto">
               {workspaces.map((ws) => (
                 <button
                   key={ws.id}
+                  type="button"
                   onClick={() => { setActiveId(ws.id); setOpen(false); }}
+                  aria-pressed={ws.id === active.id}
                   className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-content hover:bg-surface-2 transition-colors"
                 >
                   <span className="truncate">{ws.name}</span>

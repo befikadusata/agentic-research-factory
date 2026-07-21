@@ -78,8 +78,9 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
           style={{ background: "var(--hitl-backdrop)" }}
         />
         <Dialog.Content
-          className="ftm-hitl fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl
-                     rounded-lg p-6 animate-hitl-enter shadow-hitl"
+          className="ftm-hitl fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50
+                     w-[calc(100%-2rem)] max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto
+                     rounded-lg p-4 animate-hitl-enter shadow-hitl sm:p-6"
           style={{ background: "var(--hitl-surface)" }}
         >
           <header className="mb-4 flex items-center gap-2 border-b border-hitl/30 pb-3">
@@ -125,13 +126,13 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
                        focus:ring-2 focus:ring-hitl"
           />
 
-          {error && <p className="text-content text-sm mb-3">{error}</p>}
+          {error && <p role="alert" className="text-content text-sm mb-3">{error}</p>}
 
-          <div className="flex justify-end">
+          <div className="flex justify-stretch sm:justify-end">
             <button
               onClick={handleApprove}
               disabled={loading}
-              className="rounded-md bg-primary px-6 py-2 text-sm font-semibold text-primary-on
+              className="w-full rounded-md bg-primary px-6 py-3 text-sm font-semibold text-primary-on sm:w-auto sm:py-2
                          hover:bg-primary-hover transition-colors disabled:opacity-50
                          focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2
                          focus:ring-offset-surface-2"
