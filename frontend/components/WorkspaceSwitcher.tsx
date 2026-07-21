@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useWorkspace } from "@/lib/workspace";
 import { createWorkspace } from "@/lib/api";
@@ -15,6 +15,7 @@ export function WorkspaceSwitcher() {
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
+  const workspaceButtonRef = useRef<HTMLButtonElement>(null);
 
   if (status !== "authenticated") return null;
   if (loading && !active) {
@@ -40,6 +41,7 @@ export function WorkspaceSwitcher() {
   return (
     <div className="relative">
       <button
+        ref={workspaceButtonRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -107,7 +109,14 @@ export function WorkspaceSwitcher() {
         </>
       )}
 
-      {showMembers && <ManageMembersModal workspace={active} onClose={() => setShowMembers(false)} />}
+      <ManageMembersModal
+        workspace={active}
+        open={showMembers}
+        onOpenChange={(nextOpen) => {
+          setShowMembers(nextOpen);
+          if (!nextOpen) requestAnimationFrame(() => workspaceButtonRef.current?.focus());
+        }}
+      />
     </div>
   );
 }

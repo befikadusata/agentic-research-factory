@@ -225,6 +225,61 @@ test.describe("Core Flow Smoke Tests", () => {
     await expect(dialog).not.toBeVisible();
   });
 
+  test("keeps workspace member management accessible during loading and removal", async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+    await page.route("**/workspaces", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "credentials:test@example.com" }]),
+      });
+    });
+    await page.route("**/runs?**", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+    });
+
+    let releaseMembers: (() => void) | undefined;
+    const membersReady = new Promise<void>((resolve) => { releaseMembers = resolve; });
+    await page.route("**/workspaces/workspace-1/members", async (route) => {
+      await membersReady;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          { user_id: "credentials:test@example.com", role: "admin" },
+          { user_id: "google:teammate@example.com", role: "viewer" },
+        ]),
+      });
+    });
+
+    await createSessionCookie(page);
+    await page.goto("/");
+
+    const workspaceButton = page.getByRole("button", { name: "Research Team" });
+    await workspaceButton.click();
+    await page.getByRole("button", { name: "Manage members" }).click();
+
+    const membersDialog = page.getByRole("dialog", { name: "Workspace members" });
+    await expect(membersDialog).toBeVisible();
+    await expect(membersDialog.getByRole("status", { name: "Loading workspace members" })).toBeVisible();
+    releaseMembers?.();
+
+    await expect(membersDialog.getByLabel("Email address")).toBeVisible();
+    await expect(membersDialog.getByLabel("Sign-in method")).toBeVisible();
+    await expect(membersDialog.getByLabel("Workspace role")).toBeVisible();
+
+    await membersDialog.getByRole("button", { name: "Remove teammate@example.com" }).click();
+    const confirmation = page.getByRole("dialog", { name: "Remove this member?" });
+    await expect(confirmation).toContainText("teammate@example.com will lose access to Research Team");
+    await confirmation.getByRole("button", { name: "Keep member" }).click();
+    await expect(confirmation).not.toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(membersDialog).not.toBeVisible();
+    await expect(workspaceButton).toBeFocused();
+  });
+
   test("creates run with vertical payload and redirects to run detail", async ({ page }) => {
     await mockAuthenticatedSession(page);
     await mockBackendToken(page);
