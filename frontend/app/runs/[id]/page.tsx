@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Radar } from "lucide-react";
+import { AlertTriangle, ArrowLeft, LoaderCircle, Radar, RefreshCw } from "lucide-react";
 import { createParser } from "eventsource-parser";
 import { getRun, authHeaders } from "@/lib/api";
 import { AgentLog } from "@/components/AgentLog";
@@ -45,24 +45,38 @@ export default function RunPage() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(true);
+  const [reconnectKey, setReconnectKey] = useState(0);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const loadRun = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const r = await getRun(id);
+      setRun(r);
+      setLogs(r.logs ?? []);
+      setStatus((prev) => (prev === null ? r.status : prev));
+      if (HITL_STATUSES.has(r.status)) {
+        setHitlStage(r.status);
+        const summary =
+          r.status === "awaiting_research_approval" ? r.research_output :
+          r.status === "awaiting_analysis_approval" ? r.analysis_output :
+          r.final_output;
+        if (summary) setHitlSummary(summary.slice(0, 2000));
+        setReviewOpen(true);
+      }
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Unable to load this run.");
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
 
   useEffect(() => {
-    getRun(id)
-      .then((r) => {
-        setRun(r);
-        setLogs(r.logs ?? []);
-        setStatus((prev) => (prev === null ? r.status : prev));
-        if (HITL_STATUSES.has(r.status)) {
-          setHitlStage(r.status);
-          const summary =
-            r.status === "awaiting_research_approval" ? r.research_output :
-            r.status === "awaiting_analysis_approval" ? r.analysis_output :
-            r.final_output;
-          if (summary) setHitlSummary(summary.slice(0, 2000));
-        }
-      })
-      .catch((e) => setLoadError(e.message));
-  }, [id]);
+    loadRun();
+  }, [loadRun]);
 
   useEffect(() => {
     if (!id) return;
@@ -76,10 +90,12 @@ export default function RunPage() {
       } else if (parsed.type === "status") {
           setStatus(parsed.data.status);
           setResuming(false);
+          setStreamError(null);
       } else if (parsed.type === "hitl_required") {
           setHitlStage(parsed.data.stage);
           setHitlSummary(parsed.data.summary);
           setStatus(parsed.data.stage as RunStatus);
+          setReviewOpen(true);
       } else if (parsed.type === "complete") {
           setStatus("complete");
           getRun(id).then(setRun);
@@ -101,6 +117,8 @@ export default function RunPage() {
           signal: controller.signal,
         });
         if (!res.ok || !res.body) throw new Error(`stream failed: ${res.status}`);
+        setStreamError(null);
+        setReconnecting(false);
 
         const parser = createParser({ onEvent: (e) => handleEvent(e.data) });
         const reader = res.body.getReader();
@@ -112,16 +130,42 @@ export default function RunPage() {
         }
       } catch {
         if (!controller.signal.aborted) {
-          setStreamError("Live update stream disconnected. Refresh the page to reconnect.");
+          setReconnecting(false);
+          setStreamError("Live update stream disconnected. Reconnect to continue receiving progress updates.");
         }
       }
     })();
 
     return () => controller.abort();
-  }, [id]);
+  }, [id, reconnectKey]);
 
-  if (loadError) return <p className="text-content p-8">{loadError}</p>;
-  if (!run) return <p className="text-content-muted p-8">Loading run…</p>;
+  if (loadError) return (
+    <div role="alert" className="mx-auto max-w-lg rounded-lg border border-feedback-error/40 bg-feedback-error/10 p-6 text-content">
+      <div className="flex items-start gap-3">
+        <AlertTriangle size={20} className="mt-0.5 flex-none text-feedback-error" aria-hidden />
+        <div>
+          <h1 className="font-semibold">Unable to load this run</h1>
+          <p className="mt-1 text-sm text-content-secondary">{loadError}</p>
+        </div>
+      </div>
+      <div className="mt-5 flex flex-wrap gap-3">
+        <button onClick={loadRun} className="inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-on hover:bg-primary-hover">
+          <RefreshCw size={16} aria-hidden /> Retry
+        </button>
+        <Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border-subtle px-4 py-2 text-sm font-medium text-content-secondary hover:bg-surface-2 hover:text-content">
+          <ArrowLeft size={16} aria-hidden /> Back to runs
+        </Link>
+      </div>
+    </div>
+  );
+  if (loading || !run) return (
+    <div role="status" aria-label="Loading run" className="space-y-5 animate-pulse">
+      <div className="h-9 w-2/3 rounded-md bg-surface-3" />
+      <div className="h-6 w-64 rounded-md bg-surface-3" />
+      <div className="h-44 rounded-xl bg-surface-2" />
+      <span className="sr-only">Loading run…</span>
+    </div>
+  );
 
   const verticalDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) ?? null : null;
   const statusGlyph = status ? AGENT_STATE_GLYPH[STATUS_TO_AGENT_STATE[status]] : "";
@@ -134,7 +178,7 @@ export default function RunPage() {
           <span className="capitalize text-sm text-content-secondary font-medium bg-surface-2 border border-border-subtle px-3 py-1 rounded-sm">
             {run.format} Run
           </span>
-          <span className={`text-sm font-semibold px-3 py-1 rounded-sm ${status ? statusBadgeClass(status) : "text-content-muted bg-surface-2"}`}>
+          <span aria-live="polite" className={`text-sm font-semibold px-3 py-1 rounded-sm ${status ? statusBadgeClass(status) : "text-content-muted bg-surface-2"}`}>
             {statusGlyph && <span aria-hidden>{statusGlyph} </span>}
             {status === null ? "…" : (STATUS_LABEL[status] ?? status)}
           </span>
@@ -164,13 +208,23 @@ export default function RunPage() {
 
       {streamError && (
         <div role="alert" className="flex flex-col items-start gap-3 text-content text-sm bg-hitl/10 border border-hitl/40 rounded-lg px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-          <span>⚠ {streamError}</span>
-          <button
-            onClick={() => setStreamError(null)}
-            className="text-content-secondary hover:text-content text-xs underline flex-shrink-0"
-          >
-            Dismiss
-          </button>
+          <span className="flex items-start gap-2"><AlertTriangle size={17} className="mt-0.5 flex-none text-hitl" aria-hidden /> {streamError}</span>
+          <div className="flex gap-3">
+            <button
+              onClick={() => { setReconnecting(true); setReconnectKey((key) => key + 1); }}
+              disabled={reconnecting}
+              className="inline-flex min-h-11 items-center gap-2 rounded-md border border-hitl/40 px-3 py-2 text-sm font-semibold text-content transition-colors hover:bg-hitl/10 disabled:opacity-50"
+            >
+              <RefreshCw size={15} className={reconnecting ? "animate-spin" : ""} aria-hidden />
+              {reconnecting ? "Reconnecting…" : "Reconnect"}
+            </button>
+            <button
+              onClick={() => setStreamError(null)}
+              className="min-h-11 px-2 text-sm text-content-secondary underline hover:text-content"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -178,14 +232,28 @@ export default function RunPage() {
 
       <AgentLog logs={logs} />
 
-      {status !== null && HITL_STATUSES.has(status) && hitlSummary && hitlStage && (
+      {status !== null && HITL_STATUSES.has(status) && hitlSummary && hitlStage && !reviewOpen && (
+        <div role="status" className="flex flex-col items-start gap-3 rounded-lg border border-hitl/40 bg-hitl/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-semibold text-content">Your review is needed to continue</p>
+            <p className="mt-1 text-sm text-content-secondary">The pipeline is paused safely at this checkpoint.</p>
+          </div>
+          <button onClick={() => setReviewOpen(true)} className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-on hover:bg-primary-hover">
+            Open review
+          </button>
+        </div>
+      )}
+
+      {status !== null && HITL_STATUSES.has(status) && hitlSummary && hitlStage && reviewOpen && (
         <HitlModal
           runId={id}
           stage={hitlStage}
           stageSummary={hitlSummary}
+          onDismiss={() => setReviewOpen(false)}
           onApproved={() => {
             setHitlSummary(null);
             setHitlStage(null);
+            setReviewOpen(false);
             setResuming(true);
           }}
         />
@@ -193,7 +261,7 @@ export default function RunPage() {
 
       {resuming && (
         <div role="status" className="flex items-center gap-3 text-content text-sm bg-agent-thinking/10 border border-agent-thinking/40 rounded-lg px-4 py-3">
-          <span className="inline-block animate-spin">⟳</span>
+          <LoaderCircle size={17} className="animate-spin" aria-hidden />
           Pipeline resuming, waiting for the next stage to begin…
         </div>
       )}
@@ -218,10 +286,23 @@ export default function RunPage() {
 
       {status === "failed" && (
         <div role="alert" className="border border-feedback-error/40 bg-feedback-error/10 rounded-lg p-5 text-content font-medium">
-          This run failed. Check the agent logs above for details.
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={20} className="mt-0.5 flex-none text-feedback-error" aria-hidden />
+            <div>
+              <p>This run failed. Check the agent logs above for details.</p>
           {(runError ?? run.error_message) && (
             <p className="mt-2 text-sm font-normal text-content-secondary">{runError ?? run.error_message}</p>
           )}
+            </div>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Link href="/new" className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-on hover:bg-primary-hover">
+              Start a new run
+            </Link>
+            <Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border-subtle px-4 py-2 text-sm font-medium text-content-secondary hover:bg-surface-2 hover:text-content">
+              <ArrowLeft size={16} aria-hidden /> Back to runs
+            </Link>
+          </div>
         </div>
       )}
     </div>

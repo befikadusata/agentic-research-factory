@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
+import { ArrowLeft, LoaderCircle } from "lucide-react";
 import { createRun } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { FormatSelector } from "@/components/FormatSelector";
@@ -91,12 +93,15 @@ export default function NewRunPage() {
 
   return (
     <div className="max-w-2xl">
+      <Link href="/" className="mb-5 inline-flex min-h-11 items-center gap-2 text-sm font-medium text-content-secondary hover:text-content">
+        <ArrowLeft size={16} aria-hidden /> Back to runs
+      </Link>
       <h1 className="text-2xl font-bold mb-2 text-content sm:text-3xl">New Research Run</h1>
       <p className="text-content-secondary text-sm mb-8">
         Choose a playbook or start general research.
       </p>
 
-      <form onSubmit={handleSubmit} className="space-y-8">
+      <form onSubmit={handleSubmit} aria-busy={loading} className="space-y-8">
         {/* Playbook selector */}
         <div>
           <label className="block text-sm font-semibold text-content-secondary mb-3">
@@ -193,12 +198,23 @@ export default function NewRunPage() {
 
         {error && <p role="alert" className="text-content text-sm bg-feedback-error/10 border border-feedback-error/40 p-3 rounded-md">{error}</p>}
 
+        {loading && (
+          <p role="status" className="flex items-center gap-2 rounded-md border border-agent-thinking/40 bg-agent-thinking/10 p-3 text-sm text-content-secondary">
+            <LoaderCircle size={16} className="animate-spin" aria-hidden />
+            Creating your run and preparing the research pipeline…
+          </p>
+        )}
+
         <button
           type="submit"
           disabled={loading}
           className="w-full bg-primary hover:bg-primary-hover text-primary-on font-semibold py-3 rounded-md disabled:opacity-50 transition-colors duration-base"
         >
-          {loading ? "Starting…" : vertical ? `Start ${verticalDef?.displayName ?? "Research"}` : "Start Research"}
+          {loading ? (
+            <span className="flex items-center justify-center gap-2">
+              <LoaderCircle size={17} className="animate-spin" aria-hidden /> Starting research…
+            </span>
+          ) : vertical ? `Start ${verticalDef?.displayName ?? "Research"}` : "Start Research"}
         </button>
       </form>
     </div>

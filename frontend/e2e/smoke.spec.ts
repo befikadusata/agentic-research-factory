@@ -253,6 +253,10 @@ test.describe("Core Flow Smoke Tests", () => {
     await createSessionCookie(page);
     await page.goto("/runs/hitl-run");
     await expect(page.getByText("Research Complete — Review Before Analysis")).toBeVisible();
+    await page.getByRole("button", { name: "Review later" }).click();
+    await expect(page.getByText("The pipeline is paused safely at this checkpoint.")).toBeVisible();
+    await page.getByRole("button", { name: "Open review" }).click();
+    await expect(page.getByText("Research Complete — Review Before Analysis")).toBeVisible();
     await page.getByPlaceholder(/Focus more on pricing strategy/i).fill("Focus on pricing and enterprise segment.");
     await page.getByRole("button", { name: /Approve & Continue to Analysis/i }).click();
     await page.waitForResponse((res) => res.url().includes("/approve") && res.status() === 200);
@@ -374,5 +378,7 @@ test.describe("Core Flow Smoke Tests", () => {
 
     await expect(page.getByText("This run failed. Check the agent logs above for details.")).toBeVisible();
     await expect(page.getByText("Run failed: rate limit exceeded")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Start a new run" })).toHaveAttribute("href", "/new");
+    await expect(page.getByRole("link", { name: "Back to runs" })).toHaveAttribute("href", "/");
   });
 });

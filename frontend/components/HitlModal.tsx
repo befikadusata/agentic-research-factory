@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { LoaderCircle, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { approveHitl } from "@/lib/api";
@@ -12,6 +13,7 @@ interface Props {
   stage: string;
   stageSummary: string;
   onApproved: () => void;
+  onDismiss: () => void;
 }
 
 const STAGE_COPY: Record<string, { title: string; description: string; cta: string; feedbackLabel: string }> = {
@@ -42,7 +44,7 @@ const DEFAULT_COPY = {
   feedbackLabel: "Optional: add instructions",
 };
 
-export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
+export function HitlModal({ runId, stage, stageSummary, onApproved, onDismiss }: Props) {
   const [instruction, setInstruction] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +73,7 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
   }
 
   return (
-    <Dialog.Root open>
+    <Dialog.Root open onOpenChange={(open) => { if (!open && !loading) onDismiss(); }}>
       <Dialog.Portal>
         <Dialog.Overlay
           className="fixed inset-0 z-40"
@@ -83,13 +85,23 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
                      rounded-lg p-4 animate-hitl-enter shadow-hitl sm:p-6"
           style={{ background: "var(--hitl-surface)" }}
         >
-          <header className="mb-4 flex items-center gap-2 border-b border-hitl/30 pb-3">
-            <span className="text-hitl" aria-hidden>▮▮</span>
+          <header className="mb-4 flex items-start gap-2 border-b border-hitl/30 pb-3">
+            <span className="mt-0.5 text-hitl" aria-hidden>▮▮</span>
             <Dialog.Title asChild>
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-content">
+              <span className="min-w-0 flex-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-content">
                 Checkpoint · {copy.title}
               </span>
             </Dialog.Title>
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                disabled={loading}
+                aria-label="Close review and return to run"
+                className="-m-2 ml-auto flex min-h-11 min-w-11 items-center justify-center rounded-md text-content-muted transition-colors hover:bg-surface-3 hover:text-content disabled:opacity-50"
+              >
+                <X size={18} aria-hidden />
+              </button>
+            </Dialog.Close>
           </header>
           <Dialog.Description className="text-content-secondary text-sm mb-4">
             {copy.description}
@@ -128,7 +140,16 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
 
           {error && <p role="alert" className="text-content text-sm mb-3">{error}</p>}
 
-          <div className="flex justify-stretch sm:justify-end">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                disabled={loading}
+                className="min-h-11 rounded-md border border-border-subtle px-5 py-2 text-sm font-medium text-content-secondary transition-colors hover:bg-surface-3 hover:text-content disabled:opacity-50"
+              >
+                Review later
+              </button>
+            </Dialog.Close>
             <button
               onClick={handleApprove}
               disabled={loading}
@@ -137,7 +158,12 @@ export function HitlModal({ runId, stage, stageSummary, onApproved }: Props) {
                          focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2
                          focus:ring-offset-surface-2"
             >
-              {loading ? "Resuming…" : `${copy.cta} →`}
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <LoaderCircle size={16} className="animate-spin" aria-hidden />
+                  Resuming pipeline…
+                </span>
+              ) : `${copy.cta} →`}
             </button>
           </div>
         </Dialog.Content>
