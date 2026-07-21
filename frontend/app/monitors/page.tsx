@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
+import { LoaderCircle, Plus } from "lucide-react";
 import { getMonitors, createMonitor } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { MonitorCard } from "@/components/MonitorCard";
 import { FormatSelector } from "@/components/FormatSelector";
+import { CardListSkeleton, LoadError } from "@/components/ListState";
 import { INTERVAL_PRESETS } from "@/lib/monitors";
 import type { Monitor, OutputFormat } from "@/lib/types";
 
@@ -29,8 +31,10 @@ export default function MonitorsPage() {
   const [notify, setNotify] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
-  function load() {
+  const load = useCallback(() => {
     if (status !== "authenticated" || !activeId) return;
     setLoading(true);
     setError(null);
@@ -38,16 +42,20 @@ export default function MonitorsPage() {
       .then(setMonitors)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }
+  }, [status, activeId]);
 
-  useEffect(load, [status, activeId]);
+  useEffect(load, [load]);
+
+  useEffect(() => {
+    if (showForm) nameInputRef.current?.focus();
+  }, [showForm]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setFormError(null);
     try {
-      await createMonitor({
+      const created = await createMonitor({
         name: name.trim(),
         topic: topic.trim(),
         format,
@@ -60,6 +68,7 @@ export default function MonitorsPage() {
       setTopic("");
       setNotify("");
       setShowForm(false);
+      setAnnouncement(`${created.name} monitor created.`);
       load();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create monitor.");
@@ -78,29 +87,43 @@ export default function MonitorsPage() {
           </p>
         </div>
         <button
+          type="button"
           onClick={() => setShowForm((s) => !s)}
-          className="min-h-11 bg-primary hover:bg-primary-hover text-primary-on text-sm font-medium px-5 py-2.5 rounded-md transition-colors duration-base"
+          aria-expanded={showForm}
+          aria-controls="new-monitor-form"
+          className="min-h-11 bg-primary hover:bg-primary-hover text-primary-on text-sm font-medium px-5 py-2.5 rounded-md transition-colors duration-base flex items-center gap-2"
         >
+          {!showForm && <Plus size={16} aria-hidden />}
           {showForm ? "Cancel" : "New Monitor"}
         </button>
       </div>
 
+      <p className="sr-only" aria-live="polite">{announcement}</p>
+
       {showForm && (
-        <form onSubmit={submit} className="bg-surface-2 border border-border-subtle rounded-lg p-4 mb-8 space-y-5 sm:p-6">
+        <form
+          id="new-monitor-form"
+          onSubmit={submit}
+          aria-busy={submitting}
+          className="bg-surface-2 border border-border-subtle rounded-lg p-4 mb-8 space-y-5 sm:p-6"
+        >
           <div>
-            <label className="block text-sm font-medium text-content-secondary mb-1">Name</label>
+            <label htmlFor="monitor-name" className="block text-sm font-medium text-content-secondary mb-1">Name</label>
             <input
+              ref={nameInputRef}
+              id="monitor-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
               maxLength={255}
               placeholder="e.g. Nvidia earnings watch"
-              className="w-full bg-surface-1 border border-border-subtle rounded-md px-3 py-2 text-content text-sm focus:border-primary outline-none"
+              className="min-h-11 w-full bg-surface-1 border border-border-subtle rounded-md px-3 py-2 text-content text-base sm:text-sm focus:border-primary outline-none"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-content-secondary mb-1">Research topic</label>
+            <label htmlFor="monitor-topic" className="block text-sm font-medium text-content-secondary mb-1">Research topic</label>
             <textarea
+              id="monitor-topic"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               required
@@ -108,7 +131,7 @@ export default function MonitorsPage() {
               maxLength={500}
               rows={2}
               placeholder="What should this monitor research each run?"
-              className="w-full bg-surface-1 border border-border-subtle rounded-md px-3 py-2 text-content text-sm focus:border-primary outline-none resize-none"
+              className="w-full bg-surface-1 border border-border-subtle rounded-md px-3 py-2 text-content text-base sm:text-sm focus:border-primary outline-none resize-none"
             />
           </div>
           <div>
@@ -117,11 +140,12 @@ export default function MonitorsPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-content-secondary mb-1">Frequency</label>
+              <label htmlFor="monitor-frequency" className="block text-sm font-medium text-content-secondary mb-1">Frequency</label>
               <select
+                id="monitor-frequency"
                 value={interval}
                 onChange={(e) => setInterval(Number(e.target.value))}
-                className="w-full bg-surface-1 border border-border-subtle rounded-md px-3 py-2 text-content text-sm focus:border-primary outline-none"
+                className="min-h-11 w-full bg-surface-1 border border-border-subtle rounded-md px-3 py-2 text-content text-base sm:text-sm focus:border-primary outline-none"
               >
                 {INTERVAL_PRESETS.map((p) => (
                   <option key={p.minutes} value={p.minutes}>{p.label}</option>
@@ -129,15 +153,16 @@ export default function MonitorsPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-content-secondary mb-1">
+              <label htmlFor="monitor-notify" className="block text-sm font-medium text-content-secondary mb-1">
                 Alert email or webhook <span className="text-content-muted font-normal">(optional)</span>
               </label>
               <input
+                id="monitor-notify"
                 type="text"
                 value={notify}
                 onChange={(e) => setNotify(e.target.value)}
                 placeholder="you@example.com or https://hooks.slack.com/…"
-                className="w-full bg-surface-1 border border-border-subtle rounded-md px-3 py-2 text-content text-sm focus:border-primary outline-none"
+                className="min-h-11 w-full bg-surface-1 border border-border-subtle rounded-md px-3 py-2 text-content text-base sm:text-sm focus:border-primary outline-none"
               />
             </div>
           </div>
@@ -149,15 +174,19 @@ export default function MonitorsPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="bg-primary hover:bg-primary-hover text-primary-on text-sm font-medium px-5 py-2.5 rounded-md transition-colors duration-base disabled:opacity-50"
+            className="min-h-11 bg-primary hover:bg-primary-hover text-primary-on text-sm font-medium px-5 py-2.5 rounded-md transition-colors duration-base disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitting ? "Creating…" : "Create Monitor"}
+            {submitting ? (
+              <span className="flex items-center gap-2"><LoaderCircle size={16} className="animate-spin" aria-hidden /> Creating…</span>
+            ) : "Create Monitor"}
           </button>
         </form>
       )}
 
-      {loading && <p className="text-content-muted">Loading monitors…</p>}
-      {error && <p role="alert" className="text-content bg-feedback-error/10 border border-feedback-error/40 p-4 rounded-lg">{error}</p>}
+      {loading && <CardListSkeleton label="Loading monitors" count={2} />}
+      {!loading && error && (
+        <LoadError title="Monitors couldn’t be loaded" message={error} onRetry={load} />
+      )}
       {!loading && !error && monitors.length === 0 && !showForm && (
         <div className="border-2 border-dashed border-border-subtle rounded-lg px-6 py-12 text-center text-content-muted sm:p-16">
           <p className="text-lg mb-4">No monitors yet.</p>

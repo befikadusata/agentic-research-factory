@@ -136,6 +136,95 @@ test.describe("Core Flow Smoke Tests", () => {
     await expect(page.getByRole("alert").filter({ hasText: "Competitor Name" })).toBeVisible();
   });
 
+  test("recovers when the runs list fails to load", async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+    await page.route("**/workspaces", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "test-user-id" }]),
+      });
+    });
+
+    let attempts = 0;
+    await page.route("**/runs?**", async (route) => {
+      attempts += 1;
+      if (attempts === 1) {
+        await route.fulfill({ status: 503, contentType: "text/plain", body: "Temporary service outage" });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          id: "recovered-run",
+          topic: "Recovered market research",
+          format: "report",
+          status: "complete",
+          workspace_id: "workspace-1",
+          created_at: "2026-01-01T00:00:00Z",
+        }]),
+      });
+    });
+
+    await createSessionCookie(page);
+    await page.goto("/");
+
+    const loadError = page.getByRole("alert").filter({ hasText: "Runs couldn’t be loaded" });
+    await expect(loadError).toContainText("Runs couldn’t be loaded");
+    await expect(loadError).toContainText("Temporary service outage");
+    await page.getByRole("button", { name: "Retry" }).click();
+    await expect(page.getByText("Recovered market research")).toBeVisible();
+  });
+
+  test("explains monitor deletion before confirming it", async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+    await page.route("**/workspaces", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+    });
+    await page.route("**/monitors/monitor-1/runs", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+    });
+    await page.route("**/monitors/monitor-1", async (route) => {
+      if (route.request().isNavigationRequest()) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "monitor-1",
+          user_id: "test-user-id",
+          workspace_id: null,
+          name: "Competitor watch",
+          topic: "Track competitor pricing",
+          format: "report",
+          interval_minutes: 1440,
+          enabled: true,
+          next_run_at: "2026-07-22T00:00:00Z",
+          last_run_id: null,
+          last_run_at: null,
+          notify_channel: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        }),
+      });
+    });
+
+    await createSessionCookie(page);
+    await page.goto("/monitors/monitor-1");
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Delete this monitor?" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("past research runs will remain available");
+    await dialog.getByRole("button", { name: "Keep monitor" }).click();
+    await expect(dialog).not.toBeVisible();
+  });
+
   test("creates run with vertical payload and redirects to run detail", async ({ page }) => {
     await mockAuthenticatedSession(page);
     await mockBackendToken(page);
