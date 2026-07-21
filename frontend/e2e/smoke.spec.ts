@@ -281,6 +281,35 @@ test.describe("Core Flow Smoke Tests", () => {
     await expect(workspaceButton).toBeFocused();
   });
 
+  test("announces email verification progress and provides clear outcomes", async ({ page }) => {
+    let releaseVerification: (() => void) | undefined;
+    const verificationReady = new Promise<void>((resolve) => { releaseVerification = resolve; });
+    await page.route("**/auth/verify-email", async (route) => {
+      await verificationReady;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ email: "verified@example.com" }),
+      });
+    });
+
+    await page.goto("/verify-email?token=valid-token");
+
+    const verificationProgress = page.getByRole("status").filter({ hasText: "Verifying your email" });
+    await expect(verificationProgress).toBeVisible();
+    await expect(verificationProgress).toContainText("This should only take a moment");
+    releaseVerification?.();
+
+    const verificationComplete = page.getByRole("status").filter({ hasText: "Email verified" });
+    await expect(verificationComplete).toContainText("verified@example.com is confirmed");
+    await expect(verificationComplete.getByRole("link", { name: "Continue to sign in" })).toHaveAttribute("href", "/");
+
+    await page.goto("/verify-email");
+    const verificationError = page.getByRole("alert").filter({ hasText: "Verification failed" });
+    await expect(verificationError).toContainText("invalid or has expired");
+    await expect(verificationError.getByRole("link", { name: "Back to sign in" })).toHaveAttribute("href", "/");
+  });
+
   test("creates run with vertical payload and redirects to run detail", async ({ page }) => {
     await mockAuthenticatedSession(page);
     await mockBackendToken(page);

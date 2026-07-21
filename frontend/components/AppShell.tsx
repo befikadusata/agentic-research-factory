@@ -10,6 +10,7 @@ import { SidebarUser } from "@/components/SidebarUser";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import { AuthScreen } from "@/components/AuthScreen";
+import { AuthLoadingState } from "@/components/AuthLoadingState";
 
 // Routes that render for signed-out users without the app chrome (e.g. the
 // email verification link lands here before the user has a session).
@@ -92,11 +93,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   if (status === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-content-muted">
-        Loading…
-      </div>
-    );
+    return <AuthLoadingState fullScreen />;
   }
 
   if (status === "unauthenticated") {

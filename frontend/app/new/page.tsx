@@ -10,6 +10,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { FormatSelector } from "@/components/FormatSelector";
 import { FileUpload } from "@/components/FileUpload";
 import { VerticalSelector } from "@/components/VerticalSelector";
+import { AuthLoadingState } from "@/components/AuthLoadingState";
 import { useVerticals } from "@/lib/useVerticals";
 import type { Vertical, OutputFormat } from "@/lib/types";
 
@@ -30,7 +31,9 @@ export default function NewRunPage() {
     if (authStatus === "unauthenticated") router.push("/");
   }, [authStatus, router]);
 
-  if (authStatus === "loading") return <p className="text-content-muted p-8">Loading…</p>;
+  if (authStatus === "loading") {
+    return <AuthLoadingState title="Preparing your research workspace" description="Confirming your session before starting a new run." />;
+  }
   if (!session) return null;
 
   const verticalDef = verticals.find((v) => v.key === vertical) ?? null;

@@ -19,7 +19,16 @@ export function WorkspaceSwitcher() {
 
   if (status !== "authenticated") return null;
   if (loading && !active) {
-    return <div className="text-xs text-content-muted px-3 py-2">Loading workspace…</div>;
+    return (
+      <div
+        role="status"
+        aria-label="Loading workspace"
+        className="flex min-h-11 items-center rounded-md border border-border-subtle bg-surface-2 px-3"
+      >
+        <span aria-hidden className="h-4 w-2/3 animate-pulse rounded bg-surface-3 motion-reduce:animate-none" />
+        <span className="sr-only">Loading workspace…</span>
+      </div>
+    );
   }
   if (!active) return null;
 
