@@ -7,6 +7,11 @@ export function SidebarUser() {
   const { data: session } = useSession();
   if (!session?.user) return null;
 
+  async function handleSignOut() {
+    await signOut({ redirect: false, callbackUrl: "/" });
+    window.location.assign("/");
+  }
+
   return (
     <div className="border-t border-border-subtle pt-4">
       <div className="flex items-center gap-3 mb-3 px-1">
@@ -26,7 +31,8 @@ export function SidebarUser() {
         </div>
       </div>
       <button
-        onClick={() => signOut({ callbackUrl: "/" })}
+        type="button"
+        onClick={handleSignOut}
         className="w-full flex items-center gap-2 text-sm text-content-secondary hover:text-content px-2 py-2 rounded-md hover:bg-surface-3 transition-colors"
       >
         <LogOut size={16} />

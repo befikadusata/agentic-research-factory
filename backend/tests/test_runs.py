@@ -96,8 +96,8 @@ async def test_run_detail_response_fields(client, auth_as, db_session):
 
 
 @pytest.mark.asyncio
-async def test_emit_persists_to_db(db_session, auth_as, client):
-    """Run.logs written via fixture session are visible in the detail API."""
+async def test_run_detail_normalizes_persisted_event_envelopes(db_session, auth_as, client):
+    """Historical event envelopes are returned as display-safe log entries."""
     from sqlalchemy.orm.attributes import flag_modified
 
     uid = "emit-user@example.com"
@@ -105,16 +105,26 @@ async def test_emit_persists_to_db(db_session, auth_as, client):
     run = await _make_run(db_session, uid)
 
     # Simulate what emit() does: append a log entry directly via the session
-    entry = {"type": "status", "data": {"status": "researching"}, "ts": "2026-01-01T00:00:00+00:00"}
-    run.logs = [entry]
+    run.logs = [
+        {"type": "status", "data": {"status": "researching"}, "ts": "2026-01-01T00:00:00+00:00"},
+        {"type": "log", "data": {"agent": 42, "message": {"step": "search"}}, "ts": None},
+        {"type": "error", "data": {"message": 503}, "ts": "2026-01-01T00:00:02+00:00"},
+        {"type": "hitl_required", "data": {"stage": "awaiting_final_approval"}},
+        {"type": "agent_start", "data": {"stage": "research"}},
+        None,
+    ]
     flag_modified(run, "logs")
     await db_session.commit()
 
     resp = await client.get(f"/runs/{run.id}")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data["logs"]) == 1
-    assert data["logs"][0]["type"] == "status"
+    assert data["logs"] == [
+        {"agent": "system", "message": "Status changed to researching", "ts": "2026-01-01T00:00:00+00:00"},
+        {"agent": "42", "message": '{"step": "search"}', "ts": ""},
+        {"agent": "error", "message": "503", "ts": "2026-01-01T00:00:02+00:00"},
+        {"agent": "system", "message": "Human approval required at awaiting_final_approval", "ts": ""},
+    ]
 
 
 @pytest.mark.asyncio
@@ -213,4 +223,3 @@ async def test_run_detail_exposes_failed_at_status(client, auth_as, db_session):
     assert list_resp.status_code == 200
     listed = next(r for r in list_resp.json() if r["id"] == str(run.id))
     assert listed["failed_at_status"] == "analyzing"
-

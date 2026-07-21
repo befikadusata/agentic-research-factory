@@ -28,6 +28,19 @@ export default function NewRunPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!vertical) return;
+    const refreshedDefinition = verticals.find((definition) => definition.key === vertical);
+    if (!refreshedDefinition) {
+      setVertical(null);
+      setVerticalInputs({});
+      setDocIds([]);
+      setFormat("report");
+      return;
+    }
+    setFormat(refreshedDefinition.defaultFormat);
+  }, [vertical, verticals]);
+
+  useEffect(() => {
     if (authStatus === "unauthenticated") router.push("/");
   }, [authStatus, router]);
 
@@ -39,6 +52,7 @@ export default function NewRunPage() {
   const verticalDef = verticals.find((v) => v.key === vertical) ?? null;
 
   function handleVerticalChange(v: Vertical) {
+    if (v === vertical) return;
     setVertical(v);
     setVerticalInputs({});
     setDocIds([]);
@@ -110,7 +124,7 @@ export default function NewRunPage() {
           <label className="block text-sm font-semibold text-content-secondary mb-3">
             Playbook <span className="text-content-muted font-normal">(optional)</span>
           </label>
-          <VerticalSelector value={vertical} onChange={handleVerticalChange} />
+          <VerticalSelector value={vertical} onChange={handleVerticalChange} verticals={verticals} />
           {vertical && (
             <button
               type="button"

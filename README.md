@@ -109,6 +109,16 @@ cd frontend
 npx playwright test
 ```
 
+Docker authentication e2e (requires the Compose stack to be running):
+```bash
+docker compose up -d
+cd frontend
+npx playwright test --config=playwright.docker.config.ts
+```
+
+Generated frontend scratch builds are disposable and ignored. If a tool creates
+them inside the repository, remove them with `rm -rf frontend/tmp`.
+
 **Backend coverage** (117 tests across 14 files):
 
 | Area | Test file |

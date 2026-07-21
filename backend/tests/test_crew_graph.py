@@ -207,6 +207,51 @@ def test_route_after_review_retry_cap_still_bounds_loop(monkeypatch):
     assert crew_module.route_after_review(_fail_state(retry_count=3)) == "write"
 
 
+def test_lead_intel_contract_rejects_missing_buyer_freshness_and_readiness():
+    failures = crew_module.lead_intel_contract_failures(
+        "## Company Overview\nGeneric profile only.",
+        "CISO",
+    )
+    assert any("Target Buyer" in failure for failure in failures)
+    assert any("Purchase-Readiness" in failure for failure in failures)
+    assert any("CISO" in failure for failure in failures)
+    assert any("source URL" in failure for failure in failures)
+    assert any("publication/update date" in failure for failure in failures)
+
+
+def test_lead_intel_contract_accepts_sourced_target_buyer_report():
+    output = """## Target Buyer — CISO
+Verified person: Jane Doe, Chief Information Security Officer
+Supporting source and date: https://example.com/leadership — 2026-06-01
+## Purchase-Readiness Evidence
+Dated security hiring and compliance initiative.
+## Source Evidence Ledger
+| CISO title | https://example.com/leadership | 2026-06-01 |
+"""
+    assert crew_module.lead_intel_contract_failures(output, "CISO", current_year=2026) == []
+
+
+def test_lead_intel_contract_rejects_stale_executive_title():
+    output = """## Target Buyer — CISO
+Verified person: Former Security Leader
+Supporting source and date: https://example.com/old-leadership — 2022-05-01
+## Purchase-Readiness Evidence
+Recent compliance investment.
+## Source Evidence Ledger
+| readiness | https://example.com/news | 2026-06-01 |
+"""
+    failures = crew_module.lead_intel_contract_failures(output, "CISO", current_year=2026)
+    assert "Target-buyer title is supported only by stale sources" in failures
+
+
+def test_failed_lead_review_retries_once_then_warns_at_end(monkeypatch):
+    monkeypatch.setattr(crew_module.settings, "RUN_COST_CEILING_USD", None)
+    state = _fail_state(retry_count=1)
+    assert crew_module.route_after_lead_review(state) == "lead_intel"
+    state["retry_count"] = 2
+    assert crew_module.route_after_lead_review(state) == "end"
+
+
 # ── researcher retry-budget escalation (gap #3): a re-run after a review FAIL
 # gets a deeper budget than the deliberately-shallow first pass, so it acts on the
 # feedback instead of re-failing the same undersized pass and re-billing it. ─────

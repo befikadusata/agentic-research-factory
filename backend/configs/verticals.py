@@ -5,6 +5,7 @@ Each vertical defines the structured context injected into agent prompts,
 the dynamic form fields shown in the frontend, and the output requirements
 enforced by the writer/editor.
 """
+from datetime import datetime, timezone
 from typing import TypedDict
 
 
@@ -68,14 +69,18 @@ VERTICALS: dict[str, VerticalConfig] = {
         ),
         "output_sections": [
             "Company Overview",
+            "Target Buyer",
             "Key Decision Makers",
             "Recent News & Strategic Signals",
             "Technology Stack",
+            "Purchase-Readiness Evidence",
             "Fit Score & Reasoning",
             "Recommended Outreach Angle",
         ],
         "quality_rubric": (
-            "Score on: completeness of decision-maker data (name + title + LinkedIn), "
+            "Fail if the requested buyer role is missing or replaced by an unrelated executive without explanation, "
+            "if a current title lacks a supporting source and publication date, or if purchase-readiness evidence is missing. "
+            "Otherwise score on: completeness of decision-maker data (name + title + LinkedIn), "
             "specificity of fit reasoning (tied to real evidence), "
             "recency of news cited (last 3 months preferred), "
             "accuracy of tech stack, and actionability of the outreach angle."
@@ -220,6 +225,7 @@ def build_execution_brief(topic: str, vertical: str | None, vertical_inputs: dic
 
     return (
         f"{topic}\n\n"
+        f"**Execution Date (UTC)**: {datetime.now(timezone.utc).date().isoformat()}\n\n"
         f"**Vertical Playbook**: {config['display_name']}\n\n"
         f"**Structured Context**:\n{inputs_lines}\n\n"
         f"**Research Focus**: {config['prompt_focus']}\n\n"

@@ -7,6 +7,7 @@ task_type routing:
 """
 import operator
 import re
+from datetime import datetime, timezone
 from typing import TypedDict, Literal, Optional, List, Annotated
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
@@ -16,6 +17,7 @@ from logger import logger
 class ResearchState(TypedDict):
     topic: str
     vertical: Optional[str]
+    vertical_inputs: dict
     task_type: Literal["research_report", "lead_intel"]
     context_docs: str
     workspace_id: str
@@ -203,12 +205,71 @@ def node_lead_intel(state: ResearchState, config: RunnableConfig) -> dict:
     agent = lead_intel_agent()
     
     topic = state["topic"]
-    # NEW: Add feedback if available
-    if state.get("user_feedback"):
-        topic = f"{topic}\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
+    feedback = state.get("review_output") or state.get("user_feedback")
+    if feedback:
+        topic = f"{topic}\n\n**REQUIRED CORRECTIONS FROM REVIEW**:\n{compact_text(feedback, 2000)}"
         
-    task = lead_intel_task(agent, topic)
+    task = lead_intel_task(agent, topic, state.get("vertical_inputs"))
     return _run_crew_node([agent], [task], state, config, "final_output", "lead_intel")
+
+
+def lead_intel_contract_failures(
+    output: str,
+    target_role: str = "",
+    current_year: int | None = None,
+) -> list[str]:
+    """Deterministic release-gate checks that the LLM reviewer cannot waive."""
+    lowered = (output or "").lower()
+    failures = []
+    for heading, label in (
+        ("target buyer", "Target Buyer section"),
+        ("purchase-readiness", "Purchase-Readiness Evidence section"),
+        ("source evidence ledger", "Source Evidence Ledger"),
+    ):
+        if heading not in lowered:
+            failures.append(f"Missing {label}")
+    if target_role and target_role.lower() not in lowered and "not confidently identified" not in lowered:
+        failures.append(f"Requested buyer role '{target_role}' is not addressed")
+    buyer_match = re.search(
+        r"#{1,6}\s+Target Buyer[^\n]*\n(.*?)(?=\n#{1,6}\s|\Z)",
+        output or "",
+        re.IGNORECASE | re.DOTALL,
+    )
+    buyer_section = buyer_match.group(1) if buyer_match else ""
+    if not re.search(r"https?://", buyer_section):
+        failures.append("No source URL supports current personnel claims")
+    source_years = [int(year) for year in re.findall(r"\b(20\d{2})\b", buyer_section)]
+    if not source_years:
+        failures.append("No publication/update date supports current personnel claims")
+    else:
+        current_year = current_year or datetime.now(timezone.utc).year
+        if max(source_years) < current_year - 1:
+            failures.append("Target-buyer title is supported only by stale sources")
+    return failures
+
+
+def node_lead_review(state: ResearchState, config: RunnableConfig) -> dict:
+    from agents.reviewer import reviewer_agent, review_task
+
+    vertical_config = get_vertical(state.get("vertical"))
+    rubric = vertical_config["quality_rubric"] if vertical_config else "Verify buyer identity, freshness, sources, and purchase readiness."
+    target_role = str((state.get("vertical_inputs") or {}).get("target_role") or "")
+    failures = lead_intel_contract_failures(state.get("final_output", ""), target_role)
+    agent = reviewer_agent()
+    task = review_task(
+        agent,
+        state["topic"],
+        f"LEAD-INTEL REPORT:\n{state.get('final_output', '')}",
+        rubric,
+    )
+    result = _run_crew_node([agent], [task], state, config, "review_output", "reviewer")
+    review = result.get("review_output", "")
+    if failures:
+        findings = "\n".join(f"- {failure}" for failure in failures)
+        review = f"VERDICT: FAIL\n\n### Quality Audit: FAIL\n\n#### Critical Findings:\n{findings}\n\n{review}"
+    result["review_output"] = review
+    result["retry_count"] = state.get("retry_count", 0) + 1
+    return result
 
 
 def node_analyse(state: ResearchState, config: RunnableConfig) -> dict:
@@ -361,6 +422,14 @@ def route_after_review(state: ResearchState) -> str:
     return "write"
 
 
+def route_after_lead_review(state: ResearchState) -> str:
+    if review_verdict(state.get("review_output", "")) == "PASS":
+        return "end"
+    if state.get("retry_count", 0) < 2 and not _over_budget(state):
+        return "lead_intel"
+    return "end"
+
+
 # ── graph ────────────────────────────────────────────────────────────────────
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -377,6 +446,7 @@ def build_graph() -> StateGraph:
     g.add_node("plan",       node_plan)
     g.add_node("research",   node_research)
     g.add_node("lead_intel", node_lead_intel)
+    g.add_node("lead_review", node_lead_review)
     g.add_node("analyse",    node_analyse)
     g.add_node("review",     node_review)
     g.add_node("write",      node_write)
@@ -404,7 +474,12 @@ def build_graph() -> StateGraph:
         {"research": "research", "write": "write"},
     )
     
-    g.add_edge("lead_intel", END)
+    g.add_edge("lead_intel", "lead_review")
+    g.add_conditional_edges(
+        "lead_review",
+        route_after_lead_review,
+        {"lead_intel": "lead_intel", "end": END},
+    )
     g.add_edge("write",      "edit")
     g.add_edge("edit",       END)
 

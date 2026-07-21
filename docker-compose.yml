@@ -246,6 +246,8 @@ services:
       # host-reachable URL (the published port), not the internal "backend"
       # hostname the browser can't resolve.
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      # NextAuth runs inside this container and must use Docker DNS to reach the API.
+      - BACKEND_INTERNAL_URL=http://backend:8000
       # Must match the backend's BACKEND_JWT_SECRET (backend/.env = dummy-secret)
       # or the JWT that /api/backend-token mints is rejected with 401.
       - BACKEND_JWT_SECRET=dummy-secret

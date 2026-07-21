@@ -124,9 +124,15 @@ class RunCostResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class LogEntryResponse(BaseModel):
+    agent: str
+    message: str
+    ts: str
+
+
 class RunDetailResponse(RunResponse):
     updated_at: datetime
-    logs: list[dict]
+    logs: list[LogEntryResponse]
     research_output: Optional[str]
     analysis_output: Optional[str]
     final_output: Optional[str]

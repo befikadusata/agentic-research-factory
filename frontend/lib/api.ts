@@ -1,4 +1,5 @@
 import type { Run, RunDetail, Workspace, WorkspaceMember, Monitor, CreateMonitorInput } from "./types";
+import { normalizeLogEntries } from "./logs";
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
@@ -72,7 +73,8 @@ export async function getRun(id: string): Promise<RunDetail> {
   const headers = await authHeaders();
   const res = await fetch(`${BASE}/runs/${id}`, { headers });
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const data = await res.json() as RunDetail;
+  return { ...data, logs: normalizeLogEntries(data.logs) };
 }
 
 export async function approveHitl(id: string, instruction?: string) {

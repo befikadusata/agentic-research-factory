@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { LogEntry } from "@/lib/types";
+import { normalizeLogEntries } from "@/lib/logs";
 
 // Agent identity hues — fixed per role, independent of state. See
 // docs/design/factotum-design.md §2.6.
@@ -28,9 +29,10 @@ export function AgentLog({ logs }: { logs: LogEntry[] }) {
   const [filter, setFilter] = useState<"all" | "error">("all");
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const safeLogs = normalizeLogEntries(logs);
   const filteredLogs = filter === "all"
-    ? logs
-    : logs.filter(l => l.message.toLowerCase().includes("error") || l.agent.toLowerCase().includes("error"));
+    ? safeLogs
+    : safeLogs.filter(l => l.message.toLowerCase().includes("error") || l.agent.toLowerCase().includes("error"));
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

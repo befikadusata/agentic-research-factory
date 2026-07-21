@@ -368,7 +368,7 @@ test.describe("Core Flow Smoke Tests", () => {
     await page.getByPlaceholder("e.g. Competitive landscape for Notion in project management, 2025").fill("How does Notion position itself?");
     await page.getByRole("button", { name: /Start Marketing/i }).click();
 
-    await expect(page).toHaveURL(/\/runs\/run-123$/);
+    await expect(page).toHaveURL(/\/runs\/run-123$/, { timeout: 20_000 });
     expect(createPayload).not.toBeNull();
     expect(createPayload!.vertical).toBe("marketing_competitor_briefs");
     expect(createPayload!.topic).toBe("How does Notion position itself?");
@@ -376,6 +376,108 @@ test.describe("Core Flow Smoke Tests", () => {
       competitor_name: "Notion",
       our_product: "AcmeDocs",
     });
+  });
+
+  test("keeps an early playbook click consistent while verticals refresh", async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+    let releaseVerticals: (() => void) | undefined;
+    const verticalsReady = new Promise<void>((resolve) => { releaseVerticals = resolve; });
+    let createPayload: Record<string, unknown> | null = null;
+
+    await page.route("**/verticals", async (route) => {
+      await verticalsReady;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          key: "marketing_competitor_briefs",
+          display_name: "Refreshed Competitor Brief",
+          description: "Backend-authoritative definition",
+          default_format: "summary",
+          input_schema: {
+            competitor_name: { label: "Current Competitor", required: true, placeholder: "Updated competitor", type: "text" },
+          },
+        }]),
+      });
+    });
+    await page.route("**/runs", async (route) => {
+      createPayload = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ id: "delayed-run" }) });
+    });
+    await page.route("**/runs/delayed-run", async (route) => {
+      if (route.request().isNavigationRequest()) return route.continue();
+      await route.fulfill({ status: 404, body: "not needed" });
+    });
+
+    await createSessionCookie(page);
+    await page.goto("/new");
+    const playbookGroup = page.getByRole("group", { name: "Playbook" });
+    const initialCard = playbookGroup.getByRole("button", { name: /Marketing Competitor Brief/i });
+    await initialCard.click();
+    await expect(initialCard).toHaveAttribute("aria-pressed", "true");
+    releaseVerticals?.();
+
+    const refreshedCard = playbookGroup.getByRole("button", { name: /Refreshed Competitor Brief/i });
+    await expect(refreshedCard).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: /Executive Summary/i })).toHaveAttribute("aria-pressed", "true");
+    await page.getByPlaceholder("Updated competitor").fill("Notion");
+    await refreshedCard.click();
+    await expect(page.getByPlaceholder("Updated competitor")).toHaveValue("Notion");
+    await page.getByPlaceholder(/Competitive landscape for Notion/i).fill("Current Notion positioning");
+    await page.getByRole("button", { name: /Start Refreshed/i }).click();
+    await expect(page).toHaveURL(/\/runs\/delayed-run$/, { timeout: 20_000 });
+    expect(createPayload).toMatchObject({
+      vertical: "marketing_competitor_briefs",
+      format: "summary",
+      vertical_inputs: { competitor_name: "Notion" },
+    });
+  });
+
+  test("revisits and reloads a completed run with persisted logs", async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+    await page.route("**/runs/revisited-run", async (route) => {
+      if (route.request().isNavigationRequest()) return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "revisited-run",
+          topic: "Persisted report",
+          format: "report",
+          status: "complete",
+          workspace_id: null,
+          vertical: null,
+          created_at: "2026-07-21T10:00:00Z",
+          updated_at: "2026-07-21T10:05:00Z",
+          logs: [
+            { agent: "system", message: "Status changed to researching", ts: "2026-07-21T10:00:01Z" },
+            { agent: "Researcher", message: "Collected current evidence", ts: "2026-07-21T10:01:00Z" },
+            { agent: "error", message: "Recovered non-fatal tool error", ts: "2026-07-21T10:02:00Z" },
+          ],
+          research_output: "Research body",
+          analysis_output: "Analysis body",
+          final_output: "# Persisted Final Output\n\nStill available after refresh.",
+          error_message: null,
+        }),
+      });
+    });
+    await page.route("**/runs/revisited-run/stream", async (route) => {
+      await route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: "" });
+    });
+
+    await createSessionCookie(page);
+    await page.goto("/runs/revisited-run");
+    await expect(page.getByText("Persisted Final Output")).toBeVisible();
+    await expect(page.getByText("Collected current evidence")).toBeVisible();
+    await page.getByRole("button", { name: "Errors" }).click();
+    await expect(page.getByText("Recovered non-fatal tool error")).toBeVisible();
+    await expect(page.getByText("Collected current evidence")).not.toBeVisible();
+
+    await page.reload();
+    await expect(page.getByText("Persisted Final Output")).toBeVisible();
+    await expect(page.getByText("Collected current evidence")).toBeVisible();
   });
 
   test("shows HITL modal and approves with optional instruction", async ({ page }) => {

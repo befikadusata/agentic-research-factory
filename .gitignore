@@ -21,6 +21,8 @@ node_modules/
 out/
 .vercel/
 *.tsbuildinfo
+frontend/tmp/
+frontend/test-results/
 
 # Uploads
 /tmp/research_factory_uploads/

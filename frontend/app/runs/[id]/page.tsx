@@ -14,6 +14,7 @@ import { ConfidenceBadge } from "@/components/ConfidenceBadge";
 import { MonitorDiffPanel } from "@/components/MonitorDiffPanel";
 import { PlaybookIcon } from "@/components/PlaybookIcon";
 import type { RunDetail, LogEntry, RunStatus } from "@/lib/types";
+import { normalizeLogEntry } from "@/lib/logs";
 import { VERTICALS, AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, statusBadgeClass } from "@/lib/types";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -87,7 +88,8 @@ export default function RunPage() {
       if (data === "heartbeat") return;
       const parsed = JSON.parse(data);
       if (parsed.type === "log") {
-          setLogs((prev) => [...prev, parsed.data]);
+          const entry = normalizeLogEntry(parsed);
+          if (entry) setLogs((prev) => [...prev, entry]);
       } else if (parsed.type === "status") {
           setStatus(parsed.data.status);
           setResuming(false);

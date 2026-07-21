@@ -410,12 +410,13 @@ async def _run_start_segment(run_id: UUID):
     execution_brief = build_execution_brief(topic, vertical, vertical_inputs)
     task_type       = vertical_config["task_type"] if vertical_config else "research_report"
 
-    from agents.crew import supervisor
+    from agents.crew import supervisor, review_verdict
     from tools.rag import extract_citations
 
     initial_state = {
         "topic":           execution_brief,
         "vertical":        vertical,
+        "vertical_inputs": vertical_inputs,
         "task_type":       task_type,
         "context_docs":    context_docs,
         "collection_name": collection_name,
@@ -439,7 +440,7 @@ async def _run_start_segment(run_id: UUID):
     await emit(rid, "agent_start", {"stage": "research"})
 
     if task_type == "lead_intel":
-        # Single pass → END, then a single (final) approval gate.
+        # Generate, review (and retry once on critical failure), then pause for final approval.
         final_state = await _invoke_supervisor_with_retry(
             supervisor, initial_state, config, recursion_limit=15
         )
@@ -447,8 +448,20 @@ async def _run_start_segment(run_id: UUID):
         await _log_token_usages(rid, final_state.get("token_usages", []))
 
         final_output    = final_state.get("final_output", "")
+        review_output   = final_state.get("review_output", "")
+        review_passed   = review_verdict(review_output) == "PASS"
         final_citations = extract_citations(final_output or "")
-        eval_scores     = await _safe_eval(final_output, final_output, topic, log, run_id=rid, agent_name="eval_lead_intel")
+        evidence_lines = [line for line in final_output.splitlines() if "http://" in line or "https://" in line]
+        grounding = "SOURCE EVIDENCE LEDGER:\n" + "\n".join(evidence_lines[:30]) + "\n\nREVIEW AUDIT:\n" + review_output
+        eval_scores = await _safe_eval(
+            final_output, grounding, execution_brief, log,
+            run_id=rid, agent_name="eval_lead_intel",
+            evaluation_requirements=(
+                "- Buyer-role coverage: verifies the requested role or explicitly reports it was not confidently identified.\n"
+                "- Title freshness: every current title has a recent source and publication/update date.\n"
+                "- Purchase readiness: cites concrete signals and connects them to the supplied product."
+            ),
+        )
 
         async with AsyncSessionLocal() as db:
             run_obj = await db.get(Run, run_id)
@@ -457,12 +470,17 @@ async def _run_start_segment(run_id: UUID):
                 **(run_obj.metrics or {}),
                 "citations": final_citations,
                 "eval_scores": eval_scores,
+                "review_output": review_output,
+                "quality_warning": None if review_passed else review_output,
             }
             flag_modified(run_obj, "metrics")
             await db.commit()
 
         await asyncio.to_thread(supervisor.checkpointer.delete_thread, rid)
-        await _enter_gate(run_id, RunStatus.awaiting_final_approval, final_output)
+        gate_summary = final_output
+        if not review_passed:
+            gate_summary = f"QUALITY WARNING — reviewer requirements were not fully met.\n\n{review_output}\n\n{final_output}"
+        await _enter_gate(run_id, RunStatus.awaiting_final_approval, gate_summary)
         return
 
     # research_report: plan → research → pause before analyse (research approval).
@@ -533,6 +551,7 @@ async def _run_analyse_segment(run_id: UUID):
     entry_state = {
         "topic":           execution_brief,
         "vertical":        vertical,
+        "vertical_inputs": vertical_inputs,
         "task_type":       "research_report",
         "context_docs":    "",
         "collection_name": None,
@@ -642,6 +661,7 @@ async def _run_write_segment(run_id: UUID):
     entry_state = {
         "topic":           execution_brief,
         "vertical":        vertical,
+        "vertical_inputs": vertical_inputs,
         "task_type":       "research_report",
         "context_docs":    "",
         "collection_name": None,
@@ -722,11 +742,20 @@ def _extract(text: str) -> list:
     return extract_citations(text or "")
 
 
-async def _safe_eval(content: str, research: str, topic: str, log, run_id=None, agent_name: str = "eval") -> dict:
+async def _safe_eval(
+    content: str,
+    research: str,
+    topic: str,
+    log,
+    run_id=None,
+    agent_name: str = "eval",
+    evaluation_requirements: str | None = None,
+) -> dict:
     try:
         return await evaluate_output(
             content=content, research=research, topic=topic,
             run_id=run_id, agent_name=agent_name,
+            evaluation_requirements=evaluation_requirements,
         )
     except Exception as e:
         log.warning("eval_failed", error=str(e))

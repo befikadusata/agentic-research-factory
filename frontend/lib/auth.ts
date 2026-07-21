@@ -20,7 +20,10 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
-        const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/auth/login`, {
+        const backendUrl =
+          process.env.BACKEND_INTERNAL_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL;
+        if (!backendUrl) throw new Error("BACKEND_URL_NOT_CONFIGURED");
+        const res = await fetch(`${backendUrl}/auth/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: credentials.email, password: credentials.password }),

@@ -102,6 +102,26 @@ async def test_evaluate_output_skips_cost_log_without_run_id():
     logged.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_lead_intel_evaluation_adds_buyer_freshness_and_readiness_dimensions():
+    from services.eval_service import evaluate_output
+
+    completion = AsyncMock(return_value=_make_completion_response(json.dumps(VALID_SCORES)))
+    with patch("services.eval_service.acompletion", completion):
+        await evaluate_output(
+            "report", "source ledger", "complete execution brief",
+            evaluation_requirements="Buyer-role coverage; title freshness; purchase readiness",
+        )
+
+    prompt = completion.await_args.kwargs["messages"][0]["content"]
+    assert "Buyer-role coverage" in prompt
+    assert "title freshness" in prompt
+    assert "purchase readiness" in prompt
+    assert '"buyer_role_coverage"' in prompt
+    assert '"title_freshness"' in prompt
+    assert '"purchase_readiness"' in prompt
+
+
 # ── query_rewriter side-cost (in-crew direct call) ────────────────────────────
 
 def test_query_rewriter_records_side_cost():

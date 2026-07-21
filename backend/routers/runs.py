@@ -13,6 +13,48 @@ from auth import get_current_user
 router = APIRouter()
 
 
+def normalize_run_logs(entries: object) -> list[dict[str, str]]:
+    """Convert persisted event envelopes (including historical bad data) into UI logs."""
+    if not isinstance(entries, list):
+        return []
+
+    normalized: list[dict[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        event_type = str(entry.get("type") or "log")
+        payload = entry.get("data") if isinstance(entry.get("data"), dict) else entry
+        agent = payload.get("agent")
+        message = payload.get("message")
+
+        if message is None and event_type == "status" and payload.get("status") is not None:
+            message = f"Status changed to {payload['status']}"
+        elif message is None and event_type == "hitl_required" and payload.get("stage") is not None:
+            message = f"Human approval required at {payload['stage']}"
+        elif message is None and event_type == "complete":
+            message = "Run completed"
+
+        if message is None:
+            continue
+        if not isinstance(message, str):
+            try:
+                import json
+                message = json.dumps(message, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                message = str(message)
+
+        message = message.strip()
+        if not message:
+            continue
+        normalized.append({
+            "agent": str(agent or ("error" if event_type == "error" else "system")),
+            "message": message,
+            "ts": str(entry.get("ts") or payload.get("ts") or ""),
+        })
+    return normalized
+
+
 @router.post("", response_model=RunResponse, status_code=201)
 async def create_run(
     body: CreateRunRequest,
@@ -92,6 +134,7 @@ async def get_run(
         else:
             raise HTTPException(404, "Run not found")
     return RunDetailResponse(
-        **{k: v for k, v in run.__dict__.items() if not k.startswith("_")},
+        **{k: v for k, v in run.__dict__.items() if not k.startswith("_") and k != "logs"},
+        logs=normalize_run_logs(run.logs),
         citations=(run.metrics or {}).get("citations", []),
     )

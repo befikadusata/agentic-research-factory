@@ -1,6 +1,5 @@
 "use client";
 
-import { useVerticals } from "@/lib/useVerticals";
 import type { VerticalDefinition, Vertical } from "@/lib/types";
 import { PlaybookIcon } from "@/components/PlaybookIcon";
 import { clsx } from "clsx";
@@ -9,10 +8,10 @@ import { Check } from "lucide-react";
 interface Props {
   value: Vertical | null;
   onChange: (v: Vertical) => void;
+  verticals: VerticalDefinition[];
 }
 
-export function VerticalSelector({ value, onChange }: Props) {
-  const verticals = useVerticals();
+export function VerticalSelector({ value, onChange, verticals }: Props) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="group" aria-label="Playbook">
       {verticals.map((v: VerticalDefinition) => {

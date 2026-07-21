@@ -11,6 +11,7 @@ async def evaluate_output(
     topic: str,
     run_id=None,
     agent_name: str = "eval",
+    evaluation_requirements: str | None = None,
 ) -> dict:
     """
     Score output on 4 dimensions (0-100 each).
@@ -21,11 +22,22 @@ async def evaluate_output(
     cost is persisted to run_costs under `agent_name`, so /analytics/costs stops
     under-reporting the judge traffic.
     """
+    specialized = ""
+    score_shape = ""
+    if evaluation_requirements:
+        specialized = f"""
+Additional required dimensions (score each 0-100):
+{evaluation_requirements}
+Critical failure in any additional dimension must be listed in issues and must materially lower overall.
+"""
+        score_shape = ', "buyer_role_coverage": 90, "title_freshness": 85, "purchase_readiness": 80'
+
     prompt = f"""You are a quality evaluator. Score this content on 4 dimensions (0-100):
 1. Accuracy: Are all claims supported by the research?
 2. Relevance: Does it address the topic directly?
 3. Completeness: Are all required sections present and substantive?
 4. Writing Quality: Is it clear, engaging, and professional?
+{specialized}
 
 Topic: {topic}
 
@@ -36,7 +48,7 @@ Content to Evaluate:
 {compact_text(content, 3000)}
 
 Respond ONLY with valid JSON:
-{{"accuracy": 85, "relevance": 90, "completeness": 78, "writing_quality": 88, "overall": 85, "issues": ["list any critical issues"]}}"""
+{{"accuracy": 85, "relevance": 90, "completeness": 78, "writing_quality": 88{score_shape}, "overall": 85, "issues": ["list any critical issues"]}}"""
 
     llm = get_completion_settings("eval")
     response = await acompletion(

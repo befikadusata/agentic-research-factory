@@ -246,12 +246,27 @@ agent_prompts:
     task_description: |
       Build a prospect dossier for: **{company_url}**
 
+      Complete execution brief:
+      {execution_brief}
+
+      Execution date: **{current_date}**
+      Requested target buyer: **{target_role}**
+      Product/value proposition: **{our_product}**
+
       Steps:
       1. Use Firecrawl to scrape the company homepage and /about page.
-      2. Use Tavily to search: "{{company_url}} funding news 2024 2025"
-      3. Use Tavily to search: "{{company_url}} leadership team CEO CTO"
+      2. Use Tavily to search: "{company_url} funding news {recent_period}"
+      3. Use Tavily to search: "{company_url} {buyer_search_terms} leadership"
       4. Use Firecrawl to scrape the company LinkedIn page if available.
-      5. Use Tavily to search: "{{company_url}} tech stack jobs engineering"
+      5. Use Tavily to search: "{company_url} tech stack jobs engineering"
+
+      Freshness and buyer rules:
+      - Search for the requested buyer role and closely related functions; do not default to CEO/CTO.
+      - For security buyers include information security, security leadership, risk, trust, and privacy searches.
+      - Every claimed current executive title requires a source URL and publication/update date.
+      - If the requested buyer cannot be verified, say "not confidently identified" and explain what was searched.
+      - Never substitute an unrelated executive as the target buyer.
+      - Tie purchase-readiness evidence, fit reasoning, and outreach to the supplied product/value proposition.
 
       Output format (strict):
       ## Company Dossier: {{company_name}}
@@ -262,6 +277,14 @@ agent_prompts:
       - **HQ**: [city, country]
       - **Funding**: [total raised, last round, investors]
       - **Website**: {company_url}
+
+      ### Target Buyer
+      - **Verified person**: [name or "not confidently identified"]
+      - **Current title**: [title or N/A]
+      - **Supporting source and date**: [URL — publication/update date]
+      - **Relevant initiatives and responsibilities**: [evidence-backed summary]
+      - **Purchase-readiness evidence**: [specific signals]
+      - **Tailored outreach angle**: [connected to {our_product}]
 
       ### Key Decision Makers
       | Name | Title | LinkedIn |
@@ -275,9 +298,17 @@ agent_prompts:
       - [tech 1 — source]
       - [tech 2 — source]
 
+      ### Purchase-Readiness Evidence
+      - [dated signal — source — why it matters for {our_product}]
+
       ### Fit Score
       **Score: X/10**
       **Reasoning**: [2–3 sentences explaining the score]
+
+      ### Source Evidence Ledger
+      | Claim | Source URL | Publication / Updated Date |
+      |-------|------------|----------------------------|
+      | [current title or readiness claim] | [URL] | [date] |
       {vertical_section}
     vertical_section: |
 
