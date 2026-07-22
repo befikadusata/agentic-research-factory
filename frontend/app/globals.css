@@ -2,8 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Fonts are loaded via next/font in app/layout.tsx (Inter + JetBrains Mono),
-   which sets --font-sans / --font-mono via className variables on <html>. */
+/* Use resilient local font stacks so production and Docker builds never depend
+   on downloading font files from a third-party service. */
 
 /* ════════════════════════════════════════════════════════════════════
    Factotum design tokens — see docs/design/factotum-{design,implementation}.md
