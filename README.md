@@ -6,6 +6,28 @@ An AI-powered market research automation platform with **Human-in-the-Loop (HITL
 
 ---
 
+## 🎬 Product Walkthrough
+
+From a structured competitor brief to agent execution, human review, and a cited final deliverable:
+
+![Agentic Research Factory end-to-end research workflow](docs/assets/video_readme_research-flow_20260723.gif)
+
+<sub>Playwright-captured product flow using deterministic demo data for a fast, reproducible walkthrough.</sub>
+
+### Human-in-the-loop quality gate
+
+Research pauses at an explicit checkpoint so an operator can inspect the evidence and redirect the analysis before the pipeline continues.
+
+![Human reviewing research findings before analysis](docs/assets/screenshot_readme_hitl-review_20260723.png)
+
+### Reviewable, export-ready output
+
+Completed briefs combine the final narrative, citations, quality scoring, and PDF/Markdown export in one review surface.
+
+![Completed competitor intelligence brief with confidence scoring](docs/assets/screenshot_readme_final-brief_20260723.png)
+
+---
+
 ## 🚀 Key Capabilities
 
 * **Dynamic Agent Routing**: Uses a **LangGraph Supervisor** to choreograph specialized CrewAI agents (`Strategist`, `Researcher`, `Analyst`, `Reviewer`, `Writer`, `Editor`) tailored to the selected task profile.
