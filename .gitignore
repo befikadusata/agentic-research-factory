@@ -23,6 +23,7 @@ out/
 *.tsbuildinfo
 frontend/tmp/
 frontend/test-results/
+frontend/playwright-report/
 
 # Uploads
 /tmp/research_factory_uploads/
