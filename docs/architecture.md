@@ -51,7 +51,8 @@ graph TD
 
     %% Database
     subgraph Storage [Persistent Storage]
-        PG[(PostgreSQL + pgvector)]:::db
+        PG[(PostgreSQL)]:::db
+        VectorDB[(Supabase Postgres + pgvector)]:::db
         Redis[(Redis Pub/Sub & HITL)]:::db
     end
 
@@ -59,8 +60,8 @@ graph TD
     subgraph External [External APIs]
         Tavily[Tavily Search API]:::external
         Firecrawl[Firecrawl Scraper API]:::external
-        LLM[OpenAI / LiteLLM]:::external
-        LlamaParse[LlamaParse PDF API]:::external
+        LLM[Model providers via LiteLLM]:::external
+        LlamaParse[LlamaParse fallback]:::external
     end
 
     %% Connections
@@ -70,7 +71,8 @@ graph TD
     Graph -- "Search" --> Tavily
     Graph -- "Scrape" --> Firecrawl
     Graph -- "Reasoning" --> LLM
-    API -- "Parse Docs" --> LlamaParse
+    API -. "Optional PDF fallback" .-> LlamaParse
+    Graph -- "Hybrid document retrieval" --> VectorDB
     
     API -- "Save Runs/Metrics" --> PG
     API <--> Redis
@@ -81,7 +83,7 @@ graph TD
 
 ## 2. Agent Coordination Loop (LangGraph Supervisor)
 
-Instead of a linear sequential queue, the system utilizes a **Supervisor Routing Pattern** implemented in [backend/agents/crew.py](file:///home/befikadusata/Devs/2026/agentic-research-factory/backend/agents/crew.py). This architecture routes tasks dynamically based on the vertical and active run parameters:
+Instead of a linear sequential queue, the system utilizes a **Supervisor Routing Pattern** implemented in [`backend/agents/crew.py`](../backend/agents/crew.py). This architecture routes tasks dynamically based on the vertical and active run parameters:
 
 ### Agent Roles and Boundaries
 1. **Supervisor**: Orchestrates which node should run next based on `task_type` (`research_report` vs. `lead_intel` vs. `quick_snapshot`).
@@ -100,18 +102,18 @@ Instead of a linear sequential queue, the system utilizes a **Supervisor Routing
 Documents uploaded via the UI `/upload` route are processed through a high-precision pipeline:
 
 1. **Document Ingestion**:
-   - PDFs are split into markdown pages using LlamaParse.
+   - PDFs are converted to Markdown with Docling. LlamaParse is an optional fallback when Docling fails and `LLAMA_CLOUD_API_KEY` is configured.
    - Text chunks are parsed with a `RecursiveCharacterTextSplitter` (size = 1000, overlap = 200) to preserve paragraph flow.
-   - Embeddings are generated with `all-MiniLM-L6-v2` and saved in a PostgreSQL vector store.
+   - Embeddings use the configured Gemini embedding model when a Gemini key is present; otherwise they use the local `all-MiniLM-L6-v2` model. Vectors are stored in workspace-scoped Supabase `vecs` collections.
 2. **Hybrid Search**:
-   - Queries are rewritten/expanded via a dedicated LLM rewriter ([query_rewriter.py](file:///home/befikadusata/Devs/2026/agentic-research-factory/backend/services/query_rewriter.py)).
+   - Queries are rewritten/expanded via a dedicated LLM rewriter ([`query_rewriter.py`](../backend/services/query_rewriter.py)).
    - Dual-index search query is dispatched using dense `HNSW` vectors alongside sparse `BM25` keyword indexes.
 3. **Cross-Encoder Re-ranking**:
    - 20 candidate document chunks are retrieved from PostgreSQL.
    - Candidate chunks are re-scored using `cross-encoder/ms-marco-MiniLM-L-6-v2` to determine exact contextual relevance.
    - The top 5 chunks are returned to the requesting agent node.
 4. **Scoping**:
-   - Retrieval operations apply database-level `query_filters` based on workspace metadata tags.
+   - Each workspace uses its own collection, with optional metadata filtering by research vertical.
 
 ---
 
@@ -120,16 +122,16 @@ Documents uploaded via the UI `/upload` route are processed through a high-preci
 1. **Agent State Events**: As CrewAI agents execute actions, their logs are routed via Redis channels under a `run_log:{run_id}` prefix.
 2. **FastAPI Streaming**: The client opens an EventSource connection to the `/runs/{id}/stream` route. The SSE handler listens to Redis Pub/Sub events and flushes them to the browser.
 3. **HITL Interrupt Loop**:
-   - When a checkpoint is reached, the backend sets the run status to an awaiting state (e.g., `awaiting_research_approval`) and blocks on `blpop` or Redis key polling.
+   - Each research, analysis, and writing segment runs as a separate Celery task. At a checkpoint, the backend persists the output, sets an awaiting status (for example, `awaiting_research_approval`), and returns the worker slot.
    - The client UI presents an interactive modal showing the current draft along with an instruction input field.
-   - Approving the state posts user input to `/runs/{id}/approve`, which writes the instruction to `run_hitl_instr:{run_id}` and sets `run_hitl_signal:{run_id}` to release the backend block.
-   - The agent resumes execution, reading the injected user feedback to refine the next lifecycle stage.
+   - Approving the state posts user input to `/runs/{id}/approve`, stores the instruction in Redis, and dispatches the next segment.
+   - The next task claims the expected gate atomically, reads the feedback, and resumes from persisted state. Duplicate or stale approvals become no-ops.
 
 ---
 
 ## 5. Database Schema
 
-The database schemas defined in [backend/models.py](file:///home/befikadusata/Devs/2026/agentic-research-factory/backend/models.py) govern isolation and resource utilization:
+The database schemas defined in [`backend/models.py`](../backend/models.py) govern isolation and resource utilization:
 
 * **Workspaces**: Group resources and establish isolation boundaries.
 * **WorkspaceMembers**: Map users to workspaces and assign permissions (`viewer`, `operator`, `admin`).
