@@ -93,7 +93,14 @@ def _make_searxng_response(results: list = None):
     }
 
 
-def test_searxng_search_success():
+@pytest.fixture
+def searxng_url():
+    """Keep SearXNG unit tests independent from developer and CI environments."""
+    with patch("tools.search.settings.SEARXNG_URL", "http://searxng.test"):
+        yield
+
+
+def test_searxng_search_success(searxng_url):
     from tools.search import SearxngSearchTool
 
     tool = SearxngSearchTool()
@@ -110,7 +117,7 @@ def test_searxng_search_success():
     assert "http://a.com" in result
 
 
-def test_searxng_search_cache_hit_skips_api():
+def test_searxng_search_cache_hit_skips_api(searxng_url):
     from tools.search import SearxngSearchTool
 
     tool = SearxngSearchTool()
@@ -125,7 +132,7 @@ def test_searxng_search_cache_hit_skips_api():
     assert "Cached" in result
 
 
-def test_searxng_search_failure_returns_degradation_string():
+def test_searxng_search_failure_returns_degradation_string(searxng_url):
     from tools.search import SearxngSearchTool
 
     tool = SearxngSearchTool()
@@ -138,7 +145,7 @@ def test_searxng_search_failure_returns_degradation_string():
     assert "unavailable" in result.lower()
 
 
-def test_searxng_search_no_results_returns_fallback():
+def test_searxng_search_no_results_returns_fallback(searxng_url):
     from tools.search import SearxngSearchTool
 
     tool = SearxngSearchTool()
@@ -154,7 +161,7 @@ def test_searxng_search_no_results_returns_fallback():
     assert result == "No search results found for this query."
 
 
-def test_searxng_search_uses_provider_scoped_cache_key():
+def test_searxng_search_uses_provider_scoped_cache_key(searxng_url):
     """§8.2 regression: same as the Tavily-side test above, but for SearXNG —
     the two providers must never read/write each other's cached results."""
     from tools.search import SearxngSearchTool
