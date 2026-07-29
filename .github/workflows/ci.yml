@@ -55,7 +55,6 @@ jobs:
         env:
           DATABASE_URL: "postgresql+asyncpg://user:password@localhost:5432/research_factory_test"
           BACKEND_JWT_SECRET: "test-secret"
-          NEXTAUTH_SECRET: "test-secret"
         run: uv run alembic upgrade head
 
       - name: Run tests
@@ -68,7 +67,6 @@ jobs:
           FIRECRAWL_API_KEY: "mock"
           LLAMA_CLOUD_API_KEY: "mock"
           BACKEND_JWT_SECRET: "test-secret"
-          NEXTAUTH_SECRET: "test-secret"
         run: uv run pytest
 
   frontend:

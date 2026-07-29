@@ -107,14 +107,7 @@ Prerequisites: Docker with Compose and at least one supported LLM provider key. 
 
 2. In `backend/.env`, set `GROQ_API_KEY`. Leave unused provider keys and per-agent model overrides blank so capability-based routing selects the available Groq models.
 
-   With the unchanged development Compose file, use its local-only auth values in the backend environment:
-
-   ```dotenv
-   BACKEND_JWT_SECRET=dummy-secret
-   NEXTAUTH_SECRET=test-secret-at-least-32-chars-long-for-e2e
-   ```
-
-   For any shared or deployed environment, generate real secrets and update the corresponding frontend environment values at the same time.
+   No other edits are required. `BACKEND_JWT_SECRET` ships with a local-only development value that already matches the Compose frontend, so authentication works out of the box. For any shared or deployed environment, replace it with `openssl rand -hex 32` in both `backend/.env` and the frontend environment — the two must match, and `ENVIRONMENT=production` refuses to start on the development value.
 
    Google OAuth is optional for local use; the application also supports email/password registration. In development, the verification URL is returned to the client when SMTP is not configured.
 

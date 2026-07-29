@@ -63,13 +63,14 @@
 | `TAVILY_API_KEY` | Your Tavily API key |
 | `FIRECRAWL_API_KEY` | Your Firecrawl API key |
 | `LLAMA_CLOUD_API_KEY` | Your LlamaParse API key |
-| `BACKEND_JWT_SECRET` | A random 32+ char secret |
-| `NEXTAUTH_SECRET` | Same value as frontend `NEXTAUTH_SECRET` |
+| `BACKEND_JWT_SECRET` | `openssl rand -hex 32` — same value as frontend `BACKEND_JWT_SECRET` |
 | `FRONTEND_URL` | `https://your-app.vercel.app` |
+
+`NEXTAUTH_SECRET` is a frontend-only variable; the backend never reads it.
 
 5. Deploy. Verify `GET /health` returns `{"status": "ok"}`.
 
-> **Note:** Setting `ENVIRONMENT=production` enables fail-fast startup. The backend will refuse to start if `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, or `LLAMA_CLOUD_API_KEY` are missing, logging an explicit error listing the absent keys.
+> **Note:** Setting `ENVIRONMENT=production` enables fail-fast startup. The backend refuses to start if `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, or `LLAMA_CLOUD_API_KEY` are missing, logging an explicit error listing the absent keys. It also refuses to start if `BACKEND_JWT_SECRET` is still one of the development values the repo ships, or is shorter than 32 characters.
 
 ---
 
@@ -84,7 +85,8 @@
 |----------|-------|
 | `NEXT_PUBLIC_BACKEND_URL` | `https://your-backend.railway.app` |
 | `NEXTAUTH_URL` | `https://your-app.vercel.app` |
-| `NEXTAUTH_SECRET` | Same value as backend `NEXTAUTH_SECRET` |
+| `NEXTAUTH_SECRET` | `openssl rand -hex 32` — frontend only, unrelated to the backend |
+| `BACKEND_JWT_SECRET` | Same value as backend `BACKEND_JWT_SECRET` (a mismatch 401s every API call) |
 | `GOOGLE_CLIENT_ID` | Your Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Your Google OAuth client secret |
 
@@ -116,7 +118,7 @@ Ensure `FRONTEND_URL` in the backend matches the exact Vercel domain. The backen
 | Secret | Rotation Impact | Steps |
 |--------|----------------|-------|
 | `BACKEND_JWT_SECRET` | Invalidates all active sessions | Update in both backend + frontend env vars, redeploy both |
-| `NEXTAUTH_SECRET` | Invalidates all NextAuth sessions | Update in both, redeploy both |
+| `NEXTAUTH_SECRET` | Invalidates all NextAuth sessions | Update in the frontend, redeploy frontend |
 | `GROQ_API_KEY` | Interrupts Groq-backed agents | Update backend env var, redeploy backend |
 | `OPENROUTER_API_KEY` | Interrupts OpenRouter-backed agents | Update backend env var, redeploy backend |
 | `GEMINI_API_KEY` | Interrupts Gemini embeddings | Update backend env var, redeploy backend |

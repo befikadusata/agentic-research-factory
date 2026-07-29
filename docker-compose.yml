@@ -248,8 +248,13 @@ services:
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
       # NextAuth runs inside this container and must use Docker DNS to reach the API.
       - BACKEND_INTERNAL_URL=http://backend:8000
-      # Must match the backend's BACKEND_JWT_SECRET (backend/.env = dummy-secret)
-      # or the JWT that /api/backend-token mints is rejected with 401.
+      # Must match the backend's BACKEND_JWT_SECRET or the JWT that
+      # /api/backend-token mints is rejected: the stack boots healthy, login
+      # succeeds, and every authenticated request 401s with nothing pointing at
+      # the cause. backend/.env.example and frontend/.env.local.example ship
+      # this same throwaway value so a fresh clone needs no edits. Rotating it
+      # means changing all three together (the backend reads its own
+      # ./backend/.env via env_file, so it cannot inherit this one).
       - BACKEND_JWT_SECRET=dummy-secret
     depends_on:
       backend:

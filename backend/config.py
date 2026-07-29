@@ -114,8 +114,14 @@ class Settings(BaseSettings):
     # sibling database; set this to override where the test schema lives.
     TEST_DATABASE_URL: str | None = None
     REDIS_URL: str = "redis://localhost:6379/0"
+    # Shared HS256 signing key. The frontend mints tokens with it in
+    # /api/backend-token; auth.py verifies them. Both sides must carry the SAME
+    # value or every authenticated request 401s — see _validate_secret below.
+    #
+    # NEXTAUTH_SECRET is deliberately absent: it belongs to NextAuth in the
+    # frontend and nothing here has ever read it. Declaring it required meant a
+    # fresh clone refused to boot over a variable the backend does not use.
     BACKEND_JWT_SECRET: str
-    NEXTAUTH_SECRET: str
     FRONTEND_URL: str = "http://localhost:3000"
     BACKEND_URL: str = "http://localhost:8000"
 
@@ -201,7 +207,48 @@ _FEATURE_LABEL = {
 }
 
 
+# The signing keys the repo ships. backend/.env.example, frontend/.env.local.example
+# and docker-compose.yml all carry the same throwaway value on purpose, so that
+# `cp backend/.env.example backend/.env && docker compose up` authenticates with
+# no manual edits. Previously they disagreed, and the stack booted healthy while
+# every authenticated request 401'd with nothing pointing at the cause.
+#
+# "test-secret" is CI's value; it is listed for the same reason.
+_DEV_JWT_SECRETS = frozenset({
+    "dummy-secret",
+    "test-secret",
+    "generate-with-openssl-rand-hex-32",
+})
+
+# `openssl rand -hex 32` is what every doc recommends; that is 64 chars. 32 is a
+# floor, not a target — it only rejects values obviously too short for HS256.
+_MIN_JWT_SECRET_LEN = 32
+
+
+def _validate_secret(s: Settings) -> None:
+    """Refuse to start production with a shipped or trivially weak signing key.
+
+    Shipping a working default is what makes a fresh clone boot, but it is only
+    safe if promoting that same file to production fails loudly: anyone holding
+    this key can mint a token for any `sub` and impersonate any user.
+    """
+    if s.ENVIRONMENT != "production":
+        return
+    if s.BACKEND_JWT_SECRET in _DEV_JWT_SECRETS:
+        raise RuntimeError(
+            "BACKEND_JWT_SECRET is still a shipped development value. Generate "
+            "one with `openssl rand -hex 32` and set it in BOTH the backend and "
+            "frontend environments — they must match."
+        )
+    if len(s.BACKEND_JWT_SECRET) < _MIN_JWT_SECRET_LEN:
+        raise RuntimeError(
+            f"BACKEND_JWT_SECRET must be at least {_MIN_JWT_SECRET_LEN} "
+            f"characters in production (got {len(s.BACKEND_JWT_SECRET)})."
+        )
+
+
 def validate_config(s: Settings) -> None:
+    _validate_secret(s)
     missing = [k for k in _PROD_REQUIRED if getattr(s, k) is None]
     if s.SEARXNG_URL:
         missing = [k for k in missing if k != "TAVILY_API_KEY"]
