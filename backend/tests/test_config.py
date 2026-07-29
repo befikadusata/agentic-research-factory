@@ -62,13 +62,18 @@ def test_validate_config_firecrawl_api_url_alone_still_requires_tavily():
 
 
 def _prod_ready(**overrides):
-    """Settings that pass every check except the one under test."""
-    return _settings(
-        TAVILY_API_KEY="tvly-x",
-        FIRECRAWL_API_KEY="fc-x",
-        LLAMA_CLOUD_API_KEY="llx-x",
-        **overrides,
-    )
+    """Settings that pass every check except the one under test.
+
+    Merged rather than passed as keywords so a caller can override the provider
+    keys themselves — which the blank-value tests below do.
+    """
+    base = {
+        "TAVILY_API_KEY": "tvly-x",
+        "FIRECRAWL_API_KEY": "fc-x",
+        "LLAMA_CLOUD_API_KEY": "llx-x",
+    }
+    base.update(overrides)
+    return _settings(**base)
 
 
 @pytest.mark.parametrize(
@@ -149,3 +154,37 @@ def test_shipped_jwt_secret_is_rejected_in_production():
 
     with pytest.raises(RuntimeError):
         validate_config(_prod_ready(BACKEND_JWT_SECRET=shipped))
+
+
+# --- blank vs. unset ----------------------------------------------------------
+# These arrive from a .env file, where `TAVILY_API_KEY=` is the natural way to
+# disable a key — pydantic reads that as "", not None. An `is None` check let it
+# through, so production booted clean and failed on the first search call.
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+@pytest.mark.parametrize("key", ["TAVILY_API_KEY", "FIRECRAWL_API_KEY", "LLAMA_CLOUD_API_KEY"])
+def test_production_treats_blank_keys_as_missing(key, blank):
+    with pytest.raises(RuntimeError) as exc:
+        validate_config(_prod_ready(**{key: blank}))
+    assert key in str(exc.value)
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_searxng_url_does_not_exempt_tavily_key(blank):
+    """A blank URL is not a configured self-hosted backend."""
+    with pytest.raises(RuntimeError) as exc:
+        validate_config(_prod_ready(TAVILY_API_KEY=None, SEARXNG_URL=blank))
+    assert "TAVILY_API_KEY" in str(exc.value)
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_firecrawl_url_does_not_exempt_firecrawl_key(blank):
+    with pytest.raises(RuntimeError) as exc:
+        validate_config(_prod_ready(FIRECRAWL_API_KEY=None, FIRECRAWL_API_URL=blank))
+    assert "FIRECRAWL_API_KEY" in str(exc.value)
+
+
+def test_blank_key_in_development_warns_rather_than_raising(caplog):
+    """Non-production keeps degrading gracefully — this only tightens prod."""
+    validate_config(_prod_ready(ENVIRONMENT="development", TAVILY_API_KEY=""))

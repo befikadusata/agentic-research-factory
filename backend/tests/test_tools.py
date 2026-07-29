@@ -262,3 +262,120 @@ async def test_batch_scrape_single_url_failure_includes_error():
 
     assert "http://fail.com" in result
     assert "Error" in result
+
+
+# ── Firecrawl configuration / import safety ──────────────────────────────────
+# Scraping is optional: docker-compose.yml puts self-hosted Firecrawl behind the
+# "scraping" profile and the README says a plain `docker compose up` skips it.
+# The tools used to build their client in an eager pydantic default_factory, so
+# importing tools.scraper — which agents/researcher.py does unconditionally —
+# raised ValueError('No API key provided') and took every run down with it.
+
+
+@pytest.fixture
+def firecrawl_env(monkeypatch):
+    """Set FIRECRAWL_* on settings and reset the cached client around the test."""
+    from config import settings
+    from tools import scraper
+
+    def apply(api_key, api_url):
+        monkeypatch.setattr(settings, "FIRECRAWL_API_KEY", api_key)
+        monkeypatch.setattr(settings, "FIRECRAWL_API_URL", api_url)
+        scraper._firecrawl_app.cache_clear()
+
+    yield apply
+    scraper._firecrawl_app.cache_clear()
+
+
+def test_self_hosted_firecrawl_needs_no_api_key(firecrawl_env):
+    """docker-compose runs Firecrawl with USE_DB_AUTHENTICATION=false.
+
+    firecrawl-py refuses to construct without *some* key, so a placeholder
+    stands in — otherwise the documented keyless self-hosted path can't work.
+    """
+    from tools import scraper
+
+    firecrawl_env(None, "http://firecrawl-api:3002")
+    app = scraper._firecrawl_app()
+
+    assert app.api_url == "http://firecrawl-api:3002"
+    assert app.api_key == scraper._SELF_HOSTED_KEY
+
+
+def test_real_api_key_is_not_replaced_by_the_placeholder(firecrawl_env):
+    from tools import scraper
+
+    firecrawl_env("fc-real-key", "http://firecrawl-api:3002")
+
+    assert scraper._firecrawl_app().api_key == "fc-real-key"
+
+
+def test_unconfigured_scrape_degrades_instead_of_raising(firecrawl_env):
+    from tools.scraper import FirecrawlTool
+
+    firecrawl_env(None, None)
+    result = FirecrawlTool()._run("http://example.com")
+
+    assert "⚠️" in result
+    assert "unavailable" in result.lower()
+
+
+def test_unconfigured_batch_scrape_degrades_instead_of_raising(firecrawl_env):
+    from tools.scraper import BatchScrapeTool
+
+    firecrawl_env(None, None)
+    result = BatchScrapeTool()._run(["http://example.com"])
+
+    assert "⚠️" in result
+    assert "unavailable" in result.lower()
+
+
+def test_researcher_agent_imports_without_any_firecrawl_config(tmp_path):
+    """The regression itself: a clean interpreter with no Firecrawl config at all.
+
+    Subprocess, because the failure was at *import* time and tools.scraper is
+    already imported in this one.
+
+    Getting this to actually fail against the bug takes care. crewai calls
+    load_dotenv() when imported, and load_dotenv walks *up* the tree — from
+    anywhere inside the repo it finds backend/.env and hands a developer's real
+    key to firecrawl-py's os.getenv fallback, hiding the crash. That is why the
+    bug survived local use. So run from a tmp_path outside the repo with a
+    minimal .env: scrubbing os.environ alone is not enough.
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    # Only what Settings requires to construct — deliberately no FIRECRAWL_*.
+    (tmp_path / ".env").write_text(
+        "DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/unused\n"
+        "BACKEND_JWT_SECRET=dummy-secret\n"
+    )
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("FIRECRAWL_")}
+    env["PYTHONPATH"] = str(backend)
+    env.pop("TESTING", None)  # would redirect DATABASE_URL at import
+
+    proc = subprocess.run(
+        [sys.executable, "-c", "import agents.researcher; print('ok')"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, f"researcher import failed:\n{proc.stderr[-2000:]}"
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_firecrawl_config_counts_as_unconfigured(firecrawl_env, blank):
+    """`FIRECRAWL_API_URL=` in a .env is unset, not a self-hosted endpoint."""
+    from tools.scraper import FirecrawlTool
+
+    firecrawl_env(blank, blank)
+    result = FirecrawlTool()._run("http://example.com")
+
+    assert "unavailable" in result.lower()

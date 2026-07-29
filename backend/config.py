@@ -247,12 +247,26 @@ def _validate_secret(s: Settings) -> None:
         )
 
 
+def _is_blank(value: str | None) -> bool:
+    """Treat unset, empty, and whitespace-only as equally missing.
+
+    These come from a `.env` file, where `TAVILY_API_KEY=` is a far more natural
+    way to disable a key than deleting the line — and pydantic reads that as `""`,
+    not `None`. An `is None` check let it through, so production booted clean and
+    then failed on the first search call, which is exactly what the fail-fast is
+    supposed to prevent.
+    """
+    return value is None or not value.strip()
+
+
 def validate_config(s: Settings) -> None:
     _validate_secret(s)
-    missing = [k for k in _PROD_REQUIRED if getattr(s, k) is None]
-    if s.SEARXNG_URL:
+    missing = [k for k in _PROD_REQUIRED if _is_blank(getattr(s, k))]
+    # A blank URL must not exempt anything either: it would waive the key check
+    # for a self-hosted backend that isn't actually configured.
+    if not _is_blank(s.SEARXNG_URL):
         missing = [k for k in missing if k != "TAVILY_API_KEY"]
-    if s.FIRECRAWL_API_URL:
+    if not _is_blank(s.FIRECRAWL_API_URL):
         missing = [k for k in missing if k != "FIRECRAWL_API_KEY"]
     if not missing:
         return
