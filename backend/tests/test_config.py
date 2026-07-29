@@ -116,7 +116,7 @@ def test_backend_does_not_require_nextauth_secret():
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # The frontend signs tokens with its copy of this value and the backend verifies
-# them with its own. They live in three separate files with no mechanism forcing
+# them with its own. They live in four separate files with no mechanism forcing
 # agreement, and they HAVE disagreed: the stack booted healthy, login succeeded,
 # and every authenticated request 401'd with nothing in the logs naming the
 # cause. This test is that missing mechanism.
@@ -124,6 +124,9 @@ _SECRET_SOURCES = [
     "backend/.env.example",
     "frontend/.env.local.example",
     "docker-compose.yml",
+    # Documentation, but it is written to be copied — §3 is a pair of ready-made
+    # .env blocks, so a stale value here reproduces the original bug by hand.
+    "docs/build_specification.md",
 ]
 
 

@@ -1,6 +1,16 @@
 # Agentic Research Factory — Complete Build Specification
 > **For AI Agent Use.** This document is a self-contained, step-by-step build spec. Follow every section in order. Do not skip sections. Do not infer missing details — all decisions are explicit here.
 
+> **Status: this is the original build plan, and the code has moved past it.** Most of §14 shipped, and some of it shipped differently from what is written here. Where this document and the repository disagree, **the repository wins**. For anything you intend to run:
+>
+> | For | Use |
+> | :-- | :-- |
+> | Environment variables | `backend/.env.example`, `frontend/.env.local.example` |
+> | Local startup | [README Quick Start](../README.md#quick-start) |
+> | Hosted configuration | [deployment guide](deployment.md) |
+>
+> §3 below is kept as a readable overview, but `.env.example` is the authority — it is the file that is actually loaded, and it is regression-tested.
+
 ---
 
 ## Table of Contents
@@ -150,12 +160,24 @@ EMBEDDING_MODEL=gemini-embedding-2
 TAVILY_API_KEY=tvly-...
 FIRECRAWL_API_KEY=fc-...
 
+# Self-hosted alternatives — set either of these and the matching cloud key
+# above becomes optional. docker-compose.yml sets both.
+SEARXNG_URL=http://localhost:8081
+FIRECRAWL_API_URL=http://localhost:3002
+
 # Database
 DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/research_factory
+# Document RAG (vecs/pgvector). Leave blank to derive it from DATABASE_URL —
+# the application Postgres already has pgvector, so no second service is needed.
+VECTOR_DB_URL=
 
 # App
-BACKEND_JWT_SECRET=generate-with-openssl-rand-hex-32
-NEXTAUTH_SECRET=generate-with-openssl-rand-hex-32
+# Shared HS256 signing key: the frontend mints tokens with it, the backend
+# verifies them. It must be byte-identical on both sides or every authenticated
+# request 401s while the UI otherwise looks fine. .env.example ships a matching
+# throwaway value so a fresh clone works unedited; ENVIRONMENT=production
+# refuses to start on it.
+BACKEND_JWT_SECRET=dummy-secret
 FRONTEND_URL=http://localhost:3000
 BACKEND_URL=http://localhost:8000
 
@@ -170,8 +192,11 @@ LANGFUSE_SECRET_KEY=
 ### Frontend — `frontend/.env.local`
 ```env
 NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=generate-with-openssl-rand-hex-32
-BACKEND_JWT_SECRET=generate-with-openssl-rand-hex-32
+# NextAuth's own session key. Frontend-only — the backend never reads it, so it
+# does not belong in backend/.env.
+NEXTAUTH_SECRET=test-secret-at-least-32-chars-long-for-e2e
+# Same value as backend/.env — see the note there.
+BACKEND_JWT_SECRET=dummy-secret
 
 GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=...
@@ -1707,30 +1732,46 @@ async def upload_file(file: UploadFile = File(...)):
 
 > **Do not build these for V1.** Implement in the order listed below after V1 is shipped and a paying client confirmed.
 
-### 14.1 Persistent Vector DB (Week 3)
+> **Most of this section has since shipped.** Marked below as **Shipped** or **Not built**. The Shipped entries are kept for the reasoning, not as instructions — read the code for current behaviour, and do not follow their setup steps.
+>
+> | | | |
+> | :-- | :-- | :-- |
+> | 14.1 Persistent Vector DB | **Shipped** | differs from the plan — see below |
+> | 14.2 LangGraph Supervisor | **Shipped** | `backend/agents/crew.py` |
+> | 14.3 Lead Intelligence Agent | **Shipped** | `backend/agents/lead_intel.py` |
+> | 14.4 LLM-as-Judge Evaluation | **Shipped** | `backend/services/eval_service.py` |
+> | 14.5 Publisher Agent | **Not built** | |
+> | 14.6 React Flow Agent Graph | **Not built** | |
+> | 14.7 Multi-User Workspaces | **Shipped** | `Workspace` / `WorkspaceMember` in `backend/models.py` |
+> | 14.8 Docker Compose | **Shipped** | `docker-compose.yml` |
 
-Replace `tools/rag.py` in-memory Chroma with Supabase + pgvector:
+### 14.1 Persistent Vector DB (Week 3) — **Shipped, but not as specified**
+
+The plan was Chroma → Supabase. What shipped is `vecs` + pgvector on the **application's own PostgreSQL**, in a `vecs` schema. Supabase became one option rather than a requirement, which removed a hosted dependency from the local setup — `docker-compose.yml` already runs `pgvector/pgvector:pg16`, so there is no second service to provision.
+
+Current behaviour (`backend/tools/rag.py`, `backend/config.py`):
 
 ```python
-# Replace chromadb with:
-# pip install supabase vecs sentence-transformers
-
 import vecs
-from sentence_transformers import SentenceTransformer
-
-# Connection: vecs.create_client(settings.SUPABASE_DB_URL)
-# Collection persists across sessions per user_id
-# Hybrid search: pgvector cosine similarity + tsvector keyword match
+_vecs_client = vecs.create_client(settings.VECTOR_DB_URL)
 ```
 
-New env vars needed:
+`VECTOR_DB_URL` is optional. Left unset, `config.py` derives it from `DATABASE_URL` by dropping the async driver — SQLAlchemy needs `postgresql+asyncpg://`, `vecs` uses psycopg2 and needs a bare `postgresql://`. Set it only to put embeddings on a different database.
+
+Do **not** use the env vars originally specified here:
+
 ```env
+# ❌ Superseded. SUPABASE_URL and SUPABASE_KEY are not read by anything.
+# SUPABASE_DB_URL is still honoured, but only as a deprecated alias: config.py
+# copies it into VECTOR_DB_URL and logs a warning. Use VECTOR_DB_URL directly.
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_KEY=eyJ...
 SUPABASE_DB_URL=postgresql://postgres:password@db.xxx.supabase.co:5432/postgres
 ```
 
-### 14.2 LangGraph Supervisor (Week 3)
+Hosting the vector store on Supabase is still supported — point `VECTOR_DB_URL` at its connection string.
+
+### 14.2 LangGraph Supervisor (Week 3) — **Shipped**
 
 Replace the sequential `build_crew` in `crew.py` with a LangGraph StateGraph:
 
@@ -1750,7 +1791,7 @@ class ResearchState(TypedDict):
 # "lead_intel" → route to Lead Intelligence subgraph instead of Writer
 ```
 
-### 14.3 Lead Intelligence Agent (Week 4)
+### 14.3 Lead Intelligence Agent (Week 4) — **Shipped**
 
 New agent and task. Input: company URL. Output: prospect dossier.
 
@@ -1766,7 +1807,7 @@ New agent and task. Input: company URL. Output: prospect dossier.
 #   - Fit Score (1–10) with reasoning
 ```
 
-### 14.4 LLM-as-Judge Evaluation (Week 3)
+### 14.4 LLM-as-Judge Evaluation (Week 3) — **Shipped**
 
 After the Editor task completes, run a separate evaluation call:
 
@@ -1811,7 +1852,7 @@ Respond ONLY with valid JSON:
     return json.loads(response.choices[0].message.content)
 ```
 
-### 14.5 Publisher Agent (Week 4)
+### 14.5 Publisher Agent (Week 4) — **Not built**
 
 ```python
 # agents/publisher.py
@@ -1823,7 +1864,7 @@ Respond ONLY with valid JSON:
 #   BUFFER_ACCESS_TOKEN=
 ```
 
-### 14.6 React Flow Agent Graph (Week 4)
+### 14.6 React Flow Agent Graph (Week 4) — **Not built**
 
 Add to `frontend/components/AgentGraph.tsx`:
 
@@ -1838,7 +1879,7 @@ import { ReactFlow, Node, Edge } from "@xyflow/react";
 // Click any completed node to view its output in a side panel
 ```
 
-### 14.7 Multi-User Workspaces (Week 5)
+### 14.7 Multi-User Workspaces (Week 5) — **Shipped**
 
 New DB tables:
 ```sql
@@ -1859,7 +1900,7 @@ CREATE TABLE workspace_members (
 ALTER TABLE runs ADD COLUMN workspace_id UUID REFERENCES workspaces(id);
 ```
 
-### 14.8 Docker Compose (Week 6)
+### 14.8 Docker Compose (Week 6) — **Shipped**
 
 ```yaml
 # docker-compose.yml
