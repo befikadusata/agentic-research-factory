@@ -31,6 +31,12 @@ dependencies = [
   "httpx==0.27.0",
   "vecs==0.4.3",
   "sentence-transformers==3.0.1",
+  # Declared directly ONLY so the CPU-index pin below applies — uv resolves
+  # [tool.uv.sources] against direct dependencies, not transitive ones, and both
+  # of these arrive via docling and sentence-transformers. Versions match what
+  # those packages already resolved to, so the rest of the graph is unchanged.
+  "torch==2.12.0",
+  "torchvision==0.27.0",
   "langgraph>=0.2.35",
   "pytest==8.3.3",
   "pytest-asyncio==0.24.0",
@@ -45,6 +51,26 @@ dependencies = [
   "langfuse>=4.12.0",
   "nest-asyncio>=1.6.0",
 ]
+
+# torch arrives transitively via docling -> accelerate (and sentence-transformers),
+# and the default PyPI wheel bundles the full CUDA runtime: ~2.2 GB of nvidia-*
+# and triton wheels. Nothing here ever runs on a GPU — Docling's layout models
+# and the MiniLM embedder/cross-encoder in tools/rag.py are all CPU inference —
+# so that payload is pure image weight. Pin torch to PyTorch's CPU-only index.
+# `explicit = true` keeps every other package resolving from PyPI.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+# Both, not just torch: torchvision ships a compiled extension linked against
+# libtorch, and PyPI's wheel is built for the default (CUDA) torch. Pairing it
+# with the +cpu build fails at import with
+# "operator torchvision::nms does not exist", which breaks Docling's layout
+# models. The two must come from the same index.
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
