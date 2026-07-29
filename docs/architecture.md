@@ -52,7 +52,7 @@ graph TD
     %% Database
     subgraph Storage [Persistent Storage]
         PG[(PostgreSQL)]:::db
-        VectorDB[(Supabase Postgres + pgvector)]:::db
+        VectorDB[(PostgreSQL + pgvector<br/>vecs schema)]:::db
         Redis[(Redis Pub/Sub & HITL)]:::db
     end
 
@@ -104,10 +104,10 @@ Documents uploaded via the UI `/upload` route are processed through a high-preci
 1. **Document Ingestion**:
    - PDFs are converted to Markdown with Docling. LlamaParse is an optional fallback when Docling fails and `LLAMA_CLOUD_API_KEY` is configured.
    - Text chunks are parsed with a `RecursiveCharacterTextSplitter` (size = 1000, overlap = 200) to preserve paragraph flow.
-   - Embeddings use the configured Gemini embedding model when a Gemini key is present; otherwise they use the local `all-MiniLM-L6-v2` model. Vectors are stored in workspace-scoped Supabase `vecs` collections.
+   - Embeddings use the configured Gemini embedding model when a Gemini key is present; otherwise they use the local `all-MiniLM-L6-v2` model. Vectors are stored in workspace-scoped `vecs` collections — tables in the `vecs` schema of the PostgreSQL instance named by `VECTOR_DB_URL`, which defaults to the application database.
 2. **Hybrid Search**:
    - Queries are rewritten/expanded via a dedicated LLM rewriter ([`query_rewriter.py`](../backend/services/query_rewriter.py)).
-   - Dual-index search query is dispatched using dense `HNSW` vectors alongside sparse `BM25` keyword indexes.
+   - Each sub-query is dispatched twice: against the dense `HNSW` vector index, and against a GIN full-text index (`ts_rank_cd`) for exact-term recall. Results merge into one deduplicated pool.
 3. **Cross-Encoder Re-ranking**:
    - 20 candidate document chunks are retrieved from PostgreSQL.
    - Candidate chunks are re-scored using `cross-encoder/ms-marco-MiniLM-L-6-v2` to determine exact contextual relevance.

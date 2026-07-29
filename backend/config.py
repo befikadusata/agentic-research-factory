@@ -128,9 +128,16 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "no-reply@research-factory.local"
     SMTP_STARTTLS: bool = True
 
-    # V2 — 14.1 Persistent Vector DB
-    SUPABASE_URL: str | None = None
-    SUPABASE_KEY: str | None = None
+    # Persistent vector store for uploaded-document RAG. `vecs` is a thin
+    # pgvector client (pgvector + psycopg2 + SQLAlchemy — no Supabase SDK), so
+    # this is any Postgres with the vector extension, including the pgvector
+    # image Compose already runs. Left unset it is derived from DATABASE_URL
+    # below, which is why it has no separate entry in .env.example.
+    #
+    # It cannot simply reuse DATABASE_URL: that carries the +asyncpg driver for
+    # SQLAlchemy's async engine, and vecs drives psycopg2 synchronously.
+    VECTOR_DB_URL: str | None = None
+    # Deprecated former name, still read so an existing .env keeps working.
     SUPABASE_DB_URL: str | None = None
 
     # Langfuse for observability
@@ -161,6 +168,29 @@ if os.environ.get("TESTING") == "1":
     if _target == settings.DATABASE_URL:
         raise RuntimeError("TEST_DATABASE_URL must differ from DATABASE_URL")
     settings.DATABASE_URL = _target
+
+# Older configs named this SUPABASE_DB_URL. Without this the value would be
+# ignored and the derivation below would silently repoint the vector store at
+# the local database — moving someone's embeddings out from under them.
+if settings.SUPABASE_DB_URL and not settings.VECTOR_DB_URL:
+    settings.VECTOR_DB_URL = settings.SUPABASE_DB_URL
+    logger.warning("SUPABASE_DB_URL is deprecated — rename it to VECTOR_DB_URL")
+
+# Derive the vecs DSN from the application database unless one is set
+# explicitly. Runs AFTER the TESTING redirect above so the suite's vector
+# collections land in the `_test` database alongside its tables, never in the
+# real one. The only transform is dropping the async driver: DATABASE_URL is
+# `postgresql+asyncpg://` for SQLAlchemy's async engine, while vecs uses
+# psycopg2 and needs the bare `postgresql://` scheme.
+if not settings.VECTOR_DB_URL:
+    from sqlalchemy.engine import make_url
+
+    # render_as_string(hide_password=False) — str(url) would mask the password.
+    settings.VECTOR_DB_URL = (
+        make_url(settings.DATABASE_URL)
+        .set(drivername="postgresql")
+        .render_as_string(hide_password=False)
+    )
 
 _PROD_REQUIRED = ["TAVILY_API_KEY", "FIRECRAWL_API_KEY", "LLAMA_CLOUD_API_KEY"]
 

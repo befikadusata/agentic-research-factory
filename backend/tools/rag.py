@@ -8,11 +8,29 @@ from config import settings
 from logger import logger
 from services.query_rewriter import generate_sub_queries
 import vecs
+from vecs import IndexMeasure, IndexMethod
+from sqlalchemy import text as sql_text
 
 # ---------------------------------------------------------------------------
-# Supabase + vecs persistent vector store
-# One collection per user_id so documents persist across sessions.
+# pgvector persistent vector store, via `vecs` (pgvector + psycopg2, no
+# Supabase SDK — any Postgres with the vector extension works, including the
+# one Compose runs). One collection per workspace so documents persist across
+# sessions. Hybrid retrieval = HNSW vector search UNION Postgres full-text
+# search, merged and re-ranked by a cross-encoder.
 # ---------------------------------------------------------------------------
+
+# Collection names are interpolated into DDL/SQL below (identifiers cannot be
+# bound as parameters). They are built internally as f"workspace_{uuid}", but
+# validate anyway so that stays true if a caller ever passes something else.
+# Hyphens are allowed because UUIDs contain them, and they are safe inside the
+# double-quoted identifiers used below; quotes and semicolons are not.
+_COLLECTION_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _safe_collection(name: str) -> str:
+    if not _COLLECTION_NAME_RE.match(name):
+        raise ValueError(f"Unsafe collection name: {name!r}")
+    return name
 
 _vecs_client = None
 _sentence_model = None
@@ -21,7 +39,7 @@ _reranker_model = None
 def _get_client():
     global _vecs_client
     if _vecs_client is None:
-        _vecs_client = vecs.create_client(settings.SUPABASE_DB_URL)
+        _vecs_client = vecs.create_client(settings.VECTOR_DB_URL)
     return _vecs_client
 
 def _embedder():
@@ -80,6 +98,56 @@ def _embed(texts: list[str]) -> list[list[float]]:
     return model.encode(texts).tolist()
 
 
+def _ensure_fts_index(vx, name: str) -> None:
+    """GIN index backing the keyword half of hybrid retrieval.
+
+    `vecs` only ever exposed vector indexes (IndexMethod.hnsw / .ivfflat), so
+    the lexical side is plain Postgres full-text search over the chunk text in
+    the metadata JSONB. The expression here must match `_keyword_search`
+    exactly or the planner falls back to a sequential scan.
+    """
+    with vx.Session() as sess, sess.begin():
+        sess.execute(
+            sql_text(
+                f'CREATE INDEX IF NOT EXISTS "{name}_fts_idx" ON vecs."{name}" '
+                "USING GIN (to_tsvector('english', metadata->>'text'))"
+            )
+        )
+
+
+def _keyword_search(vx, name: str, query: str, limit: int, vertical: Optional[str]):
+    """Lexical half of the hybrid: ts_rank_cd over the same chunks.
+
+    Catches exact identifiers — product names, tickers, error codes — that
+    embeddings routinely miss. Returns (id, metadata) to match the shape
+    `Collection.query` yields with include_value=False.
+    """
+    where_vertical = "AND metadata->>'vertical' = :vertical" if vertical else ""
+    params = {"q": query, "limit": limit}
+    if vertical:
+        params["vertical"] = vertical
+
+    with vx.Session() as sess:
+        rows = sess.execute(
+            sql_text(
+                f"""
+                SELECT id, metadata
+                FROM vecs."{name}"
+                WHERE to_tsvector('english', metadata->>'text')
+                      @@ plainto_tsquery('english', :q)
+                  {where_vertical}
+                ORDER BY ts_rank_cd(
+                    to_tsvector('english', metadata->>'text'),
+                    plainto_tsquery('english', :q)
+                ) DESC
+                LIMIT :limit
+                """
+            ),
+            params,
+        ).fetchall()
+    return [(row[0], row[1]) for row in rows]
+
+
 class RAGTool(BaseTool):
     name: str = "search_documents"
     description: str = (
@@ -95,9 +163,10 @@ class RAGTool(BaseTool):
             sub_queries = generate_sub_queries(query)
             logger.info("rag_sub_queries", count=len(sub_queries), queries=sub_queries)
 
+            name = _safe_collection(self.collection_name)
             vx = _get_client()
             collection = vx.get_or_create_collection(
-                name=self.collection_name,
+                name=name,
                 dimension=settings.EMBEDDING_DIMENSION,
             )
 
@@ -105,40 +174,49 @@ class RAGTool(BaseTool):
 
             q_filter = {"vertical": {"$eq": self.vertical}} if self.vertical else None
 
-            # Fan-out: one vecs query per sub-query, dedup by chunk ID
+            # Fan-out: one vector query per sub-query plus one keyword query,
+            # deduped by chunk ID. Recall is what matters here — precision is
+            # the cross-encoder's job below, so the two halves are merged
+            # unweighted rather than score-fused.
             seen_ids: set = set()
             merged: list = []
-            for sq, vec in zip(sub_queries, query_vecs):
-                candidates = collection.query(
-                    data=vec,
-                    limit=10,
-                    include_metadata=True,
-                    include_value=False,
-                    query_filter=q_filter,
-                    search_params={"bm25_query": sq},
-                )
-                for res in candidates:
-                    chunk_id = res[0]
+
+            def _collect(records):
+                for chunk_id, metadata in records:
                     if chunk_id not in seen_ids:
                         seen_ids.add(chunk_id)
-                        merged.append(res)
+                        merged.append((chunk_id, metadata))
+
+            for vec in query_vecs:
+                # Records are (id, metadata) when include_value=False.
+                _collect(
+                    collection.query(
+                        data=vec,
+                        limit=10,
+                        include_metadata=True,
+                        include_value=False,
+                        filters=q_filter,
+                    )
+                )
+
+            for sq in sub_queries:
+                _collect(_keyword_search(vx, name, sq, 10, self.vertical))
 
             if not merged:
                 return "No relevant documents found."
 
             # Re-rank merged deduplicated pool against original query
             reranker = _reranker()
-            pairs = [(query, res[2].get("text", "")) for res in merged]
+            pairs = [(query, metadata.get("text", "")) for _, metadata in merged]
             scores = reranker.predict(pairs)
 
             scored_results = sorted(
                 zip(merged, scores), key=lambda x: x[1], reverse=True
             )
-            top_results = [res for res, _ in scored_results[:5]]
+            top_results = [rec for rec, _ in scored_results[:5]]
 
             output = []
-            for res in top_results:
-                metadata = res[2] if len(res) > 2 else {}
+            for _, metadata in top_results:
                 text = metadata.get("text", "No text content found.")
                 source = metadata.get("source", "Unknown Source")
                 page = metadata.get("page", "N/A")
@@ -151,21 +229,15 @@ class RAGTool(BaseTool):
 
 
 def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", vertical: str = None):
-    """Upsert text chunks into the Supabase vecs collection with metadata."""
+    """Upsert text chunks into the pgvector collection with metadata."""
     logger.info("rag_ingest_start", collection=collection_name, chunks=len(chunks), vertical=vertical)
+    name = _safe_collection(collection_name)
     vx = _get_client()
-    # Create collection and explicitly enable BM25
     collection = vx.get_or_create_collection(
-        name=collection_name, 
+        name=name,
         dimension=settings.EMBEDDING_DIMENSION,
     )
-    # Enable BM25 index
-    try:
-        collection.create_index(index_type=vecs.IndexType.bm25)
-    except Exception:
-        # Index might already exist, log and continue
-        logger.info("rag_bm25_index_already_exists", collection=collection_name)
-    
+
     texts = [c["text"] for c in chunks]
     embeddings = _embed(texts)
     
@@ -179,8 +251,14 @@ def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", 
         records.append((record_id, emb, metadata))
     
     collection.upsert(records=records)
-    # Create HNSW index for embeddings
-    collection.create_index(index_type=vecs.IndexType.hnsw)
+
+    # Index both retrieval paths. create_index(replace=True) is the vecs
+    # default and rebuilds in place, so re-ingesting into an existing
+    # collection stays correct rather than accumulating stale indexes.
+    collection.create_index(
+        method=IndexMethod.hnsw, measure=IndexMeasure.cosine_distance
+    )
+    _ensure_fts_index(vx, name)
     logger.info("rag_ingest_complete", collection=collection_name)
 
 

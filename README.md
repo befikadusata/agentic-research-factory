@@ -34,7 +34,7 @@ The workflow pauses after research so an operator can inspect the evidence, redi
 ## Engineering Highlights
 
 - **Resumable agent orchestration:** A LangGraph supervisor routes task-specific CrewAI agents. Each human approval boundary ends the current Celery segment, persists state, and resumes in a new task so an idle reviewer does not occupy a worker.
-- **High-precision document retrieval:** Uploaded PDFs are parsed with Docling, with LlamaParse as an optional fallback. Queries fan out through multi-query retrieval, combine HNSW vector search with BM25 keyword search, and pass the merged candidates through an MS MARCO cross-encoder.
+- **High-precision document retrieval:** Uploaded PDFs are parsed with Docling, with LlamaParse as an optional fallback. Queries fan out through multi-query retrieval, combine HNSW vector search with PostgreSQL full-text keyword search, and pass the merged candidates through an MS MARCO cross-encoder.
 - **Real-time, failure-aware execution:** Redis Pub/Sub feeds SSE status and log events to the Next.js client. Provider routing, bounded retries, stuck-run recovery, and a configurable per-run cost ceiling keep failures and spend visible.
 - **Tenant-aware authorization:** Workspaces isolate runs and uploaded documents. API routes enforce `viewer`, `operator`, and `admin` membership rules, including cross-user and cross-workspace denial paths.
 - **Reviewable outputs:** Completed runs retain intermediate research and analysis, extracted citations, model-cost records, quality scores, and Markdown/PDF exports instead of exposing only the final model response.
@@ -67,7 +67,7 @@ flowchart LR
     Graph --> VectorDB
 ```
 
-The application database uses SQLAlchemy and Alembic. The current document-RAG path uses `vecs` and connects through `SUPABASE_DB_URL`; see the [architecture specification](docs/architecture.md) and [RAG notes](docs/optimizations.md) for implementation details.
+The application database uses SQLAlchemy and Alembic. Document RAG stores its embeddings through `vecs` (a pgvector client) in a `vecs` schema on the same PostgreSQL instance, so no extra service is required; `VECTOR_DB_URL` can point it at a different database. See the [architecture specification](docs/architecture.md) and [RAG notes](docs/optimizations.md) for implementation details.
 
 ## Core Capabilities
 
@@ -88,7 +88,7 @@ The application database uses SQLAlchemy and Alembic. The current document-RAG p
 | API | FastAPI, Python 3.11+, Pydantic, SQLAlchemy, Alembic |
 | Orchestration | LangGraph, CrewAI, Celery |
 | Data | PostgreSQL, pgvector/vecs, Redis |
-| Retrieval | Docling, optional LlamaParse fallback, SentenceTransformers, BM25 + HNSW |
+| Retrieval | Docling, optional LlamaParse fallback, SentenceTransformers, HNSW + Postgres full-text |
 | Operations | Docker Compose, structured logging, Prometheus metrics, optional Langfuse tracing |
 
 ## Quick Start
@@ -142,7 +142,7 @@ Add only the providers required for the features you want:
 | :-- | :-- |
 | Cross-provider model fallback | `OPENROUTER_API_KEY` |
 | Gemini document embeddings | `GEMINI_API_KEY` |
-| Uploaded-document RAG | `SUPABASE_DB_URL` pointing to a PostgreSQL/pgvector database usable by `vecs` |
+| Uploaded-document RAG on a separate database | `VECTOR_DB_URL`; defaults to the application PostgreSQL, which already has pgvector |
 | Cloud search instead of SearXNG | `TAVILY_API_KEY` |
 | Cloud scraping | `FIRECRAWL_API_KEY`; when using Compose, remove or override its self-hosted `FIRECRAWL_API_URL` value |
 | LlamaParse PDF fallback | `LLAMA_CLOUD_API_KEY` |
@@ -191,7 +191,7 @@ The Playwright suite is deterministic and does not call the live backend or exte
 
 - Model and search output varies by provider, model version, and source availability.
 - The displayed quality score is an LLM-as-judge assessment, not a guarantee of factual correctness; the human checkpoint and citations remain the primary review controls.
-- Uploaded-document RAG currently uses a separate `vecs` connection configured by `SUPABASE_DB_URL`.
+- Uploaded-document RAG uses a separate synchronous `vecs` connection, derived from `DATABASE_URL` unless `VECTOR_DB_URL` overrides it.
 - Firecrawl is resource-intensive and therefore excluded from the default Compose profile.
 - Search, scraping, parsing, and evaluation degrade independently where possible; model exhaustion and core database failure terminate a run.
 
