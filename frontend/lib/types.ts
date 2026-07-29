@@ -140,6 +140,8 @@ export interface Run {
   vertical_inputs?: Record<string, string>;
   created_at: string;
   monitor_id?: string | null;
+  /** Null for a personal run. The list endpoint filters on it server-side. */
+  workspace_id?: string | null;
 }
 
 /** LLM-judge quality scores (0–100 per dimension) computed once a run completes. */

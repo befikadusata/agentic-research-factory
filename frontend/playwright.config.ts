@@ -2,7 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: ["**/debug*.spec.ts", "**/docker-auth.spec.ts"],
+  // demo.spec.ts needs NEXT_PUBLIC_DEMO=1 — it runs from playwright.demo.config.ts.
+  testIgnore: ["**/debug*.spec.ts", "**/docker-auth.spec.ts", "**/demo.spec.ts"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

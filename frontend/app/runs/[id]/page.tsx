@@ -6,6 +6,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowLeft, LoaderCircle, Radar, RefreshCw } from "lucide-react";
 import { createParser } from "eventsource-parser";
 import { getRun, authHeaders } from "@/lib/api";
+import { IS_DEMO, subscribeToDemoRun } from "@/lib/demo";
 import { AgentLog } from "@/components/AgentLog";
 import { AgentGraph } from "@/components/AgentGraph";
 import { HitlModal } from "@/components/HitlModal";
@@ -108,6 +109,17 @@ export default function RunPage() {
           getRun(id).then(setRun);
       }
     };
+
+    // Demo mode has no server to stream from: the scripted run pushes the same
+    // event shapes straight into `handleEvent`, so everything below this line
+    // stays untouched by the demo.
+    if (IS_DEMO) {
+      const unsubscribe = subscribeToDemoRun(id, (event) => handleEvent(JSON.stringify(event)));
+      return () => {
+        controller.abort();
+        unsubscribe();
+      };
+    }
 
     (async () => {
       // Native EventSource can't send an Authorization header, so the stream

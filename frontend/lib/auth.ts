@@ -1,12 +1,33 @@
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
+import { IS_DEMO, DEMO_EMAIL, DEMO_NAME } from "./demo";
+
+/**
+ * One-click sign-in for demo mode, registered only when NEXT_PUBLIC_DEMO=1.
+ *
+ * It authorizes unconditionally, which is safe here for a structural reason
+ * rather than a policy one: in demo mode `lib/api.ts` never calls the backend at
+ * all, so the session this mints can only ever reach the seed data in
+ * `lib/demo.ts`. There is no real account, no real database, and no credential
+ * to guess. Outside demo mode this provider does not exist, so it cannot be
+ * reached by posting to /api/auth/callback/demo either.
+ */
+const demoProvider = CredentialsProvider({
+  id: "demo",
+  name: "Demo",
+  credentials: {},
+  async authorize() {
+    return { id: DEMO_EMAIL, email: DEMO_EMAIL, name: DEMO_NAME };
+  },
+});
 
 export const authOptions: NextAuthOptions = {
   // CredentialsProvider requires the JWT session strategy (no DB adapter is
   // configured, so this is already the default — set explicitly for clarity).
   session: { strategy: "jwt" },
   providers: [
+    ...(IS_DEMO ? [demoProvider] : []),
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
@@ -58,5 +79,10 @@ export const authOptions: NextAuthOptions = {
       return session;
     },
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  // Demo mode falls back to a fixed throwaway key so `npm run demo` needs no
+  // .env.local at all. It only ever signs sessions for the demo user, and those
+  // sessions can only reach the in-memory seed data — there is nothing behind
+  // them to protect. Any real deployment sets NEXTAUTH_SECRET and this fallback
+  // is never reached, because IS_DEMO is false.
+  secret: process.env.NEXTAUTH_SECRET ?? (IS_DEMO ? "demo-mode-session-key-not-a-secret" : undefined),
 };

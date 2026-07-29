@@ -2,11 +2,16 @@
 
 import { useState, useEffect } from "react";
 import { VERTICALS, type VerticalDefinition, type OutputFormat, type Vertical } from "./types";
+import { IS_DEMO } from "./demo";
 
 export function useVerticals(): VerticalDefinition[] {
   const [verticals, setVerticals] = useState<VerticalDefinition[]>(VERTICALS);
 
   useEffect(() => {
+    // The static VERTICALS are already the fallback for a failed fetch, so demo
+    // mode just skips the request rather than logging a connection error for a
+    // backend it knows isn't there.
+    if (IS_DEMO) return;
     fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/verticals`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: unknown) => {

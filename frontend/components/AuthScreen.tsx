@@ -1,8 +1,9 @@
 "use client";
 
 import { signIn } from "next-auth/react";
-import { LayoutGrid } from "lucide-react";
+import { LayoutGrid, Play } from "lucide-react";
 import { CredentialsForm } from "@/components/CredentialsForm";
+import { IS_DEMO } from "@/lib/demo";
 
 export function AuthScreen() {
   return (
@@ -42,23 +43,52 @@ export function AuthScreen() {
             Research Factory
           </div>
 
-          <h2 className="text-2xl font-bold text-content mb-1">Welcome back</h2>
-          <p className="text-content-secondary text-sm mb-6">Sign in to continue.</p>
+          {IS_DEMO ? (
+            // The email and Google paths both need infrastructure demo mode
+            // exists to avoid — a backend to check the password against, an
+            // OAuth client to redirect to. Showing buttons that can only fail
+            // would be worse than showing the one that works.
+            <>
+              <h2 className="text-2xl font-bold text-content mb-1">Take a look around</h2>
+              <p className="text-content-secondary text-sm mb-6">
+                This build runs on sample data with no backend, no database, and no API
+                keys. Nothing you do here is saved.
+              </p>
 
-          <CredentialsForm />
+              <button
+                onClick={() => signIn("demo", { callbackUrl: "/" })}
+                className="flex w-full min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-8 py-3 font-semibold text-primary-on transition-colors duration-base hover:bg-primary-hover"
+              >
+                <Play size={17} aria-hidden />
+                Enter the demo
+              </button>
 
-          <div className="flex items-center gap-3 my-6">
-            <span className="h-px flex-1 bg-border-subtle" />
-            <span className="text-xs text-content-muted uppercase tracking-wider">or</span>
-            <span className="h-px flex-1 bg-border-subtle" />
-          </div>
+              <p className="mt-6 text-xs text-content-muted">
+                Sign-in with email or Google is available in a full deployment — see the
+                README for the five-minute setup.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-2xl font-bold text-content mb-1">Welcome back</h2>
+              <p className="text-content-secondary text-sm mb-6">Sign in to continue.</p>
 
-          <button
-            onClick={() => signIn("google")}
-            className="w-full bg-surface-2 hover:bg-surface-3 border border-border-subtle text-content font-medium px-8 py-3 rounded-md transition-colors duration-base"
-          >
-            Sign in with Google
-          </button>
+              <CredentialsForm />
+
+              <div className="flex items-center gap-3 my-6">
+                <span className="h-px flex-1 bg-border-subtle" />
+                <span className="text-xs text-content-muted uppercase tracking-wider">or</span>
+                <span className="h-px flex-1 bg-border-subtle" />
+              </div>
+
+              <button
+                onClick={() => signIn("google")}
+                className="w-full bg-surface-2 hover:bg-surface-3 border border-border-subtle text-content font-medium px-8 py-3 rounded-md transition-colors duration-base"
+              >
+                Sign in with Google
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

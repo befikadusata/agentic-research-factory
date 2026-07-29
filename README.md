@@ -93,6 +93,29 @@ The application database uses SQLAlchemy and Alembic. Document RAG stores its em
 
 ## Quick Start
 
+### Demo mode — no keys, no backend
+
+The fastest way to see the product. The frontend runs on seed data with the
+backend calls replaced by fixtures, so there is nothing to configure: no
+PostgreSQL, no Redis, no LLM provider key, no OAuth client.
+
+```bash
+cd frontend
+npm install --legacy-peer-deps
+npm run demo          # http://localhost:3000
+```
+
+Click **Enter the demo**. You get seeded runs in two workspaces, a completed
+report with quality scores and markdown export, a failed run, a monitor with a
+change diff — and starting a new run plays a scripted pipeline that streams
+agent logs and stops at the human-in-the-loop gate for you to approve.
+
+A persistent banner marks every page, and nothing is saved. Demo mode is set by
+`NEXT_PUBLIC_DEMO=1`; never set it on a deployment with real data, since it
+replaces the entire backend surface and admits anyone with one click.
+
+For the real thing, keep reading.
+
 ### Core live research
 
 This path starts the web application, API, PostgreSQL, Redis, Celery workers, and self-hosted SearXNG. It does not start the heavier self-hosted Firecrawl stack or configure uploaded-document RAG.
@@ -179,6 +202,13 @@ npx playwright test
 ```
 
 The Playwright suite is deterministic and does not call the live backend or external model providers. Docker authentication end-to-end tests use `playwright.docker.config.ts` and require the Compose stack.
+
+Demo mode has its own suite, which registers **no route mocks at all** and points the app at a dead backend port — so a demo build that quietly regressed into making a real request would fail rather than pass:
+
+```bash
+cd frontend
+npm run test:e2e:demo
+```
 
 ## Reliability and Known Boundaries
 

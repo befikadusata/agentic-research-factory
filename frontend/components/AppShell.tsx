@@ -11,6 +11,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import { AuthScreen } from "@/components/AuthScreen";
 import { AuthLoadingState } from "@/components/AuthLoadingState";
+import { DemoBanner } from "@/components/DemoBanner";
 
 // Routes that render for signed-out users without the app chrome (e.g. the
 // email verification link lands here before the user has a session).
@@ -100,11 +101,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (isPublic) {
       return <main className="min-h-screen">{children}</main>;
     }
-    return <AuthScreen />;
+    return (
+      <>
+        <DemoBanner />
+        <AuthScreen />
+      </>
+    );
   }
 
-  // Authenticated → full application shell.
+  // Authenticated → full application shell. The banner sits outside the flex
+  // row so it spans the sidebar too; it renders nothing unless demo mode is on.
   return (
+    <>
+    <DemoBanner />
     <div className="min-h-screen lg:flex">
       <a
         href="#main-content"
@@ -159,5 +168,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {children}
       </main>
     </div>
+    </>
   );
 }
