@@ -50,6 +50,7 @@ from contextlib import nullcontext
 from crewai import Crew, Process
 from config import settings
 from services.llm_router import resolve_actual_model, reset_actual_model
+from utils.agent_output import strip_agent_scaffolding
 from utils.context import compact_text
 from utils.cost_tracker import reset_side_costs, take_side_costs
 from utils.langfuse_utils import get_langfuse
@@ -142,7 +143,13 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
         "prompt_tokens":     prompt_tokens,
         "completion_tokens": completion_tokens,
     }
-    return {"token_usages": [node_usage, *take_side_costs()], result_key: str(result)}
+    # Strip here rather than at persistence: this is the one place every node's
+    # output becomes state, so the cleaned text is what the reviewer, evaluator
+    # and citation extractor see downstream — not just what the DB stores.
+    return {
+        "token_usages": [node_usage, *take_side_costs()],
+        result_key: strip_agent_scaffolding(str(result)),
+    }
 
 
 # ── nodes ────────────────────────────────────────────────────────────────────
