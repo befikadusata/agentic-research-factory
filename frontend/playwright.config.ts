@@ -1,10 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // Its own port rather than Next's default 3000, for the same reason
-// playwright.demo.config.ts claims 3100: `reuseExistingServer` cannot tell our
-// dev server from anything else already listening, so on a machine where some
-// unrelated project owns 3000 the entire suite silently runs against that
-// server and every test fails for reasons found nowhere in this repo.
+// playwright.demo.config.ts claims 3100: an unrelated project owning 3000 is
+// entirely normal, and Playwright cannot tell that server from ours.
 const PORT = 3200;
 const APP_URL = `http://localhost:${PORT}`;
 
@@ -30,8 +28,14 @@ export default defineConfig({
   webServer: {
     command: `npm run dev -- -p ${PORT}`,
     url: APP_URL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 30000,
+    // Never reuse, matching playwright.demo.config.ts. `reuseExistingServer`
+    // decides by asking whether *something* answers on the port, which is not
+    // the same question as whether it is this app — when it guesses wrong the
+    // whole suite runs against a stranger and fails with symptoms that appear
+    // nowhere in this repo. Booting our own server costs a few seconds and
+    // makes that failure impossible rather than merely rarer.
+    reuseExistingServer: false,
+    timeout: 60_000,
     env: {
       // A developer's .env.local pins NEXTAUTH_URL to :3000; without this
       // override NextAuth's post-sign-in redirect leaves the server under test.
