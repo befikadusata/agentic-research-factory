@@ -20,7 +20,8 @@ import { SourcesPanel } from "@/components/SourcesPanel";
 import { PlaybookIcon } from "@/components/PlaybookIcon";
 import type { RunDetail, LogEntry, RunStatus } from "@/lib/types";
 import { normalizeLogEntry } from "@/lib/logs";
-import { VERTICALS, AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, statusBadgeClass, canApproveRun } from "@/lib/types";
+import { AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, statusBadgeClass, canApproveRun } from "@/lib/types";
+import { useVertical } from "@/lib/useVerticals";
 
 const STATUS_LABEL: Record<string, string> = {
   pending:                    "Pending",
@@ -58,6 +59,8 @@ export default function RunPage() {
   const [reconnectKey, setReconnectKey] = useState(0);
   const [reconnecting, setReconnecting] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Above the loading early-returns because it's a hook, not a derived value.
+  const verticalDef = useVertical(run?.vertical);
 
   const loadRun = useCallback(async () => {
     setLoading(true);
@@ -188,7 +191,6 @@ export default function RunPage() {
     </div>
   );
 
-  const verticalDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) ?? null : null;
   const statusGlyph = status ? AGENT_STATE_GLYPH[STATUS_TO_AGENT_STATE[status]] : "";
 
   // Approving resumes the pipeline, which the backend restricts to operators

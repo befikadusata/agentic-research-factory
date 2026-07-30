@@ -1,11 +1,14 @@
-import { AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, VERTICALS, statusBadgeClass } from "@/lib/types";
+"use client";
+
+import { AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, statusBadgeClass } from "@/lib/types";
 import type { Run } from "@/lib/types";
 import Link from "next/link";
 import { PipelineProgress } from "@/components/PipelineProgress";
 import { PlaybookIcon } from "@/components/PlaybookIcon";
+import { useVertical } from "@/lib/useVerticals";
 
 export function RunCard({ run }: { run: Run }) {
-  const vDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) : null;
+  const vDef = useVertical(run.vertical);
   const glyph = AGENT_STATE_GLYPH[STATUS_TO_AGENT_STATE[run.status]];
 
   return (

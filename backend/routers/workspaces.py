@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from database import get_db
 from models import Workspace, WorkspaceMember
-from auth import get_current_user
+from auth import get_current_user, role_meets
 
 router = APIRouter()
 
@@ -27,6 +27,29 @@ def _ws_dict(ws: Workspace, role: str) -> dict:
     showing the control to a viewer and surfacing the 403 as a failure.
     """
     return {"id": str(ws.id), "name": ws.name, "owner_id": ws.owner_id, "role": role}
+
+
+async def _assert_may_manage_members(db: AsyncSession, workspace_id: UUID, user_id: str) -> Workspace:
+    """Return the workspace if `user_id` may change its roster, else raise 403.
+
+    Two ways in. The `admin` role is the intended one — it is the top rung of
+    `_ROLE_RANK`, and gating this on ownership alone was what left that rung
+    with nothing to do. Ownership is kept as a second, independent grant: it is
+    the one claim that cannot be revoked, so a workspace whose admin rows were
+    all deleted can still be repaired by the person who created it.
+
+    A missing workspace raises the same 403 as an unauthorized one — a caller
+    who may not manage this roster learns nothing about whether it exists.
+    """
+    denied = HTTPException(403, "Requires 'admin' role in this workspace")
+    ws = await db.get(Workspace, workspace_id)
+    if not ws:
+        raise denied
+    if ws.owner_id != user_id:
+        member = await db.get(WorkspaceMember, (workspace_id, user_id))
+        if not member or not role_meets(member.role, "admin"):
+            raise denied
+    return ws
 
 
 async def _create_workspace(db: AsyncSession, name: str, owner_id: str) -> Workspace:
@@ -90,9 +113,7 @@ async def add_member(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    ws = await db.get(Workspace, workspace_id)
-    if not ws or ws.owner_id != user_id:
-        raise HTTPException(403, "Only the workspace owner can add members")
+    await _assert_may_manage_members(db, workspace_id, user_id)
     # Idempotent: re-adding an existing member updates their role instead of
     # crashing on the (workspace_id, user_id) primary key.
     member = await db.get(WorkspaceMember, (workspace_id, body.user_id))
@@ -112,9 +133,9 @@ async def remove_member(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    ws = await db.get(Workspace, workspace_id)
-    if not ws or ws.owner_id != user_id:
-        raise HTTPException(403, "Only the workspace owner can remove members")
+    ws = await _assert_may_manage_members(db, workspace_id, user_id)
+    # Ownership outranks the admin role here: an admin must not be able to evict
+    # the owner and leave the workspace with no unrevokable claim on it.
     if member_user_id == ws.owner_id:
         raise HTTPException(400, "The workspace owner cannot be removed")
     member = await db.get(WorkspaceMember, (workspace_id, member_user_id))

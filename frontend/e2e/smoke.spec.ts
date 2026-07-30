@@ -480,6 +480,84 @@ test.describe("Core Flow Smoke Tests", () => {
     await expect(page.getByText("Collected current evidence")).toBeVisible();
   });
 
+  test("labels runs with a playbook only the backend knows about", async ({ page }) => {
+    // The bundled VERTICALS list is a fallback, not the authority. /new always
+    // asked the backend, but the run list and run detail read the bundle — so a
+    // playbook added server-side produced runs you could start and then never
+    // see identified anywhere afterwards.
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+    await page.route("**/verticals", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          key: "regulatory_watch",
+          display_name: "Regulatory Watch",
+          description: "Defined on the server only",
+          default_format: "report",
+          input_schema: {},
+        }]),
+      });
+    });
+    await page.route("**/workspaces", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "test-user-id", role: "admin" }]),
+      });
+    });
+    await page.route("**/runs?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          id: "novel-playbook-run",
+          topic: "EU AI Act obligations",
+          format: "report",
+          status: "complete",
+          workspace_id: "workspace-1",
+          vertical: "regulatory_watch",
+          created_at: "2026-01-01T00:00:00Z",
+        }]),
+      });
+    });
+    await page.route("**/runs/novel-playbook-run", async (route) => {
+      if (route.request().isNavigationRequest()) return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "novel-playbook-run",
+          topic: "EU AI Act obligations",
+          format: "report",
+          status: "complete",
+          workspace_id: "workspace-1",
+          vertical: "regulatory_watch",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:05:00Z",
+          logs: [],
+          final_output: "# Obligations",
+        }),
+      });
+    });
+    await page.route("**/runs/novel-playbook-run/stream", async (route) => {
+      await route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: "" });
+    });
+
+    await createSessionCookie(page);
+    await page.goto("/");
+    // The list badge — the surface that used to render nothing at all here.
+    await expect(page.getByText("Regulatory Watch")).toBeVisible();
+
+    await page.getByText("EU AI Act obligations").click();
+    await expect(page.getByText("Regulatory Watch")).toBeVisible();
+    // The badge carries an icon, and an unknown key used to resolve to
+    // `undefined` — which React rejects as an element type, taking the page
+    // down rather than merely looking generic.
+    await expect(page.getByText("Obligations")).toBeVisible();
+  });
+
   test("shows HITL modal and approves with optional instruction", async ({ page }) => {
     await mockAuthenticatedSession(page);
     await mockBackendToken(page);

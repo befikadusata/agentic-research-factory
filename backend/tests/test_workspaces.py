@@ -137,6 +137,61 @@ async def test_remove_member_non_owner_forbidden(client, auth_as, db_session):
 
 
 @pytest.mark.asyncio
+async def test_admin_member_can_manage_the_roster(client, auth_as, db_session):
+    """The `admin` rung of _ROLE_RANK has to mean something.
+
+    Member management used to check ownership only, so promoting someone to
+    admin granted them the label and nothing else — the workspace still had
+    exactly one person who could add or remove anyone.
+    """
+    owner, admin = "roster-owner", "promoted-admin"
+    ws = Workspace(name="Delegated WS", owner_id=owner)
+    db_session.add(ws)
+    await db_session.flush()
+    db_session.add_all([
+        WorkspaceMember(workspace_id=ws.id, user_id=owner, role="admin"),
+        WorkspaceMember(workspace_id=ws.id, user_id=admin, role="admin"),
+        WorkspaceMember(workspace_id=ws.id, user_id="victim", role="viewer"),
+    ])
+    await db_session.commit()
+
+    auth_as(admin)
+    assert (await client.post(
+        f"/workspaces/{ws.id}/members", json={"user_id": "recruit", "role": "operator"}
+    )).status_code == 201
+    assert (await client.delete(f"/workspaces/{ws.id}/members/victim")).status_code == 204
+    # …but the owner's claim on the workspace is not the admin's to revoke.
+    assert (await client.delete(f"/workspaces/{ws.id}/members/{owner}")).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_operator_member_cannot_manage_the_roster(client, auth_as, db_session):
+    """Only the top rung manages members — being *in* the workspace isn't enough."""
+    ws = Workspace(name="Operator WS", owner_id="op-owner")
+    db_session.add(ws)
+    await db_session.flush()
+    db_session.add_all([
+        WorkspaceMember(workspace_id=ws.id, user_id="op-owner", role="admin"),
+        WorkspaceMember(workspace_id=ws.id, user_id="an-operator", role="operator"),
+    ])
+    await db_session.commit()
+
+    auth_as("an-operator")
+    add = await client.post(f"/workspaces/{ws.id}/members", json={"user_id": "x", "role": "viewer"})
+    assert add.status_code == 403
+    assert (await client.delete(f"/workspaces/{ws.id}/members/op-owner")).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_managing_a_nonexistent_workspace_reveals_nothing(client, auth_as):
+    """Same 403 as an unauthorized workspace, so the response can't be used to
+    probe which workspace IDs exist."""
+    auth_as("prober")
+    r = await client.post(f"/workspaces/{uuid.uuid4()}/members", json={"user_id": "x", "role": "viewer"})
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_list_workspaces_auto_provisions_personal(client, mock_user):
     # A user with no workspaces gets a "Personal" one created on first list.
     r = await client.get("/workspaces")
