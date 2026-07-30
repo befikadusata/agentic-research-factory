@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CircleAlert, CircleCheck } from "lucide-react";
 import { AuthLoadingState } from "@/components/AuthLoadingState";
+import { ResendVerification } from "@/components/ResendVerification";
 
 type State = "verifying" | "success" | "error";
 
@@ -19,43 +20,50 @@ function VerificationResult({
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4 py-10">
-      <div
-        role={successful ? "status" : "alert"}
-        aria-live={successful ? "polite" : "assertive"}
-        className="w-full max-w-md rounded-xl border border-border-subtle bg-surface-1 p-6 text-center shadow-hairline sm:p-8"
-      >
+      <div className="w-full max-w-md rounded-xl border border-border-subtle bg-surface-1 p-6 shadow-hairline sm:p-8">
         <div
-          className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full border ${
-            successful
-              ? "border-feedback-success/40 bg-feedback-success/10 text-feedback-success"
-              : "border-feedback-error/40 bg-feedback-error/10 text-feedback-error"
-          }`}
+          role={successful ? "status" : "alert"}
+          aria-live={successful ? "polite" : "assertive"}
+          className="text-center"
         >
-          {successful ? <CircleCheck size={28} aria-hidden /> : <CircleAlert size={28} aria-hidden />}
+          <div
+            className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full border ${
+              successful
+                ? "border-feedback-success/40 bg-feedback-success/10 text-feedback-success"
+                : "border-feedback-error/40 bg-feedback-error/10 text-feedback-error"
+            }`}
+          >
+            {successful ? <CircleCheck size={28} aria-hidden /> : <CircleAlert size={28} aria-hidden />}
+          </div>
+          <h1 className="mt-5 text-2xl font-bold text-content sm:text-3xl">
+            {successful ? "Email verified" : "Verification failed"}
+          </h1>
+          <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-content-secondary sm:text-base">
+            {successful ? (
+              <>
+                {email ? <><span className="break-all font-medium text-content">{email}</span> is confirmed. </> : null}
+                You can now sign in to your workspace.
+              </>
+            ) : (
+              "This verification link is invalid or has expired. Request a new one below."
+            )}
+          </p>
+          <Link
+            href="/"
+            className={`mt-7 inline-flex min-h-11 items-center justify-center rounded-md px-6 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 ${
+              successful
+                ? "bg-primary text-primary-on hover:bg-primary-hover"
+                : "border border-border-subtle bg-surface-2 text-content hover:bg-surface-3"
+            }`}
+          >
+            {successful ? "Continue to sign in" : "Back to sign in"}
+          </Link>
         </div>
-        <h1 className="mt-5 text-2xl font-bold text-content sm:text-3xl">
-          {successful ? "Email verified" : "Verification failed"}
-        </h1>
-        <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-content-secondary sm:text-base">
-          {successful ? (
-            <>
-              {email ? <><span className="break-all font-medium text-content">{email}</span> is confirmed. </> : null}
-              You can now sign in to your workspace.
-            </>
-          ) : (
-            "This verification link is invalid or has expired. Return to sign in and request a new one."
-          )}
-        </p>
-        <Link
-          href="/"
-          className={`mt-7 inline-flex min-h-11 items-center justify-center rounded-md px-6 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 ${
-            successful
-              ? "bg-primary text-primary-on hover:bg-primary-hover"
-              : "border border-border-subtle bg-surface-2 text-content hover:bg-surface-3"
-          }`}
-        >
-          {successful ? "Continue to sign in" : "Back to sign in"}
-        </Link>
+
+        {/* Deliberately outside the live region above: this is a control, not an
+            outcome, and an assertive region should announce the failure rather
+            than read out a form. */}
+        {!successful && <ResendVerification />}
       </div>
     </div>
   );

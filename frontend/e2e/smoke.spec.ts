@@ -310,6 +310,45 @@ test.describe("Core Flow Smoke Tests", () => {
     await expect(verificationError.getByRole("link", { name: "Back to sign in" })).toHaveAttribute("href", "/");
   });
 
+  test("offers a new verification link from the expired-link dead end", async ({ page }) => {
+    let resendPayload: Record<string, unknown> | null = null;
+    await page.route("**/auth/resend-verification", async (route) => {
+      resendPayload = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok", dev_verification_url: "http://localhost:3200/verify-email?token=fresh" }),
+      });
+    });
+
+    // No token at all, which is the same dead end an expired link reaches: the
+    // page cannot know the address, so the form has to ask for it.
+    await page.goto("/verify-email");
+    await expect(page.getByRole("alert").filter({ hasText: "Verification failed" })).toBeVisible();
+
+    await page.getByLabel("Send a new link").fill("unverified@example.com");
+    await page.getByRole("button", { name: "Resend verification email" }).click();
+
+    // Non-committal by design — the endpoint answers identically for an address
+    // with no account, and this copy must not leak what it withholds.
+    await expect(page.getByRole("status")).toContainText(
+      "If an unverified account exists for unverified@example.com, a new link is on its way.",
+    );
+    await expect(page.getByRole("link", { name: /Dev only/ })).toBeVisible();
+    expect(resendPayload).toEqual({ email: "unverified@example.com" });
+  });
+
+  test("surfaces a failed resend instead of claiming the mail was sent", async ({ page }) => {
+    await page.route("**/auth/resend-verification", (route) => route.fulfill({ status: 500, body: "" }));
+
+    await page.goto("/verify-email");
+    await page.getByLabel("Send a new link").fill("unverified@example.com");
+    await page.getByRole("button", { name: "Resend verification email" }).click();
+
+    await expect(page.getByRole("alert").filter({ hasText: "couldn’t send a new link" })).toBeVisible();
+    await expect(page.getByRole("status")).toHaveCount(0);
+  });
+
   test("creates run with vertical payload and redirects to run detail", async ({ page }) => {
     await mockAuthenticatedSession(page);
     await mockBackendToken(page);
