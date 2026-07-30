@@ -7,6 +7,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from config import settings
 from logger import logger
 from services.query_rewriter import generate_sub_queries
+from utils.source_ledger import canonical_url
 import vecs
 from vecs import IndexMeasure, IndexMethod
 from sqlalchemy import text as sql_text
@@ -300,19 +301,29 @@ def _is_placeholder_url(url: str) -> bool:
     return len(labels) >= 2 and labels[-2] == "example"
 
 
-def extract_citations(text: str) -> list[dict]:
+def extract_citations(text: str, seen_sources: list[str] | None = None) -> list[dict]:
     """Parse citations out of agent output. Handles both the internal RAG
     'SOURCE: <file> (Page: <N>)' format and the Markdown-link '[Title](URL)'
     format every prompt actually instructs agents to produce for web-sourced
     citations, deduped across both.
 
-    Links to reserved placeholder domains are dropped: they are hallucinated
-    attributions, not sources. Note this only catches the fabrications that
-    announce themselves — a made-up but plausible hostname still gets through,
-    which would take verifying URLs against what search actually returned."""
+    Links to reserved placeholder domains are dropped outright: nothing can live
+    behind them, so they are fabrications rather than sources.
+
+    Pass `seen_sources` (from utils.source_ledger) to check the rest against the
+    URLs the run actually retrieved. Each web citation then carries
+    `verified: bool` — true when the run really fetched that URL, false when the
+    model produced it from nowhere. Unverified citations are *kept*: the ledger
+    can't be complete (a link quoted inside a scraped page is a real source it
+    never saw), so dropping on a miss would delete genuine citations, and
+    labelling is what the deep-research literature recommends over filtering.
+    Without `seen_sources` no claim is made and the field is absent — that is
+    also why RAG document citations never carry it, having no URL to check."""
     seen: set = set()
     citations = []
     dropped: list[str] = []
+
+    ledger = {canonical_url(u) for u in seen_sources} if seen_sources is not None else None
 
     for m in _RAG_CITATION_RE.finditer(text):
         key = (m.group(1).strip(), m.group(2).strip())
@@ -328,10 +339,18 @@ def extract_citations(text: str) -> list[dict]:
         if _is_placeholder_url(key[1]):
             dropped.append(key[1])
             continue
-        citations.append({"source": key[0], "page": key[1]})
+        citation = {"source": key[0], "page": key[1]}
+        if ledger is not None:
+            citation["verified"] = canonical_url(key[1]) in ledger
+        citations.append(citation)
 
     if dropped:
         # Worth surfacing: the agent had nothing to cite and papered over it.
         logger.warning("citation_placeholder_dropped", count=len(dropped), urls=dropped[:5])
+
+    unverified = [c["page"] for c in citations if c.get("verified") is False]
+    if unverified:
+        # Not necessarily fabricated, but the run has no record of fetching it.
+        logger.warning("citation_unverified", count=len(unverified), urls=unverified[:5])
 
     return citations

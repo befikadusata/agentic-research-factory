@@ -6,6 +6,7 @@ from config import settings
 from tenacity import retry, stop_after_attempt, wait_exponential
 from logger import logger
 from utils.cache import tool_cache
+from utils.source_ledger import record_retrieved_url
 from tools.untrusted import wrap_untrusted
 from typing import List, Dict
 
@@ -103,6 +104,11 @@ class FirecrawlTool(_FirecrawlClientMixin, BaseTool):
         try:
             result = self._execute_scrape(url)
             content = result.get("markdown", "")
+            if content:
+                # Ledgered only on success: the agent picked this URL, so the
+                # request alone proves nothing. A page that actually returned
+                # content is a source the run really retrieved.
+                record_retrieved_url(url)
             return wrap_untrusted(content[:6000]) if content else "No content extracted from this page."
         except Exception as e:
             logger.warning("firecrawl_scrape_failed", url=url, error=str(e))
@@ -120,6 +126,7 @@ class BatchScrapeTool(_FirecrawlClientMixin, BaseTool):
         cached = tool_cache.get("scrape_webpage", url)
         if cached:
             logger.info("firecrawl_batch_cache_hit", url=url)
+            record_retrieved_url(url)
             return {"url": url, "content": cached.get("markdown", "")[:6000]}
 
         try:
@@ -132,6 +139,7 @@ class BatchScrapeTool(_FirecrawlClientMixin, BaseTool):
                 timeout=60,
             )
             tool_cache.set("scrape_webpage", url, result)
+            record_retrieved_url(url)
             return {"url": url, "content": result.get("markdown", "")[:6000]}
         except (Exception, asyncio.TimeoutError) as e:
             logger.warning("firecrawl_batch_scrape_failed", url=url, error=str(e))

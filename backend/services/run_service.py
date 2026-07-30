@@ -22,6 +22,7 @@ from configs.verticals import build_execution_brief, get_vertical
 from utils.blocking import run_in_daemon_thread
 from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_INSTRUCTION_KEY
 from utils.cost_tracker import log_cost, run_cost_total
+from utils.source_ledger import reset_seen_sources
 from utils.pricing import calculate_cost
 from services.eval_service import evaluate_output
 from services.monitor_service import finalize_monitored_run
@@ -67,6 +68,11 @@ class _Budget:
 # separate Celery tasks that now run each stage, since the in-memory LangGraph
 # checkpoint does not (Celery recycles the worker child after every task).
 _GRAPH_KEY = "_graph_state"
+
+# run.metrics sub-key holding the canonical URLs this run actually retrieved,
+# carried across segments for the same reason as _GRAPH_KEY. Citations are
+# checked against it so a fabricated URL can be told apart from a real one.
+_SOURCES_KEY = "_seen_sources"
 
 
 async def emit(run_id: str, event_type: str, data: dict):
@@ -427,6 +433,9 @@ async def _run_start_segment(run_id: UUID):
 
     # One budget for the whole segment, spent across every invoke below.
     budget = _Budget()
+    # Celery reuses a worker process across tasks, so the ledger must start empty
+    # or this run would verify its citations against the previous run's sources.
+    reset_seen_sources()
 
     async with AsyncSessionLocal() as db:
         run = await db.get(Run, run_id)
@@ -538,7 +547,8 @@ async def _run_start_segment(run_id: UUID):
         final_output    = final_state.get("final_output", "")
         review_output   = final_state.get("review_output", "")
         review_passed   = review_verdict(review_output) == "PASS"
-        final_citations = extract_citations(final_output or "")
+        seen_sources    = _collect_sources()
+        final_citations = extract_citations(final_output or "", seen_sources)
         evidence_lines = [line for line in final_output.splitlines() if "http://" in line or "https://" in line]
         grounding = "SOURCE EVIDENCE LEDGER:\n" + "\n".join(evidence_lines[:30]) + "\n\nREVIEW AUDIT:\n" + review_output
         eval_scores = await _safe_eval(
@@ -560,6 +570,7 @@ async def _run_start_segment(run_id: UUID):
                 "eval_scores": eval_scores,
                 "review_output": review_output,
                 "quality_warning": None if review_passed else review_output,
+                _SOURCES_KEY: seen_sources,
             }
             flag_modified(run_obj, "metrics")
             await db.commit()
@@ -579,7 +590,8 @@ async def _run_start_segment(run_id: UUID):
     await _log_token_usages(rid, state.get("token_usages", []))
 
     research_output = state.get("research_output", "")
-    citations = extract_citations(research_output or "")
+    seen_sources = _collect_sources()
+    citations = extract_citations(research_output or "", seen_sources)
     # M4: score the research before its approval gate so the operator isn't
     # approving blind. Research has no separate grounding artifact, so (like
     # lead-intel) it's scored against itself — an on-topic/completeness signal,
@@ -597,6 +609,7 @@ async def _run_start_segment(run_id: UUID):
             # plan_output/retry_count aren't Run columns but the analyse segment
             # (a separate task, fresh process) needs them to rebuild graph state.
             _GRAPH_KEY: {"plan_output": state.get("plan_output", ""), "retry_count": 0},
+            _SOURCES_KEY: seen_sources,
         }
         flag_modified(run_obj, "metrics")
         await db.commit()
@@ -633,6 +646,9 @@ async def _run_analyse_segment(run_id: UUID):
         run_format      = run.format
         workspace_id    = run.workspace_id
         stash           = _read_graph_stash(run)
+        # Seed with the research segment's sources: this process is fresh (or
+        # recycled from an unrelated run), so the ledger is empty or wrong.
+        reset_seen_sources(list((run.metrics or {}).get(_SOURCES_KEY, [])))
 
     execution_brief = build_execution_brief(topic, vertical, vertical_inputs)
 
@@ -677,7 +693,8 @@ async def _run_analyse_segment(run_id: UUID):
         # Surface the retried research for a fresh approval instead of silently
         # redoing already-approved work.
         research_output = state.get("research_output", research_output)
-        citations = _extract(research_output)
+        seen_sources = _collect_sources()
+        citations = _extract(research_output, seen_sources)
         stage_scores = await _safe_eval(research_output, research_output, topic, log, run_id=rid, agent_name="eval_research")  # M4
         async with AsyncSessionLocal() as db:
             run_obj = await db.get(Run, run_id)
@@ -687,6 +704,7 @@ async def _run_analyse_segment(run_id: UUID):
                 "citations": citations,
                 "eval_scores": stage_scores,
                 _GRAPH_KEY: {"plan_output": stash.get("plan_output", ""), "retry_count": retry_count},
+                _SOURCES_KEY: seen_sources,
             }
             flag_modified(run_obj, "metrics")
             await db.commit()
@@ -711,6 +729,7 @@ async def _run_analyse_segment(run_id: UUID):
             **(run_obj.metrics or {}),
             "eval_scores": stage_scores,
             _GRAPH_KEY: {"plan_output": stash.get("plan_output", ""), "retry_count": retry_count},
+            _SOURCES_KEY: _collect_sources(),
         }
         flag_modified(run_obj, "metrics")
         await db.commit()
@@ -745,6 +764,9 @@ async def _run_write_segment(run_id: UUID):
         run_format      = run.format
         workspace_id    = run.workspace_id
         stash           = _read_graph_stash(run)
+        # The report's citations are extracted in this segment, but the sources
+        # backing them were retrieved back in research — carry them forward.
+        reset_seen_sources(list((run.metrics or {}).get(_SOURCES_KEY, [])))
 
     execution_brief = build_execution_brief(topic, vertical, vertical_inputs)
 
@@ -782,7 +804,8 @@ async def _run_write_segment(run_id: UUID):
 
     final_output    = state.get("final_output", "")
     eval_scores     = await _safe_eval(final_output, research_output, topic, log, run_id=rid, agent_name="eval_final")
-    final_citations = _extract(final_output)
+    seen_sources    = _collect_sources()
+    final_citations = _extract(final_output, seen_sources)
 
     async with AsyncSessionLocal() as db:
         run_obj = await db.get(Run, run_id)
@@ -793,6 +816,7 @@ async def _run_write_segment(run_id: UUID):
             **(run_obj.metrics or {}),
             "citations": list(merged.values()),
             "eval_scores": eval_scores,
+            _SOURCES_KEY: seen_sources,
         }
         flag_modified(run_obj, "metrics")
         await db.commit()
@@ -829,9 +853,16 @@ async def _finalize(run_id: UUID):
 
 # ── small helpers ─────────────────────────────────────────────────────────────
 
-def _extract(text: str) -> list:
+def _extract(text: str, seen_sources: list[str] | None = None) -> list:
     from tools.rag import extract_citations
-    return extract_citations(text or "")
+    return extract_citations(text or "", seen_sources)
+
+
+def _collect_sources() -> list[str]:
+    """Every source this run has retrieved: what this segment just fetched, plus
+    whatever earlier segments seeded the ledger with at entry."""
+    from utils.source_ledger import take_seen_sources
+    return take_seen_sources()
 
 
 async def _safe_eval(
