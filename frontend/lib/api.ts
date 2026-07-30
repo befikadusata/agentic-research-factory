@@ -1,4 +1,14 @@
-import type { Run, RunDetail, Workspace, WorkspaceMember, Monitor, CreateMonitorInput, DocumentState } from "./types";
+import type {
+  AnalyticsCosts,
+  AnalyticsMetrics,
+  CreateMonitorInput,
+  DocumentState,
+  Monitor,
+  Run,
+  RunDetail,
+  Workspace,
+  WorkspaceMember,
+} from "./types";
 import { normalizeLogEntries } from "./logs";
 import { IS_DEMO, demoApi } from "./demo";
 
@@ -128,6 +138,29 @@ export async function getDocument(docId: string): Promise<DocumentState> {
   if (IS_DEMO) return demoApi.getDocument(docId);
   const headers = await authHeaders();
   const res = await fetch(`${BASE}/upload/${docId}`, { headers });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// --- Analytics ------------------------------------------------------------
+// Both endpoints scope to a workspace the caller belongs to, or — with no
+// workspace_id — to the caller's own runs. The UI always has an active
+// workspace, so it always passes one.
+
+export async function getAnalyticsMetrics(workspaceId?: string): Promise<AnalyticsMetrics> {
+  if (IS_DEMO) return demoApi.getAnalyticsMetrics(workspaceId);
+  const headers = await authHeaders();
+  const qs = workspaceId ? `?workspace_id=${workspaceId}` : "";
+  const res = await fetch(`${BASE}/analytics/metrics${qs}`, { headers });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getAnalyticsCosts(workspaceId?: string): Promise<AnalyticsCosts> {
+  if (IS_DEMO) return demoApi.getAnalyticsCosts(workspaceId);
+  const headers = await authHeaders();
+  const qs = workspaceId ? `?workspace_id=${workspaceId}` : "";
+  const res = await fetch(`${BASE}/analytics/costs${qs}`, { headers });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

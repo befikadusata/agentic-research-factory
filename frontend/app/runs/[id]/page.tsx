@@ -15,6 +15,7 @@ import { HitlModal } from "@/components/HitlModal";
 import { OutputPanel } from "@/components/OutputPanel";
 import { ConfidenceBadge } from "@/components/ConfidenceBadge";
 import { MonitorDiffPanel } from "@/components/MonitorDiffPanel";
+import { RunCostPanel } from "@/components/RunCostPanel";
 import { SourcesPanel } from "@/components/SourcesPanel";
 import { PlaybookIcon } from "@/components/PlaybookIcon";
 import type { RunDetail, LogEntry, RunStatus } from "@/lib/types";
@@ -307,6 +308,11 @@ export default function RunPage() {
           Pipeline resuming, waiting for the next stage to begin…
         </div>
       )}
+
+      {/* Outside the complete/failed branches on purpose: a run that died in the
+          research stage still spent tokens, and that is exactly when someone
+          wants to know how much. */}
+      <RunCostPanel costs={run.costs} latencySec={run.metrics?.latency_sec} />
 
       {status === "complete" && run.final_output && (
         <>

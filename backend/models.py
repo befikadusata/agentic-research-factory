@@ -12,12 +12,6 @@ class DocumentStatus(str, enum.Enum):
     failed  = "failed"
 
 
-class DocumentStatus(str, enum.Enum):
-    pending = "pending"
-    ready   = "ready"
-    failed  = "failed"
-
-
 class RunStatus(str, enum.Enum):
     pending                    = "pending"
     researching                = "researching"

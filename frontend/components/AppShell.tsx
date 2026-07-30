@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { LayoutGrid, Plus, History, Radar, Menu, X } from "lucide-react";
+import { BarChart3, LayoutGrid, Plus, History, Radar, Menu, X } from "lucide-react";
 import { SidebarUser } from "@/components/SidebarUser";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
@@ -22,6 +22,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const historyActive = pathname === "/";
   const newRunActive = pathname === "/new";
   const monitorsActive = pathname?.startsWith("/monitors");
+  const analyticsActive = pathname?.startsWith("/analytics");
 
   return (
     <>
@@ -73,6 +74,19 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         >
           <Radar size={18} />
           Monitors
+        </Link>
+        <Link
+          href="/analytics"
+          onClick={onNavigate}
+          aria-current={analyticsActive ? "page" : undefined}
+          className={`min-h-11 px-4 py-2 rounded-md flex items-center gap-3 transition-colors ${
+            analyticsActive
+              ? "bg-surface-3 text-content"
+              : "text-content-secondary hover:bg-surface-2 hover:text-content"
+          }`}
+        >
+          <BarChart3 size={18} />
+          Analytics
         </Link>
       </nav>
       <div className="mt-auto flex flex-col gap-2">

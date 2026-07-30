@@ -27,11 +27,14 @@
  */
 
 import type {
+  AnalyticsCosts,
+  AnalyticsMetrics,
   CreateMonitorInput,
   DocumentState,
   LogEntry,
   Monitor,
   Run,
+  RunCost,
   RunDetail,
   SSEEvent,
   Workspace,
@@ -275,6 +278,16 @@ function seedRuns(): RunDetail[] {
           { source: "industry analysts", page: "https://logistics-analysts.example/report", verified: false },
         ],
       },
+      // Researcher runs twice — once to plan, once after the approval gate —
+      // which is why the panel folds rows per agent rather than listing calls.
+      costs: seedCosts("demo-competitor-brief", hoursAgo(2), [
+        ["Researcher", 18_420, 3_180, 0.0139],
+        ["Researcher", 6_910, 1_240, 0.0052],
+        ["Analyst", 14_760, 4_020, 0.0171],
+        ["Writer", 9_340, 5_610, 0.0203],
+        ["Editor", 7_120, 1_890, 0.0065],
+        ["eval_judge", 5_480, 640, 0.0027],
+      ]),
     },
     {
       id: "demo-lead-intel",
@@ -324,6 +337,13 @@ function seedRuns(): RunDetail[] {
           ],
         },
       },
+      costs: seedCosts("demo-lead-intel", hoursAgo(20), [
+        ["Researcher", 12_880, 2_450, 0.0098],
+        ["Analyst", 9_610, 3_140, 0.0122],
+        ["Writer", 7_220, 4_180, 0.0154],
+        ["eval_judge", 4_930, 580, 0.0024],
+        ["monitor_diff", 6_340, 720, 0.0031],
+      ]),
     },
     {
       id: "demo-strategy-review",
@@ -368,6 +388,12 @@ function seedRuns(): RunDetail[] {
       final_output: null,
       error_message:
         "Run failed: not enough sources could be retrieved. 6 of 8 pages timed out during scraping.",
+      // A failed run still spent money before it died. This is the case the cost
+      // panel exists for — it renders outside the "complete" branch so this run
+      // reports its spend rather than swallowing it.
+      costs: seedCosts("demo-failed-run", daysAgo(2), [
+        ["Researcher", 8_140, 1_260, 0.0057],
+      ]),
     },
     {
       id: "demo-personal-scan",
@@ -390,8 +416,42 @@ function seedRuns(): RunDetail[] {
         latency_sec: 96,
         eval_scores: { accuracy: 84, relevance: 88, completeness: 71, writing_quality: 92, overall: 84 },
       },
+      costs: seedCosts("demo-personal-scan", daysAgo(1), [
+        ["Researcher", 21_300, 1_980, 0.0128],
+        ["Writer", 5_640, 3_020, 0.0113],
+        ["eval_judge", 4_110, 520, 0.0021],
+      ]),
     },
   ];
+}
+
+/**
+ * Build the `run_costs` rows a run would have accumulated.
+ *
+ * The backend writes one row per LLM call, so an agent that ran twice gets two
+ * rows — the seed keeps that shape rather than pre-summing, because folding
+ * rows per agent is exactly what the panel under test does.
+ *
+ * The seeded figures are a *paid*-model scenario. A default deployment routes
+ * to free-tier models and really does spend $0, which the scripted live run
+ * below demonstrates instead; seeding both means neither branch of the display
+ * is dead code.
+ */
+let costRowSeq = 0;
+function seedCosts(
+  runId: string,
+  at: string,
+  rows: [agent: string, input: number, output: number, usd: number][],
+): RunCost[] {
+  return rows.map(([agent_name, input_tokens, output_tokens, total_cost]) => ({
+    id: `demo-cost-${++costRowSeq}`,
+    run_id: runId,
+    agent_name,
+    input_tokens,
+    output_tokens,
+    total_cost,
+    created_at: at,
+  }));
 }
 
 function seedMonitors(): Monitor[] {
@@ -603,6 +663,17 @@ async function playRunScript(id: string, topic: string) {
         issues: ["Demo output — generated from a fixed script, not from live sources."],
       },
     };
+    // Zero-cost on purpose. A default deployment routes every agent to a
+    // free-tier model, so this is what a freshly configured install actually
+    // records — and it is the case the cost panel has to report honestly
+    // instead of showing "$0.00" as though the meter failed.
+    finished.costs = seedCosts(id, new Date().toISOString(), [
+      ["Researcher", 11_240, 2_060, 0],
+      ["Analyst", 8_470, 2_910, 0],
+      ["Writer", 6_180, 3_740, 0],
+      ["Editor", 5_020, 1_130, 0],
+      ["eval_judge", 3_960, 480, 0],
+    ]);
   }
   emit(id, { type: "complete", data: { final_output: final } });
 }
@@ -759,6 +830,66 @@ export const demoApi = {
       status: ready ? "ready" : "pending",
       chunk_count: ready ? 24 : null,
       error_message: null,
+    });
+  },
+
+  /**
+   * Mirrors `GET /analytics/metrics`, including its scoping quirk: **completed
+   * runs only**. A failed run has nothing to score, so it is absent here while
+   * its spend still shows up in `getAnalyticsCosts` below — the two panels
+   * genuinely count different populations, and the demo would misrepresent the
+   * product if it smoothed that over.
+   */
+  async getAnalyticsMetrics(workspaceId?: string): Promise<AnalyticsMetrics> {
+    const scoped = [...runs.values()].filter(
+      (r) => (workspaceId ? r.workspace_id === workspaceId : true) && r.status === "complete",
+    );
+    const withMetrics = scoped.map((r) => r.metrics).filter((m) => !!m);
+    if (withMetrics.length === 0) return respond({ count: 0, averages: {} });
+
+    const count = withMetrics.length;
+    const scores = withMetrics.map((m) => m.eval_scores).filter((s) => !!s);
+    const avgScore = (key: keyof NonNullable<(typeof scores)[number]>) =>
+      scores.length
+        ? scores.reduce((sum, s) => sum + (typeof s[key] === "number" ? (s[key] as number) : 0), 0) / scores.length
+        : 0;
+
+    return respond({
+      count,
+      averages: {
+        latency_sec: withMetrics.reduce((sum, m) => sum + (m.latency_sec ?? 0), 0) / count,
+        citations: withMetrics.reduce((sum, m) => sum + (m.citations?.length ?? 0), 0) / count,
+        accuracy: avgScore("accuracy"),
+        relevance: avgScore("relevance"),
+        completeness: avgScore("completeness"),
+        writing_quality: avgScore("writing_quality"),
+        overall: avgScore("overall"),
+      },
+    });
+  },
+
+  /** Mirrors `GET /analytics/costs` — every run in scope, failed ones included.
+   *  Derived from the same rows the run pages show, so the workspace total and
+   *  the per-run panels can never disagree. */
+  async getAnalyticsCosts(workspaceId?: string): Promise<AnalyticsCosts> {
+    const rows = [...runs.values()]
+      .filter((r) => (workspaceId ? r.workspace_id === workspaceId : true))
+      .flatMap((r) => r.costs ?? []);
+
+    const perAgent = new Map<string, { cost: number; input_tokens: number; output_tokens: number }>();
+    for (const row of rows) {
+      const agent = perAgent.get(row.agent_name) ?? { cost: 0, input_tokens: 0, output_tokens: 0 };
+      agent.cost += row.total_cost;
+      agent.input_tokens += row.input_tokens;
+      agent.output_tokens += row.output_tokens;
+      perAgent.set(row.agent_name, agent);
+    }
+
+    return respond({
+      total_cost_usd: rows.reduce((sum, r) => sum + r.total_cost, 0),
+      total_input_tokens: rows.reduce((sum, r) => sum + r.input_tokens, 0),
+      total_output_tokens: rows.reduce((sum, r) => sum + r.output_tokens, 0),
+      per_agent: [...perAgent.entries()].map(([agent_name, totals]) => ({ agent_name, ...totals })),
     });
   },
 

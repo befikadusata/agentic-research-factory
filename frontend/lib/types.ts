@@ -215,6 +215,19 @@ export interface CreateMonitorInput {
   notify_channel?: string | null;
 }
 
+/** One recorded LLM call's token usage and cost, filed under the agent that made
+ *  it. An agent that ran more than once contributes more than one row, so these
+ *  are summed per agent before display. */
+export interface RunCost {
+  id: string;
+  run_id: string;
+  agent_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_cost: number;
+  created_at: string;
+}
+
 export interface RunDetail extends Run {
   logs: LogEntry[];
   research_output: string | null;
@@ -222,6 +235,44 @@ export interface RunDetail extends Run {
   final_output: string | null;
   error_message?: string | null;
   metrics?: RunMetrics;
+  /** Optional because a failed run may have spent nothing, and because a
+   *  response cached from before the UI read this field has no rows. */
+  costs?: RunCost[];
+}
+
+/** Aggregates from `GET /analytics/metrics`.
+ *
+ *  Counts **completed runs only** — a run that failed has no scores to average,
+ *  so it is excluded here even though it still cost money. That is why this
+ *  count and the cost totals below are not drawn from the same population. */
+export interface AnalyticsMetrics {
+  count: number;
+  averages: {
+    latency_sec?: number;
+    citations?: number;
+    accuracy?: number;
+    relevance?: number;
+    completeness?: number;
+    writing_quality?: number;
+    overall?: number;
+  };
+}
+
+export interface AgentCost {
+  agent_name: string;
+  cost: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/** Aggregates from `GET /analytics/costs`, over **every** run in scope —
+ *  including failed ones, whose spend is real and is exactly what someone
+ *  looking at a cost page needs to see. */
+export interface AnalyticsCosts {
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  per_agent: AgentCost[];
 }
 
 export interface LogEntry {

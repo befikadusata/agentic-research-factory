@@ -191,6 +191,54 @@ test.describe("Demo mode", () => {
     await expect(page.getByRole("link", { name: /Save as monitor/i })).toBeVisible();
   });
 
+  test("reports what a run cost, including one that failed", async ({ page }) => {
+    await enterDemo(page);
+    await page.getByText("How does Notion position itself").click();
+
+    const panel = page.getByRole("table", { name: "Token usage and cost per agent" });
+    await expect(panel).toBeVisible();
+    // The researcher billed two calls; the panel folds them into one row.
+    const researcher = panel.getByRole("row").filter({ hasText: "Researcher" });
+    await expect(researcher).toHaveCount(1);
+    await expect(researcher).toContainText("×2");
+    await expect(researcher).toContainText("25,330");
+
+    // A run that died mid-pipeline still spent tokens, and hiding that is how a
+    // bill becomes a surprise.
+    await page.getByRole("link", { name: "History" }).click();
+    await page.getByText("Pricing changes across enterprise observability vendors").click();
+    await expect(page.getByText("This run failed. Check the agent logs above for details.")).toBeVisible();
+    await expect(page.getByRole("table", { name: "Token usage and cost per agent" })).toContainText("Researcher");
+  });
+
+  test("aggregates quality and cost across the active workspace", async ({ page }) => {
+    const backendCalls = trackBackendCalls(page);
+    await enterDemo(page);
+    await page.getByRole("link", { name: "Analytics" }).click();
+
+    // Two of Acme's four runs completed — the failed one and the one parked at
+    // a review gate have nothing to score, so they're excluded here…
+    await expect(page.locator("dl > div").filter({ hasText: "Completed runs" })).toContainText("2");
+    await expect(page.getByRole("meter", { name: "Average overall score" })).toBeVisible();
+
+    // …but the failed run's spend still counts toward the workspace total,
+    // because it was really spent. The two sections deliberately count
+    // different populations, and the demo mirrors that rather than smoothing it.
+    await expect(page.locator("dl > div").filter({ hasText: "Total spend" })).toBeVisible();
+    await expect(
+      page.getByRole("table", { name: "Token usage and cost per agent across all runs" }),
+    ).toContainText("monitor_diff");
+
+    // Switching workspace re-scopes both halves.
+    await page.getByRole("button", { name: "Acme Research" }).click();
+    await page.getByRole("button", { name: "Personal" }).click();
+    await expect(
+      page.getByRole("table", { name: "Token usage and cost per agent across all runs" }),
+    ).not.toContainText("monitor_diff");
+
+    expect(backendCalls, "analytics must render from seed data too").toEqual([]);
+  });
+
   test("lists seeded workspace members", async ({ page }) => {
     await enterDemo(page);
     await page.getByRole("button", { name: "Acme Research" }).click();
