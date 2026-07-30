@@ -35,6 +35,13 @@ services:
       db:
         condition: service_healthy
     restart: on-failure
+    # The same source mount backend/celery/beat get. Without it, a plain
+    # `docker compose up` (no --build) ran migrations from the image's baked-in
+    # copy while the API served the mounted source: a new revision was invisible
+    # here, migrate re-ran the old head, service_completed_successfully passed,
+    # and the API booted against a schema missing the new column.
+    volumes:
+      - ./backend:/app
 
   backend:
     build: ./backend
