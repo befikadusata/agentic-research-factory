@@ -5,6 +5,12 @@ import markdown
 import weasyprint
 from config import settings
 from logger import logger
+from utils.blocking import call_with_timeout
+
+# Wall-clock cap on one docling parse. Docling's layout/OCR models are baked into
+# the image (see backend/Dockerfile), so this bounds the parse itself rather than
+# a first-run model download — a scanned or pathological PDF, not a cold start.
+PDF_PARSE_TIMEOUT_SEC = 120
 
 
 async def markdown_to_pdf(
@@ -47,11 +53,44 @@ async def markdown_to_pdf(
     return output_path
 
 
+def _build_converter():
+    """A DocumentConverter pinned to what this image can actually run.
+
+    Two deliberate departures from docling's defaults, both of which otherwise
+    fail at parse time and get swallowed into an empty (silent) ingest:
+
+    * layout_options pins DOCLING_LAYOUT_V2. The default spec is
+      docling-layout-heron, an RT-DETRv2 checkpoint that the locked
+      transformers 4.46.3 cannot load ("does not recognize this architecture").
+      Pinning the older layout model is the surgical fix; bumping transformers
+      would re-resolve the lock, which the Dockerfile documents as dragging
+      crewai to a version that breaks Pydantic tool-schema generation.
+    * do_ocr=False. OCR would need an engine resolved through OcrAutoOptions,
+      which reports "No OCR engine found" in this image, and it is dead weight
+      for the text-bearing PDFs this app ingests. Consequence: a scanned or
+      image-only PDF yields no text — ingest_service now records that as
+      `failed` with a clear message rather than a successful-looking no-op.
+
+    Models are baked into the image and located via DOCLING_ARTIFACTS_PATH, so
+    this constructor does no network I/O.
+    """
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, LayoutOptions
+    from docling.datamodel.layout_model_specs import DOCLING_LAYOUT_V2
+
+    opts = PdfPipelineOptions()
+    opts.do_ocr = False
+    opts.layout_options = LayoutOptions(model_spec=DOCLING_LAYOUT_V2)
+    return DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
+    )
+
+
 def _parse_with_docling(path: str) -> list[dict]:
-    from docling.document_converter import DocumentConverter
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-    converter = DocumentConverter()
+    converter = _build_converter()
     result = converter.convert(path)
     md_text = result.document.export_to_markdown()
     if not md_text.strip():
@@ -90,16 +129,22 @@ async def _parse_with_llamaparse(paths: list[str]) -> list[dict]:
 
 async def parse_pdf(path: str) -> list[dict]:
     """Parse a single PDF. Docling primary, LlamaParse fallback."""
-    loop = asyncio.get_event_loop()
     try:
-        chunks = await asyncio.wait_for(
-            loop.run_in_executor(None, _parse_with_docling, path),
-            timeout=120,
+        # call_with_timeout, NOT run_in_executor(None, ...): the default executor's
+        # threads are joined by asyncio.run() at task teardown, so a docling parse
+        # that blew this timeout used to keep running and wedge the Celery worker
+        # child for its full duration — the guard fired, the caller recorded zero
+        # chunks, and the task only ended minutes later on SoftTimeLimitExceeded.
+        chunks = await call_with_timeout(
+            _parse_with_docling, path,
+            timeout=PDF_PARSE_TIMEOUT_SEC,
+            name="docling-parse",
         )
         if chunks:
             return chunks
-    except (Exception, asyncio.TimeoutError) as e:
-        logger.warning("docling_parse_failed", path=path, error=str(e))
+    except Exception as e:
+        # TimeoutError stringifies to "", which made the old log say error="".
+        logger.warning("docling_parse_failed", path=path, error=str(e) or type(e).__name__)
 
     if settings.LLAMA_CLOUD_API_KEY:
         try:
