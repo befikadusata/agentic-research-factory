@@ -274,14 +274,45 @@ _RAG_CITATION_RE = re.compile(r"SOURCE:\s*(.+?)\s*\(Page:\s*(.+?)\)")
 # links) that aren't source attributions.
 _MARKDOWN_CITATION_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)")
 
+# Names the standards reserve for documentation and testing, so nothing behind
+# them can ever be a real source: RFC 2606 (example.com/net/org, and the
+# .example/.invalid/.test TLDs) plus RFC 6761 (localhost). Agents reach for
+# these when they have nothing to cite — a live run shipped
+# "[research studies](https://www.example.com/research-study)", and another
+# filled its entire citation list with https://www.example.com. A fabricated
+# citation is worse than a missing one: it tells the reader the claim was
+# sourced when it wasn't.
+_RESERVED_TLDS = {"example", "invalid", "test", "localhost"}
+
+
+def _is_placeholder_url(url: str) -> bool:
+    host = url.split("://", 1)[-1].split("/", 1)[0].split("@")[-1]
+    host = host.split(":", 1)[0].strip("[]").lower().rstrip(".")
+    if host.startswith("www."):
+        host = host[4:]
+
+    labels = host.split(".")
+    if labels[-1] in _RESERVED_TLDS:
+        return True
+    # example.com / example.org / news.example.net — the reserved second-level
+    # name under any TLD. Only the registrable position counts, so a real host
+    # that merely has an "example" subdomain (example.mysite.com) is kept.
+    return len(labels) >= 2 and labels[-2] == "example"
+
 
 def extract_citations(text: str) -> list[dict]:
     """Parse citations out of agent output. Handles both the internal RAG
     'SOURCE: <file> (Page: <N>)' format and the Markdown-link '[Title](URL)'
     format every prompt actually instructs agents to produce for web-sourced
-    citations, deduped across both."""
+    citations, deduped across both.
+
+    Links to reserved placeholder domains are dropped: they are hallucinated
+    attributions, not sources. Note this only catches the fabrications that
+    announce themselves — a made-up but plausible hostname still gets through,
+    which would take verifying URLs against what search actually returned."""
     seen: set = set()
     citations = []
+    dropped: list[str] = []
 
     for m in _RAG_CITATION_RE.finditer(text):
         key = (m.group(1).strip(), m.group(2).strip())
@@ -291,8 +322,16 @@ def extract_citations(text: str) -> list[dict]:
 
     for m in _MARKDOWN_CITATION_RE.finditer(text):
         key = (m.group(1).strip(), m.group(2).strip())
-        if key not in seen:
-            seen.add(key)
-            citations.append({"source": key[0], "page": key[1]})
+        if key in seen:
+            continue
+        seen.add(key)
+        if _is_placeholder_url(key[1]):
+            dropped.append(key[1])
+            continue
+        citations.append({"source": key[0], "page": key[1]})
+
+    if dropped:
+        # Worth surfacing: the agent had nothing to cite and papered over it.
+        logger.warning("citation_placeholder_dropped", count=len(dropped), urls=dropped[:5])
 
     return citations
