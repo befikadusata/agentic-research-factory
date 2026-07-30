@@ -1,4 +1,4 @@
-import type { Run, RunDetail, Workspace, WorkspaceMember, Monitor, CreateMonitorInput } from "./types";
+import type { Run, RunDetail, Workspace, WorkspaceMember, Monitor, CreateMonitorInput, DocumentState } from "./types";
 import { normalizeLogEntries } from "./logs";
 import { IS_DEMO, demoApi } from "./demo";
 
@@ -117,6 +117,17 @@ export async function uploadFile(file: File, workspaceId: string): Promise<{ doc
     headers,
     body: form,
   });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Current ingest state of an uploaded doc. `uploadFile` returns as soon as the
+ *  file is stored — parsing and chunking run in a Celery worker afterwards — so
+ *  this is the only way to know whether the doc is actually retrievable yet. */
+export async function getDocument(docId: string): Promise<DocumentState> {
+  if (IS_DEMO) return demoApi.getDocument(docId);
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/upload/${docId}`, { headers });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

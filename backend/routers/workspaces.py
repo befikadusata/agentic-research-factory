@@ -19,8 +19,14 @@ class AddMemberRequest(BaseModel):
     role: str = Field(default="viewer", pattern="^(viewer|operator|admin)$")
 
 
-def _ws_dict(ws: Workspace) -> dict:
-    return {"id": str(ws.id), "name": ws.name, "owner_id": ws.owner_id}
+def _ws_dict(ws: Workspace, role: str) -> dict:
+    """Serialize a workspace along with the *calling* user's role in it.
+
+    The role is per-caller, not a property of the workspace — it is what lets
+    the UI gate operator-only actions (approving a HITL checkpoint) instead of
+    showing the control to a viewer and surfacing the 403 as a failure.
+    """
+    return {"id": str(ws.id), "name": ws.name, "owner_id": ws.owner_id, "role": role}
 
 
 async def _create_workspace(db: AsyncSession, name: str, owner_id: str) -> Workspace:
@@ -40,7 +46,8 @@ async def create_workspace(
     user_id: str = Depends(get_current_user),
 ):
     ws = await _create_workspace(db, body.name, user_id)
-    return _ws_dict(ws)
+    # _create_workspace always enrolls the creator as admin.
+    return _ws_dict(ws, "admin")
 
 
 @router.get("")
@@ -49,15 +56,15 @@ async def list_workspaces(
     user_id: str = Depends(get_current_user),
 ):
     result = await db.execute(
-        select(Workspace)
+        select(Workspace, WorkspaceMember.role)
         .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
         .where(WorkspaceMember.user_id == user_id)
     )
-    workspaces = result.scalars().all()
+    rows = result.all()
     # Every user needs at least one workspace for the UI to have an active tenant.
-    if not workspaces:
-        workspaces = [await _create_workspace(db, "Personal", user_id)]
-    return [_ws_dict(ws) for ws in workspaces]
+    if not rows:
+        return [_ws_dict(await _create_workspace(db, "Personal", user_id), "admin")]
+    return [_ws_dict(ws, role) for ws, role in rows]
 
 
 @router.get("/{workspace_id}/members")

@@ -28,6 +28,7 @@
 
 import type {
   CreateMonitorInput,
+  DocumentState,
   LogEntry,
   Monitor,
   Run,
@@ -63,9 +64,11 @@ const WS_ACME = "demo-ws-acme";
 const WS_PERSONAL = "demo-ws-personal";
 
 function seedWorkspaces(): Workspace[] {
+  // The demo user is admin in both, matching the `members` seed below — so
+  // every action stays reachable rather than gated behind a role they lack.
   return [
-    { id: WS_ACME, name: "Acme Research", owner_id: DEMO_PRINCIPAL },
-    { id: WS_PERSONAL, name: "Personal", owner_id: DEMO_PRINCIPAL },
+    { id: WS_ACME, name: "Acme Research", owner_id: DEMO_PRINCIPAL, role: "admin" },
+    { id: WS_PERSONAL, name: "Personal", owner_id: DEMO_PRINCIPAL, role: "admin" },
   ];
 }
 
@@ -435,6 +438,15 @@ function seedMonitors(): Monitor[] {
 
 const workspaces: Workspace[] = seedWorkspaces();
 const members: Record<string, WorkspaceMember[]> = seedMembers();
+/**
+ * Uploaded docs, keyed by doc id. Nothing is parsed or indexed, but the
+ * pending → ready transition is modelled on a timer: real ingestion happens in
+ * a worker after the upload responds, and the upload UI's whole job is to not
+ * claim success before it finishes. A demo that returned "ready" instantly
+ * would leave that path untested and unshown.
+ */
+const documents = new Map<string, { filename: string; readyAt: number }>();
+const DEMO_INGEST_MS = 2_000;
 const runs = new Map<string, RunDetail>(seedRuns().map((r) => [r.id, r]));
 const monitors = new Map<string, Monitor>(seedMonitors().map((m) => [m.id, m]));
 
@@ -729,10 +741,25 @@ export const demoApi = {
 
   async uploadFile(file: File, workspaceId: string): Promise<{ doc_id: string }> {
     // Nothing is parsed or indexed — the demo accepts the file so the upload UI
-    // is reachable, and the resulting doc_id is inert.
+    // is reachable, and the resulting doc_id is inert as run context.
     await sleep(600);
     const slug = file.name.replace(/\W+/g, "-").toLowerCase();
-    return { doc_id: `demo-doc-${workspaceId}-${slug}` };
+    const docId = `demo-doc-${workspaceId}-${slug}`;
+    documents.set(docId, { filename: file.name, readyAt: Date.now() + DEMO_INGEST_MS });
+    return { doc_id: docId };
+  },
+
+  async getDocument(docId: string): Promise<DocumentState> {
+    const doc = documents.get(docId);
+    if (!doc) throw new Error(`Document ${docId} was not found in the demo dataset.`);
+    const ready = Date.now() >= doc.readyAt;
+    return respond({
+      doc_id: docId,
+      filename: doc.filename,
+      status: ready ? "ready" : "pending",
+      chunk_count: ready ? 24 : null,
+      error_message: null,
+    });
   },
 
   async getWorkspaces(): Promise<Workspace[]> {
@@ -744,6 +771,7 @@ export const demoApi = {
       id: `demo-ws-${Math.random().toString(36).slice(2, 8)}`,
       name,
       owner_id: DEMO_PRINCIPAL,
+      role: "admin",
     };
     workspaces.push(ws);
     members[ws.id] = [{ user_id: DEMO_PRINCIPAL, role: "admin" }];

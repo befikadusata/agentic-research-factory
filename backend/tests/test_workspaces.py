@@ -31,6 +31,39 @@ async def test_list_workspaces_returns_own(client, mock_user):
 
 
 @pytest.mark.asyncio
+async def test_create_workspace_reports_creator_as_admin(client, mock_user):
+    r = await client.post("/workspaces", json={"name": "Mine"})
+    assert r.json()["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_list_workspaces_reports_callers_own_role(client, auth_as, db_session):
+    """`role` is per-caller, not per-workspace: the same workspace reports
+    "admin" to its owner and "viewer" to a viewer. The UI gates the HITL
+    approve control on it, so a wrong role here means a guaranteed 403."""
+    auth_as("owner@example.com")
+    ws_id = (await client.post("/workspaces", json={"name": "Shared"})).json()["id"]
+    await client.post(f"/workspaces/{ws_id}/members", json={"user_id": "viewer@example.com", "role": "viewer"})
+
+    owner_view = await client.get("/workspaces")
+    assert [ws["role"] for ws in owner_view.json() if ws["id"] == ws_id] == ["admin"]
+
+    auth_as("viewer@example.com")
+    viewer_view = await client.get("/workspaces")
+    assert [ws["role"] for ws in viewer_view.json() if ws["id"] == ws_id] == ["viewer"]
+
+
+@pytest.mark.asyncio
+async def test_auto_created_personal_workspace_is_admin(client, auth_as):
+    """A user with no workspaces gets "Personal" auto-created — as its admin,
+    not as a roleless row the UI would have to guess about."""
+    auth_as("brand-new@example.com")
+    r = await client.get("/workspaces")
+    assert r.status_code == 200
+    assert [ws["role"] for ws in r.json()] == ["admin"]
+
+
+@pytest.mark.asyncio
 async def test_list_workspaces_does_not_return_others(client, auth_as, db_session):
     # Workspace owned by a different user with no membership for mock_user
     other_ws = Workspace(name="Other WS", owner_id="other-user-abc")

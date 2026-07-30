@@ -144,7 +144,7 @@ test.describe("Core Flow Smoke Tests", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "test-user-id" }]),
+        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "test-user-id", role: "admin" }]),
       });
     });
 
@@ -233,7 +233,7 @@ test.describe("Core Flow Smoke Tests", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "credentials:test@example.com" }]),
+        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "credentials:test@example.com", role: "admin" }]),
       });
     });
     await page.route("**/runs?**", async (route) => {

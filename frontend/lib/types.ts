@@ -131,6 +131,10 @@ export const VERTICALS: VerticalDefinition[] = [
 
 export interface Run {
   id: string;
+  /** Principal who started the run (`<provider>:<email>`). Optional because a
+   *  response cached from before the backend sent it has none — treat "absent"
+   *  as "ownership unknown", never as "not the owner". */
+  user_id?: string;
   topic: string;
   format: OutputFormat;
   status: RunStatus;
@@ -226,12 +230,29 @@ export interface LogEntry {
   ts: string;
 }
 
+/** Ingest state of an uploaded PDF. Chunking happens in a background worker
+ *  after the upload responds, so a doc is only usable as run context once it
+ *  reaches "ready" — at "pending" it has no chunks to retrieve. */
+export type DocumentStatus = "pending" | "ready" | "failed";
+
+export interface DocumentState {
+  doc_id: string;
+  filename: string;
+  status: DocumentStatus;
+  vertical?: string | null;
+  chunk_count?: number | null;
+  error_message?: string | null;
+}
+
 export type WorkspaceRole = "viewer" | "operator" | "admin";
 
 export interface Workspace {
   id: string;
   name: string;
   owner_id: string;
+  /** The *signed-in user's* role in this workspace, not a property of the
+   *  workspace itself. Drives which actions the UI offers. */
+  role: WorkspaceRole;
 }
 
 export interface WorkspaceMember {
@@ -310,6 +331,26 @@ export function statusBadgeClass(status: RunStatus): string {
  * a "failed" run actually failed — without it, the failure point is unknown
  * (e.g. runs that failed before this field existed) and every node stays idle.
  */
+/**
+ * Whether the signed-in user may approve this run's HITL checkpoint.
+ *
+ * Mirrors `assert_run_access(..., min_role="operator")` in backend/auth.py: a
+ * run's own creator always passes, while access granted *via* a workspace needs
+ * operator or higher. Anything undeterminable locally — unknown owner, unknown
+ * role — resolves to `true` and lets the server decide. Hiding the control on a
+ * guess would be a worse failure than the 403 it exists to prevent.
+ */
+export function canApproveRun(
+  run: Pick<Run, "user_id" | "workspace_id">,
+  workspaceRole: WorkspaceRole | undefined,
+  sessionUserId: string | undefined
+): boolean {
+  if (!run.workspace_id) return true;
+  if (!run.user_id || run.user_id === sessionUserId) return true;
+  if (!workspaceRole) return true;
+  return workspaceRole === "operator" || workspaceRole === "admin";
+}
+
 export function pipelineNodeState(
   status: RunStatus,
   nodeId: string,

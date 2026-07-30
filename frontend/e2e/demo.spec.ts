@@ -149,6 +149,48 @@ test.describe("Demo mode", () => {
     await expect(page.getByText("How does Notion position itself")).toBeHidden();
   });
 
+  test("waits for an uploaded PDF to finish indexing before it can be used", async ({ page }) => {
+    await enterDemo(page);
+    await page.getByRole("link", { name: "New Run", exact: true }).click();
+    await expect(page.getByRole("group", { name: "Playbook" })).toBeVisible();
+
+    // Retried for the same reason the playbook click above is: react-dropzone's
+    // onChange may not be attached yet on a freshly compiled `next dev` route,
+    // and a file set into an unlistening input is silently dropped.
+    const attached = page.getByText(/market-notes\.pdf/);
+    await expect(async () => {
+      await page.locator('input[type="file"]').setInputFiles({
+        name: "market-notes.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("%PDF-1.4 demo fixture"),
+      });
+      await expect(attached).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 30_000 });
+
+    // Storing the file is not indexing it. Until the chunks exist the run must
+    // not be startable — otherwise it retrieves nothing and cites a source it
+    // never read.
+    await expect(page.getByText("Indexing market-notes.pdf…")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Waiting for your PDF/i })).toBeDisabled();
+
+    await expect(page.getByText("chunks indexed")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("button", { name: "Start Research" })).toBeEnabled();
+  });
+
+  test("offers 'save as monitor' only for runs no monitor already owns", async ({ page }) => {
+    await enterDemo(page);
+
+    // Spawned by the Northwind monitor — offering to monitor it again is noise.
+    await page.getByText("Prospect dossier for Northwind Logistics").click();
+    await expect(page.getByRole("heading", { name: "Output" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Save as monitor/i })).toBeHidden();
+
+    await page.getByRole("link", { name: "History" }).click();
+    await page.getByText("How does Notion position itself").click();
+    await expect(page.getByRole("heading", { name: "Output" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Save as monitor/i })).toBeVisible();
+  });
+
   test("lists seeded workspace members", async ({ page }) => {
     await enterDemo(page);
     await page.getByRole("button", { name: "Acme Research" }).click();

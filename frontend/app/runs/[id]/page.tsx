@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, LoaderCircle, Radar, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Eye, LoaderCircle, Radar, RefreshCw } from "lucide-react";
 import { createParser } from "eventsource-parser";
 import { getRun, authHeaders } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
 import { IS_DEMO, subscribeToDemoRun } from "@/lib/demo";
 import { AgentLog } from "@/components/AgentLog";
 import { AgentGraph } from "@/components/AgentGraph";
@@ -17,7 +19,7 @@ import { SourcesPanel } from "@/components/SourcesPanel";
 import { PlaybookIcon } from "@/components/PlaybookIcon";
 import type { RunDetail, LogEntry, RunStatus } from "@/lib/types";
 import { normalizeLogEntry } from "@/lib/logs";
-import { VERTICALS, AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, statusBadgeClass } from "@/lib/types";
+import { VERTICALS, AGENT_STATE_GLYPH, STATUS_TO_AGENT_STATE, statusBadgeClass, canApproveRun } from "@/lib/types";
 
 const STATUS_LABEL: Record<string, string> = {
   pending:                    "Pending",
@@ -40,6 +42,8 @@ const HITL_STATUSES = new Set([
 
 export default function RunPage() {
   const { id } = useParams<{ id: string }>();
+  const { data: session } = useSession();
+  const { workspaces } = useWorkspace();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [hitlSummary, setHitlSummary] = useState<string | null>(null);
@@ -186,6 +190,14 @@ export default function RunPage() {
   const verticalDef = run.vertical ? VERTICALS.find((v) => v.key === run.vertical) ?? null : null;
   const statusGlyph = status ? AGENT_STATE_GLYPH[STATUS_TO_AGENT_STATE[status]] : "";
 
+  // Approving resumes the pipeline, which the backend restricts to operators
+  // and above. Checking here turns a 403-on-click into an explanation.
+  const runWorkspace = run.workspace_id
+    ? workspaces.find((w) => w.id === run.workspace_id)
+    : undefined;
+  const mayApprove = canApproveRun(run, runWorkspace?.role, session?.user?.id);
+  const atCheckpoint = status !== null && HITL_STATUSES.has(status);
+
   return (
     <div className="space-y-8">
       <div className="pb-6 border-b border-border-subtle">
@@ -249,7 +261,20 @@ export default function RunPage() {
 
       <AgentLog logs={logs} />
 
-      {status !== null && HITL_STATUSES.has(status) && hitlSummary && hitlStage && !reviewOpen && (
+      {atCheckpoint && !mayApprove && (
+        <div role="status" className="flex items-start gap-3 rounded-lg border border-hitl/40 bg-hitl/10 px-4 py-4">
+          <Eye size={18} className="mt-0.5 flex-none text-hitl" aria-hidden />
+          <div>
+            <p className="font-semibold text-content">Paused for review by an operator</p>
+            <p className="mt-1 text-sm text-content-secondary">
+              Your role in {runWorkspace?.name ?? "this workspace"} is viewer, so you can follow this run
+              but not approve it. An operator or admin can resume the pipeline.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {atCheckpoint && mayApprove && hitlSummary && hitlStage && !reviewOpen && (
         <div role="status" className="flex flex-col items-start gap-3 rounded-lg border border-hitl/40 bg-hitl/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-semibold text-content">Your review is needed to continue</p>
@@ -261,7 +286,7 @@ export default function RunPage() {
         </div>
       )}
 
-      {status !== null && HITL_STATUSES.has(status) && hitlSummary && hitlStage && reviewOpen && (
+      {atCheckpoint && mayApprove && hitlSummary && hitlStage && reviewOpen && (
         <HitlModal
           runId={id}
           stage={hitlStage}

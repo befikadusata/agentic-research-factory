@@ -26,6 +26,20 @@ async def test_create_run_success(client, mock_user):
 
 
 @pytest.mark.asyncio
+async def test_create_run_response_carries_owner_and_no_monitor(client, mock_user):
+    """A hand-started run is owned by the caller and belongs to no monitor.
+
+    Both fields drive UI decisions — `user_id` mirrors the owner-always-passes
+    rule in `assert_run_access`, `monitor_id` distinguishes a monitored run —
+    so they have to survive serialization, not just live on the model."""
+    response = await client.post("/runs", json={"topic": "Owner check", "format": "report", "doc_ids": []})
+    assert response.status_code == 201
+    data = response.json()
+    assert data["user_id"] == mock_user
+    assert data["monitor_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_list_runs_user_isolation(client, mock_user):
     response = await client.get("/runs")
     assert response.status_code == 200
