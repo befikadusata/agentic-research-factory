@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
 from sqlalchemy import select, update as sa_update
@@ -10,15 +11,56 @@ from config import settings
 from database import AsyncSessionLocal
 from models import Run, RunStatus
 from logger import logger
-from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential, before_sleep_log
+from tenacity import (
+    AsyncRetrying,
+    stop_after_attempt,
+    wait_exponential,
+    before_sleep_log,
+    retry_if_not_exception_type,
+)
 from configs.verticals import build_execution_brief, get_vertical
+from utils.blocking import run_in_daemon_thread
 from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_INSTRUCTION_KEY
 from utils.cost_tracker import log_cost, run_cost_total
 from utils.pricing import calculate_cost
 from services.eval_service import evaluate_output
 from services.monitor_service import finalize_monitored_run
 
-LLM_STAGE_TIMEOUT_SEC = 300
+# Total LLM wall-clock one Celery task (one pipeline segment) may spend. Held
+# under task_soft_time_limit so a slow segment fails inside its own task —
+# persisting `failed` with an error message — instead of being SIGKILLed and left
+# for the RUN_STUCK_TIMEOUT_MIN reaper to notice minutes later.
+SEGMENT_BUDGET_SEC = max(1, settings.TASK_SOFT_TIME_LIMIT_SEC - settings.SEGMENT_BUDGET_MARGIN_SEC)
+
+# Cap on any single invoke, clamped so a misconfigured per-stage timeout can't
+# reintroduce the overrun the segment budget exists to prevent.
+LLM_STAGE_TIMEOUT_SEC = min(settings.LLM_STAGE_TIMEOUT_SEC, SEGMENT_BUDGET_SEC)
+
+
+class StageTimeout(Exception):
+    """A graph invoke outlasted its slice of the segment budget.
+
+    Distinct from a bare TimeoutError on purpose: since 3.10 `asyncio.TimeoutError`,
+    `socket.timeout` and the builtin `TimeoutError` are all the same class, so a
+    transient network timeout inside an LLM call is indistinguishable from ours.
+    Those should still be retried; this must not be (see the retry predicate).
+    """
+
+
+class _Budget:
+    """A wall-clock deadline shared by every graph invoke in one Celery task.
+
+    Bounding each invoke on its own was not enough: stop_after_attempt(3) at
+    LLM_STAGE_TIMEOUT_SEC each is 3x the per-call cap, and _resume_graph_at makes
+    two such calls — roughly 1800s against a 600s soft limit. One shared deadline
+    makes the whole segment fit regardless of how the retries fall out.
+    """
+
+    def __init__(self, total: float = SEGMENT_BUDGET_SEC):
+        self._deadline = time.monotonic() + total
+
+    def remaining(self) -> float:
+        return self._deadline - time.monotonic()
 
 # run.metrics sub-key holding the few graph-internal fields that aren't already
 # their own Run column (plan_output, retry_count). They must survive across the
@@ -167,7 +209,13 @@ async def reap_orphaned_runs() -> list[str]:
     return reaped
 
 
-async def _invoke_supervisor_with_retry(supervisor, state: dict | None, config: dict, recursion_limit: int = 25):
+async def _invoke_supervisor_with_retry(
+    supervisor,
+    state: dict | None,
+    config: dict,
+    recursion_limit: int = 25,
+    budget: "_Budget | None" = None,
+):
     """Run (or resume) the graph up to its next interrupt point or END.
 
     `state=None` resumes an in-progress thread (`config["configurable"]["thread_id"]`)
@@ -180,28 +228,58 @@ async def _invoke_supervisor_with_retry(supervisor, state: dict | None, config: 
     overwrite those checkpointed channels with the stale entry values (e.g.
     plan_output -> "" from the reconstructed state), throwing away completed work
     and re-billing it. Resuming re-runs only the failed super-step. (M1)
+
+    Every attempt draws on the caller's `budget` (a fresh whole-segment one if
+    omitted), so the retries can never collectively outrun the Celery task limit.
     """
+    budget = budget or _Budget()
     call_config = {**config, "recursion_limit": recursion_limit}
     async for attempt in AsyncRetrying(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         before_sleep=before_sleep_log(logger, logging.WARNING),
+        # A StageTimeout means the previous invoke is STILL RUNNING on its
+        # abandoned thread. Retrying would put a second invoke on the same
+        # LangGraph thread_id concurrently, with both writing the same checkpoint.
+        # Timeouts are terminal here; ordinary node failures still retry.
+        retry=retry_if_not_exception_type(StageTimeout),
     ):
         with attempt:
             invoke_input = state if attempt.retry_state.attempt_number == 1 else None
-            call = asyncio.to_thread(supervisor.invoke, invoke_input, call_config)
-            return await asyncio.wait_for(call, timeout=LLM_STAGE_TIMEOUT_SEC)
+            slice_sec = min(LLM_STAGE_TIMEOUT_SEC, budget.remaining())
+            if slice_sec <= 0:
+                raise StageTimeout("segment compute budget exhausted")
+            # run_in_daemon_thread, NOT asyncio.to_thread: the default executor's
+            # threads are joined by asyncio.run() at task teardown, so a timed-out
+            # invoke would hold the worker child until it finished anyway.
+            call = run_in_daemon_thread(
+                supervisor.invoke, invoke_input, call_config, name="graph-invoke"
+            )
+            try:
+                return await asyncio.wait_for(call, timeout=slice_sec)
+            except asyncio.TimeoutError:
+                raise StageTimeout(f"graph invoke exceeded {slice_sec:.0f}s") from None
 
 
-async def _resume_graph_at(supervisor, entry_state: dict, config: dict, recursion_limit: int = 25):
+async def _resume_graph_at(
+    supervisor,
+    entry_state: dict,
+    config: dict,
+    recursion_limit: int = 25,
+    budget: "_Budget | None" = None,
+):
     """Re-enter the graph at `entry_state["_resume_from"]` in a fresh process.
 
     Because that node sits behind interrupt_before, the first invoke only loads
     the reconstructed state and pauses *before* the node; invoke(None) then runs
     it onward to the next interrupt or END. Returns the resulting state.
+
+    Both invokes share one budget — separately budgeted, this pair alone could
+    double the segment's allowance.
     """
-    await _invoke_supervisor_with_retry(supervisor, entry_state, config, recursion_limit)
-    return await _invoke_supervisor_with_retry(supervisor, None, config, recursion_limit)
+    budget = budget or _Budget()
+    await _invoke_supervisor_with_retry(supervisor, entry_state, config, recursion_limit, budget)
+    return await _invoke_supervisor_with_retry(supervisor, None, config, recursion_limit, budget)
 
 
 def _dispatch_resume(run_id: str, approved_gate: str | None):
@@ -242,7 +320,14 @@ def _make_step_cb(rid: str, loop: asyncio.AbstractEventLoop):
             "message": str(step)[:300],
             "ts":      datetime.now(timezone.utc).isoformat(),
         }
-        asyncio.run_coroutine_threadsafe(emit(rid, "log", data), loop)
+        coro = emit(rid, "log", data)
+        try:
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        except RuntimeError:
+            # Loop already closed: this callback belongs to an invoke that timed
+            # out and was abandoned, whose task has since returned. Nothing is
+            # listening, and raising here would only noise up the orphan thread.
+            coro.close()
     return _step_cb
 
 
@@ -339,6 +424,9 @@ async def _run_start_segment(run_id: UUID):
     if not await _claim_status(run_id, RunStatus.pending, RunStatus.researching):
         logger.bind(run_id=rid).info("start_segment_already_claimed")
         return
+
+    # One budget for the whole segment, spent across every invoke below.
+    budget = _Budget()
 
     async with AsyncSessionLocal() as db:
         run = await db.get(Run, run_id)
@@ -442,7 +530,7 @@ async def _run_start_segment(run_id: UUID):
     if task_type == "lead_intel":
         # Generate, review (and retry once on critical failure), then pause for final approval.
         final_state = await _invoke_supervisor_with_retry(
-            supervisor, initial_state, config, recursion_limit=15
+            supervisor, initial_state, config, recursion_limit=15, budget=budget
         )
         await emit(rid, "agent_end", {"stage": "research"})
         await _log_token_usages(rid, final_state.get("token_usages", []))
@@ -485,7 +573,7 @@ async def _run_start_segment(run_id: UUID):
 
     # research_report: plan → research → pause before analyse (research approval).
     state = await _invoke_supervisor_with_retry(
-        supervisor, initial_state, config, recursion_limit=25
+        supervisor, initial_state, config, recursion_limit=25, budget=budget
     )
     await emit(rid, "agent_end", {"stage": "research"})
     await _log_token_usages(rid, state.get("token_usages", []))
@@ -529,6 +617,8 @@ async def _run_analyse_segment(run_id: UUID):
     if not await _claim_status(run_id, RunStatus.awaiting_research_approval, RunStatus.analyzing):
         log.info("analyse_segment_stale_resume")
         return
+
+    budget = _Budget()
 
     user_feedback = await _pop_instruction(rid)
 
@@ -574,7 +664,7 @@ async def _run_analyse_segment(run_id: UUID):
     await emit(rid, "status", {"status": "analyzing"})
     await emit(rid, "agent_start", {"stage": "analysis"})
 
-    state = await _resume_graph_at(supervisor, entry_state, config, recursion_limit=25)
+    state = await _resume_graph_at(supervisor, entry_state, config, recursion_limit=25, budget=budget)
     await emit(rid, "agent_end", {"stage": "analysis"})
     await _log_token_usages(rid, state.get("token_usages", []))
 
@@ -639,6 +729,8 @@ async def _run_write_segment(run_id: UUID):
         log.info("write_segment_stale_resume")
         return
 
+    budget = _Budget()
+
     user_feedback = await _pop_instruction(rid)
 
     async with AsyncSessionLocal() as db:
@@ -684,7 +776,7 @@ async def _run_write_segment(run_id: UUID):
     await emit(rid, "status", {"status": "writing"})
     await emit(rid, "agent_start", {"stage": "writing"})
 
-    state = await _resume_graph_at(supervisor, entry_state, config, recursion_limit=25)
+    state = await _resume_graph_at(supervisor, entry_state, config, recursion_limit=25, budget=budget)
     await emit(rid, "agent_end", {"stage": "writing"})
     await _log_token_usages(rid, state.get("token_usages", []))
 

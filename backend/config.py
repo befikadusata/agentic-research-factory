@@ -65,6 +65,23 @@ class Settings(BaseSettings):
     # mistaken for a dead one. (M3)
     RUN_STUCK_TIMEOUT_MIN: int = 20
 
+    # Celery per-task limits, and the LLM budget derived from them. These live
+    # together because they have to stay consistent: the retry budget used to be
+    # set independently (LLM_STAGE_TIMEOUT_SEC x 3 tenacity attempts = 900s, and a
+    # resumed segment makes two such calls ≈ 1800s) against a 600s soft limit, so
+    # a slow stage was SIGKILLed mid-flight and the run sat non-terminal until the
+    # RUN_STUCK_TIMEOUT_MIN reaper caught it. run_service now spends one shared
+    # SEGMENT budget across every invoke in a task, and that budget is kept under
+    # the soft limit by SEGMENT_BUDGET_MARGIN_SEC so the segment always fails
+    # cleanly — persisting `failed` and an error message — inside its own task.
+    TASK_SOFT_TIME_LIMIT_SEC: int = 600   # SIGTERM; task can still clean up
+    TASK_TIME_LIMIT_SEC: int = 660        # SIGKILL if it ignored the above
+    # Cap on a single graph invoke. The segment budget can shrink it further.
+    LLM_STAGE_TIMEOUT_SEC: int = 300
+    # Headroom left inside the soft limit for the non-LLM work in a segment
+    # (evals, DB writes, checkpoint teardown) plus the failure path itself.
+    SEGMENT_BUDGET_MARGIN_SEC: int = 60
+
     # Per-run LLM spend ceiling in USD. Once a run's accumulated cost (summed from
     # its run_costs rows plus the in-flight segment) reaches this, the reviewer
     # retry loop stops re-running the heavy research→analyse→review triad and the
