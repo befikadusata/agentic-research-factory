@@ -13,6 +13,7 @@ import { HitlModal } from "@/components/HitlModal";
 import { OutputPanel } from "@/components/OutputPanel";
 import { ConfidenceBadge } from "@/components/ConfidenceBadge";
 import { MonitorDiffPanel } from "@/components/MonitorDiffPanel";
+import { SourcesPanel } from "@/components/SourcesPanel";
 import { PlaybookIcon } from "@/components/PlaybookIcon";
 import type { RunDetail, LogEntry, RunStatus } from "@/lib/types";
 import { normalizeLogEntry } from "@/lib/logs";
@@ -286,6 +287,7 @@ export default function RunPage() {
         <>
           <MonitorDiffPanel diff={run.metrics?.monitor_diff} />
           <ConfidenceBadge scores={run.metrics?.eval_scores} vertical={run.vertical} />
+          <SourcesPanel citations={run.metrics?.citations} />
           {!run.monitor_id && (
             <div className="flex justify-end">
               <Link

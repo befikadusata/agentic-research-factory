@@ -162,10 +162,23 @@ export interface MonitorDiff {
   baseline?: boolean;
 }
 
+/** A source the report attributes a claim to.
+ *
+ *  `page` is a URL for web citations and a page number for citations into an
+ *  uploaded document. `verified` says whether the run actually retrieved that
+ *  URL: false means the model produced it without ever fetching it. It is
+ *  absent when no claim can be made — document citations have no URL to check,
+ *  and runs from before source-ledgering was added were never checked at all. */
+export interface Citation {
+  source: string;
+  page: string;
+  verified?: boolean;
+}
+
 export interface RunMetrics {
   eval_scores?: EvalScores;
   latency_sec?: number;
-  citations?: unknown[];
+  citations?: Citation[];
   monitor_diff?: MonitorDiff;
 }
 

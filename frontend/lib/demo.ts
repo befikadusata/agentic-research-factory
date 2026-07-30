@@ -262,6 +262,15 @@ function seedRuns(): RunDetail[] {
           overall: 88,
           issues: ["Pricing tiers were captured from a single regional page and may vary by market."],
         },
+        // One unverified source on purpose: agents do cite pages they never
+        // fetched, and the demo is not honest about the product if it only
+        // ever shows the clean case.
+        citations: [
+          { source: "Northwind pricing page", page: "https://northwind-logistics.example/pricing", verified: true },
+          { source: "Q3 partner announcement", page: "https://northwind-logistics.example/press/q3-partners", verified: true },
+          { source: "Freight Weekly market review", page: "https://freight-weekly.example/market-review", verified: true },
+          { source: "industry analysts", page: "https://logistics-analysts.example/report", verified: false },
+        ],
       },
     },
     {
