@@ -131,6 +131,10 @@ export const VERTICALS: VerticalDefinition[] = [
 
 export interface Run {
   id: string;
+  /** Principal who started the run (`<provider>:<email>`). Optional because a
+   *  response cached from before the backend sent it has none — treat "absent"
+   *  as "ownership unknown", never as "not the owner". */
+  user_id?: string;
   topic: string;
   format: OutputFormat;
   status: RunStatus;
@@ -140,6 +144,8 @@ export interface Run {
   vertical_inputs?: Record<string, string>;
   created_at: string;
   monitor_id?: string | null;
+  /** Null for a personal run. The list endpoint filters on it server-side. */
+  workspace_id?: string | null;
 }
 
 /** LLM-judge quality scores (0–100 per dimension) computed once a run completes. */
@@ -160,10 +166,23 @@ export interface MonitorDiff {
   baseline?: boolean;
 }
 
+/** A source the report attributes a claim to.
+ *
+ *  `page` is a URL for web citations and a page number for citations into an
+ *  uploaded document. `verified` says whether the run actually retrieved that
+ *  URL: false means the model produced it without ever fetching it. It is
+ *  absent when no claim can be made — document citations have no URL to check,
+ *  and runs from before source-ledgering was added were never checked at all. */
+export interface Citation {
+  source: string;
+  page: string;
+  verified?: boolean;
+}
+
 export interface RunMetrics {
   eval_scores?: EvalScores;
   latency_sec?: number;
-  citations?: unknown[];
+  citations?: Citation[];
   monitor_diff?: MonitorDiff;
 }
 
@@ -196,6 +215,19 @@ export interface CreateMonitorInput {
   notify_channel?: string | null;
 }
 
+/** One recorded LLM call's token usage and cost, filed under the agent that made
+ *  it. An agent that ran more than once contributes more than one row, so these
+ *  are summed per agent before display. */
+export interface RunCost {
+  id: string;
+  run_id: string;
+  agent_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_cost: number;
+  created_at: string;
+}
+
 export interface RunDetail extends Run {
   logs: LogEntry[];
   research_output: string | null;
@@ -203,6 +235,44 @@ export interface RunDetail extends Run {
   final_output: string | null;
   error_message?: string | null;
   metrics?: RunMetrics;
+  /** Optional because a failed run may have spent nothing, and because a
+   *  response cached from before the UI read this field has no rows. */
+  costs?: RunCost[];
+}
+
+/** Aggregates from `GET /analytics/metrics`.
+ *
+ *  Counts **completed runs only** — a run that failed has no scores to average,
+ *  so it is excluded here even though it still cost money. That is why this
+ *  count and the cost totals below are not drawn from the same population. */
+export interface AnalyticsMetrics {
+  count: number;
+  averages: {
+    latency_sec?: number;
+    citations?: number;
+    accuracy?: number;
+    relevance?: number;
+    completeness?: number;
+    writing_quality?: number;
+    overall?: number;
+  };
+}
+
+export interface AgentCost {
+  agent_name: string;
+  cost: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/** Aggregates from `GET /analytics/costs`, over **every** run in scope —
+ *  including failed ones, whose spend is real and is exactly what someone
+ *  looking at a cost page needs to see. */
+export interface AnalyticsCosts {
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  per_agent: AgentCost[];
 }
 
 export interface LogEntry {
@@ -211,12 +281,29 @@ export interface LogEntry {
   ts: string;
 }
 
+/** Ingest state of an uploaded PDF. Chunking happens in a background worker
+ *  after the upload responds, so a doc is only usable as run context once it
+ *  reaches "ready" — at "pending" it has no chunks to retrieve. */
+export type DocumentStatus = "pending" | "ready" | "failed";
+
+export interface DocumentState {
+  doc_id: string;
+  filename: string;
+  status: DocumentStatus;
+  vertical?: string | null;
+  chunk_count?: number | null;
+  error_message?: string | null;
+}
+
 export type WorkspaceRole = "viewer" | "operator" | "admin";
 
 export interface Workspace {
   id: string;
   name: string;
   owner_id: string;
+  /** The *signed-in user's* role in this workspace, not a property of the
+   *  workspace itself. Drives which actions the UI offers. */
+  role: WorkspaceRole;
 }
 
 export interface WorkspaceMember {
@@ -295,6 +382,26 @@ export function statusBadgeClass(status: RunStatus): string {
  * a "failed" run actually failed — without it, the failure point is unknown
  * (e.g. runs that failed before this field existed) and every node stays idle.
  */
+/**
+ * Whether the signed-in user may approve this run's HITL checkpoint.
+ *
+ * Mirrors `assert_run_access(..., min_role="operator")` in backend/auth.py: a
+ * run's own creator always passes, while access granted *via* a workspace needs
+ * operator or higher. Anything undeterminable locally — unknown owner, unknown
+ * role — resolves to `true` and lets the server decide. Hiding the control on a
+ * guess would be a worse failure than the 403 it exists to prevent.
+ */
+export function canApproveRun(
+  run: Pick<Run, "user_id" | "workspace_id">,
+  workspaceRole: WorkspaceRole | undefined,
+  sessionUserId: string | undefined
+): boolean {
+  if (!run.workspace_id) return true;
+  if (!run.user_id || run.user_id === sessionUserId) return true;
+  if (!workspaceRole) return true;
+  return workspaceRole === "operator" || workspaceRole === "admin";
+}
+
 export function pipelineNodeState(
   status: RunStatus,
   nodeId: string,

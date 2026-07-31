@@ -99,11 +99,19 @@ class HitlApproveRequest(BaseModel):
 
 class RunResponse(BaseModel):
     id: UUID
+    # Who started the run. The UI needs it to mirror `assert_run_access`, which
+    # lets a run's owner approve their own HITL gate regardless of workspace
+    # role. Discloses nothing new: this endpoint is already owner-or-member
+    # scoped, and members can read the same principals off the member roster.
+    user_id: str
     topic: str
     format: str
     status: RunStatus
     failed_at_status: Optional[RunStatus] = None
     workspace_id: Optional[UUID]
+    # Set when a monitor spawned this run. Without it the UI can't tell a
+    # monitored run from a one-off and offers to "save as monitor" for both.
+    monitor_id: Optional[UUID] = None
     vertical: Optional[str] = None
     vertical_inputs: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime

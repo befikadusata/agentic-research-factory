@@ -55,7 +55,6 @@ jobs:
         env:
           DATABASE_URL: "postgresql+asyncpg://user:password@localhost:5432/research_factory_test"
           BACKEND_JWT_SECRET: "test-secret"
-          NEXTAUTH_SECRET: "test-secret"
         run: uv run alembic upgrade head
 
       - name: Run tests
@@ -68,7 +67,6 @@ jobs:
           FIRECRAWL_API_KEY: "mock"
           LLAMA_CLOUD_API_KEY: "mock"
           BACKEND_JWT_SECRET: "test-secret"
-          NEXTAUTH_SECRET: "test-secret"
         run: uv run pytest
 
   frontend:
@@ -126,7 +124,10 @@ jobs:
         # All backend calls are mocked via Playwright route intercepts — no backend service needed.
         env:
           NEXT_PUBLIC_BACKEND_URL: "http://localhost:8000"
-          NEXTAUTH_URL: "http://localhost:3000"
+          # playwright.config.ts overrides this for the dev server it starts;
+          # kept in step for anything that reads it before then, and matching
+          # that config's port so the two can't be read as disagreeing.
+          NEXTAUTH_URL: "http://localhost:3200"
           NEXTAUTH_SECRET: "test-secret-at-least-32-chars-long-for-e2e"
           BACKEND_JWT_SECRET: "test-secret"
         run: npx playwright test

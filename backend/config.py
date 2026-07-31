@@ -65,6 +65,23 @@ class Settings(BaseSettings):
     # mistaken for a dead one. (M3)
     RUN_STUCK_TIMEOUT_MIN: int = 20
 
+    # Celery per-task limits, and the LLM budget derived from them. These live
+    # together because they have to stay consistent: the retry budget used to be
+    # set independently (LLM_STAGE_TIMEOUT_SEC x 3 tenacity attempts = 900s, and a
+    # resumed segment makes two such calls ≈ 1800s) against a 600s soft limit, so
+    # a slow stage was SIGKILLed mid-flight and the run sat non-terminal until the
+    # RUN_STUCK_TIMEOUT_MIN reaper caught it. run_service now spends one shared
+    # SEGMENT budget across every invoke in a task, and that budget is kept under
+    # the soft limit by SEGMENT_BUDGET_MARGIN_SEC so the segment always fails
+    # cleanly — persisting `failed` and an error message — inside its own task.
+    TASK_SOFT_TIME_LIMIT_SEC: int = 600   # SIGTERM; task can still clean up
+    TASK_TIME_LIMIT_SEC: int = 660        # SIGKILL if it ignored the above
+    # Cap on a single graph invoke. The segment budget can shrink it further.
+    LLM_STAGE_TIMEOUT_SEC: int = 300
+    # Headroom left inside the soft limit for the non-LLM work in a segment
+    # (evals, DB writes, checkpoint teardown) plus the failure path itself.
+    SEGMENT_BUDGET_MARGIN_SEC: int = 60
+
     # Per-run LLM spend ceiling in USD. Once a run's accumulated cost (summed from
     # its run_costs rows plus the in-flight segment) reaches this, the reviewer
     # retry loop stops re-running the heavy research→analyse→review triad and the
@@ -114,8 +131,14 @@ class Settings(BaseSettings):
     # sibling database; set this to override where the test schema lives.
     TEST_DATABASE_URL: str | None = None
     REDIS_URL: str = "redis://localhost:6379/0"
+    # Shared HS256 signing key. The frontend mints tokens with it in
+    # /api/backend-token; auth.py verifies them. Both sides must carry the SAME
+    # value or every authenticated request 401s — see _validate_secret below.
+    #
+    # NEXTAUTH_SECRET is deliberately absent: it belongs to NextAuth in the
+    # frontend and nothing here has ever read it. Declaring it required meant a
+    # fresh clone refused to boot over a variable the backend does not use.
     BACKEND_JWT_SECRET: str
-    NEXTAUTH_SECRET: str
     FRONTEND_URL: str = "http://localhost:3000"
     BACKEND_URL: str = "http://localhost:8000"
 
@@ -128,9 +151,16 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "no-reply@research-factory.local"
     SMTP_STARTTLS: bool = True
 
-    # V2 — 14.1 Persistent Vector DB
-    SUPABASE_URL: str | None = None
-    SUPABASE_KEY: str | None = None
+    # Persistent vector store for uploaded-document RAG. `vecs` is a thin
+    # pgvector client (pgvector + psycopg2 + SQLAlchemy — no Supabase SDK), so
+    # this is any Postgres with the vector extension, including the pgvector
+    # image Compose already runs. Left unset it is derived from DATABASE_URL
+    # below, which is why it has no separate entry in .env.example.
+    #
+    # It cannot simply reuse DATABASE_URL: that carries the +asyncpg driver for
+    # SQLAlchemy's async engine, and vecs drives psycopg2 synchronously.
+    VECTOR_DB_URL: str | None = None
+    # Deprecated former name, still read so an existing .env keeps working.
     SUPABASE_DB_URL: str | None = None
 
     # Langfuse for observability
@@ -162,6 +192,29 @@ if os.environ.get("TESTING") == "1":
         raise RuntimeError("TEST_DATABASE_URL must differ from DATABASE_URL")
     settings.DATABASE_URL = _target
 
+# Older configs named this SUPABASE_DB_URL. Without this the value would be
+# ignored and the derivation below would silently repoint the vector store at
+# the local database — moving someone's embeddings out from under them.
+if settings.SUPABASE_DB_URL and not settings.VECTOR_DB_URL:
+    settings.VECTOR_DB_URL = settings.SUPABASE_DB_URL
+    logger.warning("SUPABASE_DB_URL is deprecated — rename it to VECTOR_DB_URL")
+
+# Derive the vecs DSN from the application database unless one is set
+# explicitly. Runs AFTER the TESTING redirect above so the suite's vector
+# collections land in the `_test` database alongside its tables, never in the
+# real one. The only transform is dropping the async driver: DATABASE_URL is
+# `postgresql+asyncpg://` for SQLAlchemy's async engine, while vecs uses
+# psycopg2 and needs the bare `postgresql://` scheme.
+if not settings.VECTOR_DB_URL:
+    from sqlalchemy.engine import make_url
+
+    # render_as_string(hide_password=False) — str(url) would mask the password.
+    settings.VECTOR_DB_URL = (
+        make_url(settings.DATABASE_URL)
+        .set(drivername="postgresql")
+        .render_as_string(hide_password=False)
+    )
+
 _PROD_REQUIRED = ["TAVILY_API_KEY", "FIRECRAWL_API_KEY", "LLAMA_CLOUD_API_KEY"]
 
 _FEATURE_LABEL = {
@@ -171,11 +224,66 @@ _FEATURE_LABEL = {
 }
 
 
+# The signing keys the repo ships. backend/.env.example, frontend/.env.local.example
+# and docker-compose.yml all carry the same throwaway value on purpose, so that
+# `cp backend/.env.example backend/.env && docker compose up` authenticates with
+# no manual edits. Previously they disagreed, and the stack booted healthy while
+# every authenticated request 401'd with nothing pointing at the cause.
+#
+# "test-secret" is CI's value; it is listed for the same reason.
+_DEV_JWT_SECRETS = frozenset({
+    "dummy-secret",
+    "test-secret",
+    "generate-with-openssl-rand-hex-32",
+})
+
+# `openssl rand -hex 32` is what every doc recommends; that is 64 chars. 32 is a
+# floor, not a target — it only rejects values obviously too short for HS256.
+_MIN_JWT_SECRET_LEN = 32
+
+
+def _validate_secret(s: Settings) -> None:
+    """Refuse to start production with a shipped or trivially weak signing key.
+
+    Shipping a working default is what makes a fresh clone boot, but it is only
+    safe if promoting that same file to production fails loudly: anyone holding
+    this key can mint a token for any `sub` and impersonate any user.
+    """
+    if s.ENVIRONMENT != "production":
+        return
+    if s.BACKEND_JWT_SECRET in _DEV_JWT_SECRETS:
+        raise RuntimeError(
+            "BACKEND_JWT_SECRET is still a shipped development value. Generate "
+            "one with `openssl rand -hex 32` and set it in BOTH the backend and "
+            "frontend environments — they must match."
+        )
+    if len(s.BACKEND_JWT_SECRET) < _MIN_JWT_SECRET_LEN:
+        raise RuntimeError(
+            f"BACKEND_JWT_SECRET must be at least {_MIN_JWT_SECRET_LEN} "
+            f"characters in production (got {len(s.BACKEND_JWT_SECRET)})."
+        )
+
+
+def _is_blank(value: str | None) -> bool:
+    """Treat unset, empty, and whitespace-only as equally missing.
+
+    These come from a `.env` file, where `TAVILY_API_KEY=` is a far more natural
+    way to disable a key than deleting the line — and pydantic reads that as `""`,
+    not `None`. An `is None` check let it through, so production booted clean and
+    then failed on the first search call, which is exactly what the fail-fast is
+    supposed to prevent.
+    """
+    return value is None or not value.strip()
+
+
 def validate_config(s: Settings) -> None:
-    missing = [k for k in _PROD_REQUIRED if getattr(s, k) is None]
-    if s.SEARXNG_URL:
+    _validate_secret(s)
+    missing = [k for k in _PROD_REQUIRED if _is_blank(getattr(s, k))]
+    # A blank URL must not exempt anything either: it would waive the key check
+    # for a self-hosted backend that isn't actually configured.
+    if not _is_blank(s.SEARXNG_URL):
         missing = [k for k in missing if k != "TAVILY_API_KEY"]
-    if s.FIRECRAWL_API_URL:
+    if not _is_blank(s.FIRECRAWL_API_URL):
         missing = [k for k in missing if k != "FIRECRAWL_API_KEY"]
     if not missing:
         return

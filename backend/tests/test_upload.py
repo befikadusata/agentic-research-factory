@@ -1,4 +1,5 @@
 import io
+import threading
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from uuid import uuid4
@@ -326,3 +327,77 @@ async def test_ingest_doc_sets_failed_on_error(db_session):
     await db_session.refresh(doc)
     assert doc.status == DocumentStatus.failed
     assert "parse error" in (doc.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_ingest_doc_marks_failed_when_no_chunks_extracted(db_session):
+    """parse_pdf swallows every parser failure and returns []. That used to be
+    recorded as `ready` with chunk_count=0: the UI reported a successful upload
+    while nothing was embedded, so every later run silently ran with no document
+    context."""
+    ws = Workspace(name="empty-ws", owner_id="user4")
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    doc = Document(
+        workspace_id=ws.id,
+        uploaded_by="user4",
+        filename="scanned.pdf",
+        file_path="/tmp/scanned.pdf",
+        file_size_bytes=100,
+    )
+    db_session.add(doc)
+    await db_session.commit()
+    await db_session.refresh(doc)
+
+    with patch("services.ingest_service.AsyncSessionLocal") as mock_session_cls, \
+         patch("services.ingest_service.parse_pdf", new_callable=AsyncMock, return_value=[]), \
+         patch("services.ingest_service.ingest_documents") as mock_ingest:
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=db_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_session_cls.return_value = mock_ctx
+
+        from services.ingest_service import ingest_doc
+        await ingest_doc(doc.id)
+
+    await db_session.refresh(doc)
+    assert doc.status == DocumentStatus.failed
+    assert doc.chunk_count == 0
+    assert doc.error_message
+    # Nothing was embedded, so the vector store must not have been touched.
+    mock_ingest.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_parse_pdf_timeout_abandons_the_parse_thread():
+    """A docling parse that blows the timeout must not keep the caller (and, in
+    production, the Celery worker child) waiting for it. The old
+    run_in_executor(None, ...) submitted to the loop's default executor, whose
+    threads asyncio.run() joins at teardown, so the guard fired but the task
+    still hung for the parse's full duration."""
+    import asyncio
+    import time
+    import services.pdf_service as pdf_service
+
+    started = threading.Event()
+    released = threading.Event()
+
+    def _slow_parse(path):
+        started.set()
+        released.wait(30)      # far longer than the timeout below
+        return [{"text": "too late", "metadata": {}}]
+
+    with patch.object(pdf_service, "_parse_with_docling", _slow_parse), \
+         patch.object(pdf_service, "PDF_PARSE_TIMEOUT_SEC", 0.2), \
+         patch.object(pdf_service.settings, "LLAMA_CLOUD_API_KEY", None):
+        began = time.monotonic()
+        chunks = await asyncio.wait_for(pdf_service.parse_pdf("/tmp/slow.pdf"), timeout=5)
+        elapsed = time.monotonic() - began
+
+    assert chunks == []
+    assert started.is_set()          # the parse really did start...
+    assert elapsed < 3               # ...and we returned without waiting it out
+    released.set()                   # let the orphan thread finish

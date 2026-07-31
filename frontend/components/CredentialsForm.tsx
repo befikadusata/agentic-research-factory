@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
+import { resendVerification } from "@/lib/verification";
 
 type Mode = "login" | "register";
 
@@ -47,27 +48,31 @@ export function CredentialsForm() {
     if (result?.error) {
       if (result.error.includes("EMAIL_NOT_VERIFIED")) {
         setError("Your email isn't verified yet. Check your inbox, or resend the link below.");
-        setShowResend(true);
       } else {
         setError("Invalid email or password.");
       }
+      // Offered on a wrong password too, not just the unverified 403. The
+      // backend checks the password first, so an unverified account with a
+      // mistyped password answers 401 — and that user needs this link most.
+      setShowResend(true);
       return;
     }
     window.location.assign("/");
   }
 
   async function handleResend() {
-    resetMessages();
+    // Not resetMessages(): that clears showResend, which would take this button
+    // away the moment it's pressed — leaving no way to retry a failed send.
+    setError(null);
+    setNotice(null);
+    setDevLink(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/auth/resend-verification`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json().catch(() => ({}));
+      const { devVerificationUrl } = await resendVerification(email);
       setNotice(`If an unverified account exists for ${email}, a new link is on its way.`);
-      if (data.dev_verification_url) setDevLink(data.dev_verification_url);
+      setDevLink(devVerificationUrl);
+    } catch {
+      setError("We couldn’t send a new link just now. Please try again.");
     } finally {
       setSubmitting(false);
     }

@@ -1,6 +1,6 @@
 import pytest
 from httpx import AsyncClient
-from models import Run, RunStatus
+from models import Run, RunCost, RunStatus
 
 
 async def _make_run(db, user_id: str, status: RunStatus = RunStatus.pending) -> Run:
@@ -23,6 +23,20 @@ async def test_create_run_success(client, mock_user):
     assert response.status_code == 201
     data = response.json()
     assert data["topic"] == "AI in healthcare"
+
+
+@pytest.mark.asyncio
+async def test_create_run_response_carries_owner_and_no_monitor(client, mock_user):
+    """A hand-started run is owned by the caller and belongs to no monitor.
+
+    Both fields drive UI decisions — `user_id` mirrors the owner-always-passes
+    rule in `assert_run_access`, `monitor_id` distinguishes a monitored run —
+    so they have to survive serialization, not just live on the model."""
+    response = await client.post("/runs", json={"topic": "Owner check", "format": "report", "doc_ids": []})
+    assert response.status_code == 201
+    data = response.json()
+    assert data["user_id"] == mock_user
+    assert data["monitor_id"] is None
 
 
 @pytest.mark.asyncio
@@ -93,6 +107,35 @@ async def test_run_detail_response_fields(client, auth_as, db_session):
     assert "error_message" in data
     assert data["error_message"] == "something went wrong"
     assert "updated_at" in data
+
+
+@pytest.mark.asyncio
+async def test_run_detail_reports_cost_rows_for_a_failed_run(client, auth_as, db_session):
+    """`costs` is what the run page's cost panel reads.
+
+    Asserted on a *failed* run on purpose: a run that dies mid-pipeline has
+    still spent tokens, and that spend is exactly what someone needs to see. The
+    panel renders outside the "complete" branch to match.
+    """
+    uid = "cost-detail@example.com"
+    auth_as(uid)
+
+    run = Run(user_id=uid, topic="Cost test", format="report", status=RunStatus.failed, doc_paths=[])
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(run)
+    db_session.add_all([
+        RunCost(run_id=run.id, agent_name="researcher", input_tokens=800, output_tokens=120, total_cost=0.004),
+        RunCost(run_id=run.id, agent_name="researcher", input_tokens=300, output_tokens=60, total_cost=0.002),
+    ])
+    await db_session.commit()
+
+    data = (await client.get(f"/runs/{run.id}")).json()
+    # One row per call, not pre-summed per agent — the UI folds them.
+    assert len(data["costs"]) == 2
+    assert {c["agent_name"] for c in data["costs"]} == {"researcher"}
+    assert sum(c["input_tokens"] for c in data["costs"]) == 1100
+    assert abs(sum(c["total_cost"] for c in data["costs"]) - 0.006) < 1e-9
 
 
 @pytest.mark.asyncio

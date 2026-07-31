@@ -49,7 +49,10 @@ export function ManageMembersModal({
   onOpenChange: (open: boolean) => void;
 }) {
   const { data: session } = useSession();
-  const isOwner = session?.user?.id === workspace.owner_id;
+  // Mirrors the backend's two independent grants: the admin role, or ownership.
+  // Gating on ownership alone hid these controls from a promoted admin the
+  // server would have accepted.
+  const mayManage = session?.user?.id === workspace.owner_id || workspace.role === "admin";
 
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -198,7 +201,7 @@ export function ManageMembersModal({
                           {isWorkspaceOwner && " · owner"}
                         </p>
                       </div>
-                      {isOwner && !isWorkspaceOwner && (
+                      {mayManage && !isWorkspaceOwner && (
                         <button
                           type="button"
                           onClick={() => requestRemoval(member)}
@@ -215,7 +218,7 @@ export function ManageMembersModal({
             )}
           </section>
 
-          {isOwner ? (
+          {mayManage ? (
             <form onSubmit={handleAdd} className="mt-6 space-y-4 border-t border-border-subtle pt-5">
               <h3 className="text-xs font-bold uppercase tracking-wider text-content-secondary">Add a member</h3>
 
@@ -286,7 +289,7 @@ export function ManageMembersModal({
             </form>
           ) : (
             <p className="mt-6 border-t border-border-subtle pt-4 text-xs leading-5 text-content-muted">
-              Only the workspace owner can add or remove members.
+              Only workspace admins can add or remove members.
             </p>
           )}
 

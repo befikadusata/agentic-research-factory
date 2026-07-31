@@ -8,7 +8,7 @@ import { ArrowLeft, LoaderCircle } from "lucide-react";
 import { createRun } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { FormatSelector } from "@/components/FormatSelector";
-import { FileUpload } from "@/components/FileUpload";
+import { FileUpload, type AttachedDoc } from "@/components/FileUpload";
 import { VerticalSelector } from "@/components/VerticalSelector";
 import { AuthLoadingState } from "@/components/AuthLoadingState";
 import { useVerticals } from "@/lib/useVerticals";
@@ -23,9 +23,15 @@ export default function NewRunPage() {
   const [verticalInputs, setVerticalInputs] = useState<Record<string, string>>({});
   const [topic, setTopic] = useState("");
   const [format, setFormat] = useState<OutputFormat>("report");
-  const [docIds, setDocIds] = useState<string[]>([]);
+  const [doc, setDoc] = useState<AttachedDoc | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Only a fully indexed doc is worth sending: a pending one has no chunks yet
+  // and a failed one never will, so either would make the run cite nothing
+  // while looking like it had a source.
+  const docIds = doc?.status === "ready" ? [doc.docId] : [];
+  const waitingOnIngest = doc?.status === "pending";
 
   useEffect(() => {
     if (!vertical) return;
@@ -33,7 +39,7 @@ export default function NewRunPage() {
     if (!refreshedDefinition) {
       setVertical(null);
       setVerticalInputs({});
-      setDocIds([]);
+      setDoc(null);
       setFormat("report");
       return;
     }
@@ -55,7 +61,7 @@ export default function NewRunPage() {
     if (v === vertical) return;
     setVertical(v);
     setVerticalInputs({});
-    setDocIds([]);
+    setDoc(null);
     const def = verticals.find((vd) => vd.key === v);
     if (def) setFormat(def.defaultFormat);
   }
@@ -81,6 +87,11 @@ export default function NewRunPage() {
       return;
     }
 
+    if (waitingOnIngest) {
+      setError("Your PDF is still being indexed. Wait for it to finish, or remove it to start without it.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -98,14 +109,6 @@ export default function NewRunPage() {
       setError(e instanceof Error ? e.message : "Failed to create run");
       setLoading(false);
     }
-  }
-
-  function handleUploaded(docId: string) {
-    setDocIds([docId]);
-  }
-
-  function handleRemoved() {
-    setDocIds([]);
   }
 
   return (
@@ -128,7 +131,7 @@ export default function NewRunPage() {
           {vertical && (
             <button
               type="button"
-              onClick={() => { setVertical(null); setVerticalInputs({}); setFormat("report"); setDocIds([]); }}
+              onClick={() => { setVertical(null); setVerticalInputs({}); setFormat("report"); setDoc(null); }}
               className="mt-3 text-xs text-primary hover:text-primary-hover font-medium"
             >
               Clear playbook and use general research
@@ -208,8 +211,7 @@ export default function NewRunPage() {
           <FileUpload
             key={vertical ?? "general"}
             workspaceId={activeId}
-            onUploaded={handleUploaded}
-            onRemoved={handleRemoved}
+            onChange={setDoc}
           />
         </div>
 
@@ -224,13 +226,15 @@ export default function NewRunPage() {
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || waitingOnIngest}
           className="w-full bg-primary hover:bg-primary-hover text-primary-on font-semibold py-3 rounded-md disabled:opacity-50 transition-colors duration-base"
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
               <LoaderCircle size={17} className="animate-spin" aria-hidden /> Starting research…
             </span>
+          ) : waitingOnIngest ? (
+            "Waiting for your PDF to finish indexing…"
           ) : vertical ? `Start ${verticalDef?.displayName ?? "Research"}` : "Start Research"}
         </button>
       </form>

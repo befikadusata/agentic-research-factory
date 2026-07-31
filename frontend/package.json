@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "demo": "NEXT_PUBLIC_DEMO=1 next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:demo": "playwright test -c playwright.demo.config.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.4",

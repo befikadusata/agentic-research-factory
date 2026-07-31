@@ -144,7 +144,7 @@ test.describe("Core Flow Smoke Tests", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "test-user-id" }]),
+        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "test-user-id", role: "admin" }]),
       });
     });
 
@@ -233,7 +233,7 @@ test.describe("Core Flow Smoke Tests", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "credentials:test@example.com" }]),
+        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "credentials:test@example.com", role: "admin" }]),
       });
     });
     await page.route("**/runs?**", async (route) => {
@@ -308,6 +308,45 @@ test.describe("Core Flow Smoke Tests", () => {
     const verificationError = page.getByRole("alert").filter({ hasText: "Verification failed" });
     await expect(verificationError).toContainText("invalid or has expired");
     await expect(verificationError.getByRole("link", { name: "Back to sign in" })).toHaveAttribute("href", "/");
+  });
+
+  test("offers a new verification link from the expired-link dead end", async ({ page }) => {
+    let resendPayload: Record<string, unknown> | null = null;
+    await page.route("**/auth/resend-verification", async (route) => {
+      resendPayload = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok", dev_verification_url: "http://localhost:3200/verify-email?token=fresh" }),
+      });
+    });
+
+    // No token at all, which is the same dead end an expired link reaches: the
+    // page cannot know the address, so the form has to ask for it.
+    await page.goto("/verify-email");
+    await expect(page.getByRole("alert").filter({ hasText: "Verification failed" })).toBeVisible();
+
+    await page.getByLabel("Send a new link").fill("unverified@example.com");
+    await page.getByRole("button", { name: "Resend verification email" }).click();
+
+    // Non-committal by design — the endpoint answers identically for an address
+    // with no account, and this copy must not leak what it withholds.
+    await expect(page.getByRole("status")).toContainText(
+      "If an unverified account exists for unverified@example.com, a new link is on its way.",
+    );
+    await expect(page.getByRole("link", { name: /Dev only/ })).toBeVisible();
+    expect(resendPayload).toEqual({ email: "unverified@example.com" });
+  });
+
+  test("surfaces a failed resend instead of claiming the mail was sent", async ({ page }) => {
+    await page.route("**/auth/resend-verification", (route) => route.fulfill({ status: 500, body: "" }));
+
+    await page.goto("/verify-email");
+    await page.getByLabel("Send a new link").fill("unverified@example.com");
+    await page.getByRole("button", { name: "Resend verification email" }).click();
+
+    await expect(page.getByRole("alert").filter({ hasText: "couldn’t send a new link" })).toBeVisible();
+    await expect(page.getByRole("status")).toHaveCount(0);
   });
 
   test("creates run with vertical payload and redirects to run detail", async ({ page }) => {
@@ -478,6 +517,84 @@ test.describe("Core Flow Smoke Tests", () => {
     await page.reload();
     await expect(page.getByText("Persisted Final Output")).toBeVisible();
     await expect(page.getByText("Collected current evidence")).toBeVisible();
+  });
+
+  test("labels runs with a playbook only the backend knows about", async ({ page }) => {
+    // The bundled VERTICALS list is a fallback, not the authority. /new always
+    // asked the backend, but the run list and run detail read the bundle — so a
+    // playbook added server-side produced runs you could start and then never
+    // see identified anywhere afterwards.
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+    await page.route("**/verticals", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          key: "regulatory_watch",
+          display_name: "Regulatory Watch",
+          description: "Defined on the server only",
+          default_format: "report",
+          input_schema: {},
+        }]),
+      });
+    });
+    await page.route("**/workspaces", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ id: "workspace-1", name: "Research Team", owner_id: "test-user-id", role: "admin" }]),
+      });
+    });
+    await page.route("**/runs?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          id: "novel-playbook-run",
+          topic: "EU AI Act obligations",
+          format: "report",
+          status: "complete",
+          workspace_id: "workspace-1",
+          vertical: "regulatory_watch",
+          created_at: "2026-01-01T00:00:00Z",
+        }]),
+      });
+    });
+    await page.route("**/runs/novel-playbook-run", async (route) => {
+      if (route.request().isNavigationRequest()) return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "novel-playbook-run",
+          topic: "EU AI Act obligations",
+          format: "report",
+          status: "complete",
+          workspace_id: "workspace-1",
+          vertical: "regulatory_watch",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:05:00Z",
+          logs: [],
+          final_output: "# Obligations",
+        }),
+      });
+    });
+    await page.route("**/runs/novel-playbook-run/stream", async (route) => {
+      await route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: "" });
+    });
+
+    await createSessionCookie(page);
+    await page.goto("/");
+    // The list badge — the surface that used to render nothing at all here.
+    await expect(page.getByText("Regulatory Watch")).toBeVisible();
+
+    await page.getByText("EU AI Act obligations").click();
+    await expect(page.getByText("Regulatory Watch")).toBeVisible();
+    // The badge carries an icon, and an unknown key used to resolve to
+    // `undefined` — which React rejects as an element type, taking the page
+    // down rather than merely looking generic.
+    await expect(page.getByText("Obligations")).toBeVisible();
   });
 
   test("shows HITL modal and approves with optional instruction", async ({ page }) => {

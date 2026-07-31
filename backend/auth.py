@@ -72,6 +72,16 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> str:
 _ROLE_RANK = {"viewer": 0, "operator": 1, "admin": 2}
 
 
+def role_meets(role: Optional[str], min_role: str) -> bool:
+    """True if a workspace role ranks at or above `min_role`.
+
+    The single place workspace roles are ordered. An absent or unrecognised role
+    ranks lowest rather than raising, so a row written by an older version — or
+    by hand — degrades to the least privilege instead of an opaque 500.
+    """
+    return _ROLE_RANK.get(role or "", 0) >= _ROLE_RANK[min_role]
+
+
 async def assert_run_access(run, user_id: str, db: AsyncSession, min_role: Optional[str] = None) -> None:
     """Raise HTTP 404 if user is neither the run owner nor a workspace member.
 
@@ -86,7 +96,7 @@ async def assert_run_access(run, user_id: str, db: AsyncSession, min_role: Optio
         from models import WorkspaceMember  # local import to avoid circular deps
         member = await db.get(WorkspaceMember, (run.workspace_id, user_id))
         if member:
-            if min_role is not None and _ROLE_RANK.get(member.role, 0) < _ROLE_RANK[min_role]:
+            if min_role is not None and not role_meets(member.role, min_role):
                 raise HTTPException(403, f"Requires '{min_role}' role or higher in this workspace")
             return
     raise HTTPException(404, "Run not found")

@@ -81,3 +81,77 @@ async def test_retry_exhaustion_raises():
     assert sup.inputs[0] == {"plan_output": "PLAN"}
     assert sup.inputs[1] is None
     assert sup.inputs[2] is None
+
+
+# ── segment budget ────────────────────────────────────────────────────────────
+# The retry budget used to be set independently of Celery's task_soft_time_limit:
+# LLM_STAGE_TIMEOUT_SEC (300) x stop_after_attempt(3) = 900s, and _resume_graph_at
+# makes two such calls ≈ 1800s, against a 600s soft limit. A slow stage was
+# therefore SIGKILLed mid-flight and the run sat non-terminal until the reaper.
+# The invokes in one task now share a single wall-clock budget.
+
+
+def test_segment_budget_fits_inside_the_celery_soft_limit():
+    from config import settings
+
+    assert run_service.SEGMENT_BUDGET_SEC < settings.TASK_SOFT_TIME_LIMIT_SEC
+
+
+@pytest.mark.asyncio
+async def test_budget_is_shared_across_both_resume_invokes(monkeypatch):
+    """_resume_graph_at makes two calls; separately budgeted they'd double the
+    segment's allowance, so they must draw on the same deadline."""
+    seen = []
+
+    async def _capture(supervisor, state, config, recursion_limit=25, budget=None):
+        seen.append(budget)
+        return {"ok": True}
+
+    monkeypatch.setattr(run_service, "_invoke_supervisor_with_retry", _capture)
+    await run_service._resume_graph_at(object(), {"a": 1}, {"configurable": {}})
+
+    assert len(seen) == 2
+    assert seen[0] is not None and seen[0] is seen[1]
+
+
+@pytest.mark.asyncio
+async def test_exhausted_budget_raises_stage_timeout_without_invoking():
+    sup = _FlakySupervisor(fail_times=0)
+    spent = run_service._Budget(total=0)  # already past its deadline
+
+    with pytest.raises(run_service.StageTimeout):
+        await run_service._invoke_supervisor_with_retry(
+            sup, {"plan_output": "PLAN"}, {"configurable": {"thread_id": "t-budget"}},
+            budget=spent,
+        )
+
+    assert sup.inputs == []
+
+
+@pytest.mark.asyncio
+async def test_stage_timeout_is_not_retried():
+    """A timed-out invoke is still running on its abandoned thread. Retrying would
+    put a second invoke on the same LangGraph thread_id concurrently, with both
+    writing the same checkpoint — so timeouts are terminal, unlike node failures."""
+    import threading
+
+    released = threading.Event()
+    calls = []
+
+    class _HangingSupervisor:
+        def invoke(self, state, config):
+            calls.append(state)
+            released.wait(30)
+            return {"ok": True}
+
+    sup = _HangingSupervisor()
+    budget = run_service._Budget(total=0.3)
+
+    with pytest.raises(run_service.StageTimeout):
+        await run_service._invoke_supervisor_with_retry(
+            sup, {"plan_output": "PLAN"}, {"configurable": {"thread_id": "t-hang"}},
+            budget=budget,
+        )
+
+    assert len(calls) == 1  # not 3 — no concurrent second invoke on the thread
+    released.set()

@@ -113,6 +113,9 @@ async def test_run_monitor_now_spawns_linked_run(client, mock_user, db_session):
     r = await client.post(f"/monitors/{mid}/run")
     assert r.status_code == 201
     run_id = r.json()["id"]
+    # Serialized, not just stored: the UI distinguishes a monitored run from a
+    # one-off by this field, and offers "save as monitor" only for the latter.
+    assert r.json()["monitor_id"] == mid
 
     # The spawned run is tagged with the monitor, and the monitor points back at it.
     run = await db_session.get(Run, UUID(run_id))
@@ -123,6 +126,7 @@ async def test_run_monitor_now_spawns_linked_run(client, mock_user, db_session):
     hist = await client.get(f"/monitors/{mid}/runs")
     assert hist.status_code == 200
     assert run_id in {r["id"] for r in hist.json()}
+    assert all(r["monitor_id"] == mid for r in hist.json())
 
 
 @pytest.mark.asyncio

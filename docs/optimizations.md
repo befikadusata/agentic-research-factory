@@ -17,7 +17,7 @@ Optimized the retrieval augmented generation pipeline for both recall and precis
 - **Recursive Splitting**: Replaced character-based splitting with `RecursiveCharacterTextSplitter` (`chunk_size=1000`, `overlap=200`) in `pdf_service.py` to maintain contextual coherence in retrieved documents.
 
 ### Retrieval Relevance
-- **Hybrid Search**: Implemented `vecs` with dual indexing (`BM25` for keyword retrieval + `HNSW` for semantic vector similarity) in `rag.py`.
+- **Hybrid Search**: Dual indexing in `rag.py` — `HNSW` (via `vecs`) for semantic vector similarity, plus a GIN index over `to_tsvector('english', metadata->>'text')` for keyword retrieval. `vecs` only exposes vector indexes, so the lexical half is PostgreSQL full-text search ranked by `ts_rank_cd` rather than BM25; both halves run per sub-query and merge into one deduplicated candidate pool.
 - **Query Rewriting**: Integrated a dedicated service (`services/query_rewriter.py`) utilizing a lightweight LLM to expand user queries, effectively bridging semantic gaps between user intent and document content.
 
 ### Retrieval Precision

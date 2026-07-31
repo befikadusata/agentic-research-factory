@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
 from sqlalchemy import select, update as sa_update
@@ -10,21 +11,68 @@ from config import settings
 from database import AsyncSessionLocal
 from models import Run, RunStatus
 from logger import logger
-from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential, before_sleep_log
+from tenacity import (
+    AsyncRetrying,
+    stop_after_attempt,
+    wait_exponential,
+    before_sleep_log,
+    retry_if_not_exception_type,
+)
 from configs.verticals import build_execution_brief, get_vertical
+from utils.blocking import run_in_daemon_thread
 from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_INSTRUCTION_KEY
 from utils.cost_tracker import log_cost, run_cost_total
+from utils.source_ledger import reset_seen_sources
 from utils.pricing import calculate_cost
 from services.eval_service import evaluate_output
 from services.monitor_service import finalize_monitored_run
 
-LLM_STAGE_TIMEOUT_SEC = 300
+# Total LLM wall-clock one Celery task (one pipeline segment) may spend. Held
+# under task_soft_time_limit so a slow segment fails inside its own task —
+# persisting `failed` with an error message — instead of being SIGKILLed and left
+# for the RUN_STUCK_TIMEOUT_MIN reaper to notice minutes later.
+SEGMENT_BUDGET_SEC = max(1, settings.TASK_SOFT_TIME_LIMIT_SEC - settings.SEGMENT_BUDGET_MARGIN_SEC)
+
+# Cap on any single invoke, clamped so a misconfigured per-stage timeout can't
+# reintroduce the overrun the segment budget exists to prevent.
+LLM_STAGE_TIMEOUT_SEC = min(settings.LLM_STAGE_TIMEOUT_SEC, SEGMENT_BUDGET_SEC)
+
+
+class StageTimeout(Exception):
+    """A graph invoke outlasted its slice of the segment budget.
+
+    Distinct from a bare TimeoutError on purpose: since 3.10 `asyncio.TimeoutError`,
+    `socket.timeout` and the builtin `TimeoutError` are all the same class, so a
+    transient network timeout inside an LLM call is indistinguishable from ours.
+    Those should still be retried; this must not be (see the retry predicate).
+    """
+
+
+class _Budget:
+    """A wall-clock deadline shared by every graph invoke in one Celery task.
+
+    Bounding each invoke on its own was not enough: stop_after_attempt(3) at
+    LLM_STAGE_TIMEOUT_SEC each is 3x the per-call cap, and _resume_graph_at makes
+    two such calls — roughly 1800s against a 600s soft limit. One shared deadline
+    makes the whole segment fit regardless of how the retries fall out.
+    """
+
+    def __init__(self, total: float = SEGMENT_BUDGET_SEC):
+        self._deadline = time.monotonic() + total
+
+    def remaining(self) -> float:
+        return self._deadline - time.monotonic()
 
 # run.metrics sub-key holding the few graph-internal fields that aren't already
 # their own Run column (plan_output, retry_count). They must survive across the
 # separate Celery tasks that now run each stage, since the in-memory LangGraph
 # checkpoint does not (Celery recycles the worker child after every task).
 _GRAPH_KEY = "_graph_state"
+
+# run.metrics sub-key holding the canonical URLs this run actually retrieved,
+# carried across segments for the same reason as _GRAPH_KEY. Citations are
+# checked against it so a fabricated URL can be told apart from a real one.
+_SOURCES_KEY = "_seen_sources"
 
 
 async def emit(run_id: str, event_type: str, data: dict):
@@ -167,7 +215,13 @@ async def reap_orphaned_runs() -> list[str]:
     return reaped
 
 
-async def _invoke_supervisor_with_retry(supervisor, state: dict | None, config: dict, recursion_limit: int = 25):
+async def _invoke_supervisor_with_retry(
+    supervisor,
+    state: dict | None,
+    config: dict,
+    recursion_limit: int = 25,
+    budget: "_Budget | None" = None,
+):
     """Run (or resume) the graph up to its next interrupt point or END.
 
     `state=None` resumes an in-progress thread (`config["configurable"]["thread_id"]`)
@@ -180,28 +234,58 @@ async def _invoke_supervisor_with_retry(supervisor, state: dict | None, config: 
     overwrite those checkpointed channels with the stale entry values (e.g.
     plan_output -> "" from the reconstructed state), throwing away completed work
     and re-billing it. Resuming re-runs only the failed super-step. (M1)
+
+    Every attempt draws on the caller's `budget` (a fresh whole-segment one if
+    omitted), so the retries can never collectively outrun the Celery task limit.
     """
+    budget = budget or _Budget()
     call_config = {**config, "recursion_limit": recursion_limit}
     async for attempt in AsyncRetrying(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         before_sleep=before_sleep_log(logger, logging.WARNING),
+        # A StageTimeout means the previous invoke is STILL RUNNING on its
+        # abandoned thread. Retrying would put a second invoke on the same
+        # LangGraph thread_id concurrently, with both writing the same checkpoint.
+        # Timeouts are terminal here; ordinary node failures still retry.
+        retry=retry_if_not_exception_type(StageTimeout),
     ):
         with attempt:
             invoke_input = state if attempt.retry_state.attempt_number == 1 else None
-            call = asyncio.to_thread(supervisor.invoke, invoke_input, call_config)
-            return await asyncio.wait_for(call, timeout=LLM_STAGE_TIMEOUT_SEC)
+            slice_sec = min(LLM_STAGE_TIMEOUT_SEC, budget.remaining())
+            if slice_sec <= 0:
+                raise StageTimeout("segment compute budget exhausted")
+            # run_in_daemon_thread, NOT asyncio.to_thread: the default executor's
+            # threads are joined by asyncio.run() at task teardown, so a timed-out
+            # invoke would hold the worker child until it finished anyway.
+            call = run_in_daemon_thread(
+                supervisor.invoke, invoke_input, call_config, name="graph-invoke"
+            )
+            try:
+                return await asyncio.wait_for(call, timeout=slice_sec)
+            except asyncio.TimeoutError:
+                raise StageTimeout(f"graph invoke exceeded {slice_sec:.0f}s") from None
 
 
-async def _resume_graph_at(supervisor, entry_state: dict, config: dict, recursion_limit: int = 25):
+async def _resume_graph_at(
+    supervisor,
+    entry_state: dict,
+    config: dict,
+    recursion_limit: int = 25,
+    budget: "_Budget | None" = None,
+):
     """Re-enter the graph at `entry_state["_resume_from"]` in a fresh process.
 
     Because that node sits behind interrupt_before, the first invoke only loads
     the reconstructed state and pauses *before* the node; invoke(None) then runs
     it onward to the next interrupt or END. Returns the resulting state.
+
+    Both invokes share one budget — separately budgeted, this pair alone could
+    double the segment's allowance.
     """
-    await _invoke_supervisor_with_retry(supervisor, entry_state, config, recursion_limit)
-    return await _invoke_supervisor_with_retry(supervisor, None, config, recursion_limit)
+    budget = budget or _Budget()
+    await _invoke_supervisor_with_retry(supervisor, entry_state, config, recursion_limit, budget)
+    return await _invoke_supervisor_with_retry(supervisor, None, config, recursion_limit, budget)
 
 
 def _dispatch_resume(run_id: str, approved_gate: str | None):
@@ -242,7 +326,14 @@ def _make_step_cb(rid: str, loop: asyncio.AbstractEventLoop):
             "message": str(step)[:300],
             "ts":      datetime.now(timezone.utc).isoformat(),
         }
-        asyncio.run_coroutine_threadsafe(emit(rid, "log", data), loop)
+        coro = emit(rid, "log", data)
+        try:
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        except RuntimeError:
+            # Loop already closed: this callback belongs to an invoke that timed
+            # out and was abandoned, whose task has since returned. Nothing is
+            # listening, and raising here would only noise up the orphan thread.
+            coro.close()
     return _step_cb
 
 
@@ -339,6 +430,12 @@ async def _run_start_segment(run_id: UUID):
     if not await _claim_status(run_id, RunStatus.pending, RunStatus.researching):
         logger.bind(run_id=rid).info("start_segment_already_claimed")
         return
+
+    # One budget for the whole segment, spent across every invoke below.
+    budget = _Budget()
+    # Celery reuses a worker process across tasks, so the ledger must start empty
+    # or this run would verify its citations against the previous run's sources.
+    reset_seen_sources()
 
     async with AsyncSessionLocal() as db:
         run = await db.get(Run, run_id)
@@ -442,7 +539,7 @@ async def _run_start_segment(run_id: UUID):
     if task_type == "lead_intel":
         # Generate, review (and retry once on critical failure), then pause for final approval.
         final_state = await _invoke_supervisor_with_retry(
-            supervisor, initial_state, config, recursion_limit=15
+            supervisor, initial_state, config, recursion_limit=15, budget=budget
         )
         await emit(rid, "agent_end", {"stage": "research"})
         await _log_token_usages(rid, final_state.get("token_usages", []))
@@ -450,7 +547,8 @@ async def _run_start_segment(run_id: UUID):
         final_output    = final_state.get("final_output", "")
         review_output   = final_state.get("review_output", "")
         review_passed   = review_verdict(review_output) == "PASS"
-        final_citations = extract_citations(final_output or "")
+        seen_sources    = _collect_sources()
+        final_citations = extract_citations(final_output or "", seen_sources)
         evidence_lines = [line for line in final_output.splitlines() if "http://" in line or "https://" in line]
         grounding = "SOURCE EVIDENCE LEDGER:\n" + "\n".join(evidence_lines[:30]) + "\n\nREVIEW AUDIT:\n" + review_output
         eval_scores = await _safe_eval(
@@ -472,6 +570,7 @@ async def _run_start_segment(run_id: UUID):
                 "eval_scores": eval_scores,
                 "review_output": review_output,
                 "quality_warning": None if review_passed else review_output,
+                _SOURCES_KEY: seen_sources,
             }
             flag_modified(run_obj, "metrics")
             await db.commit()
@@ -485,13 +584,14 @@ async def _run_start_segment(run_id: UUID):
 
     # research_report: plan → research → pause before analyse (research approval).
     state = await _invoke_supervisor_with_retry(
-        supervisor, initial_state, config, recursion_limit=25
+        supervisor, initial_state, config, recursion_limit=25, budget=budget
     )
     await emit(rid, "agent_end", {"stage": "research"})
     await _log_token_usages(rid, state.get("token_usages", []))
 
     research_output = state.get("research_output", "")
-    citations = extract_citations(research_output or "")
+    seen_sources = _collect_sources()
+    citations = extract_citations(research_output or "", seen_sources)
     # M4: score the research before its approval gate so the operator isn't
     # approving blind. Research has no separate grounding artifact, so (like
     # lead-intel) it's scored against itself — an on-topic/completeness signal,
@@ -509,6 +609,7 @@ async def _run_start_segment(run_id: UUID):
             # plan_output/retry_count aren't Run columns but the analyse segment
             # (a separate task, fresh process) needs them to rebuild graph state.
             _GRAPH_KEY: {"plan_output": state.get("plan_output", ""), "retry_count": 0},
+            _SOURCES_KEY: seen_sources,
         }
         flag_modified(run_obj, "metrics")
         await db.commit()
@@ -530,6 +631,8 @@ async def _run_analyse_segment(run_id: UUID):
         log.info("analyse_segment_stale_resume")
         return
 
+    budget = _Budget()
+
     user_feedback = await _pop_instruction(rid)
 
     async with AsyncSessionLocal() as db:
@@ -543,6 +646,9 @@ async def _run_analyse_segment(run_id: UUID):
         run_format      = run.format
         workspace_id    = run.workspace_id
         stash           = _read_graph_stash(run)
+        # Seed with the research segment's sources: this process is fresh (or
+        # recycled from an unrelated run), so the ledger is empty or wrong.
+        reset_seen_sources(list((run.metrics or {}).get(_SOURCES_KEY, [])))
 
     execution_brief = build_execution_brief(topic, vertical, vertical_inputs)
 
@@ -574,7 +680,7 @@ async def _run_analyse_segment(run_id: UUID):
     await emit(rid, "status", {"status": "analyzing"})
     await emit(rid, "agent_start", {"stage": "analysis"})
 
-    state = await _resume_graph_at(supervisor, entry_state, config, recursion_limit=25)
+    state = await _resume_graph_at(supervisor, entry_state, config, recursion_limit=25, budget=budget)
     await emit(rid, "agent_end", {"stage": "analysis"})
     await _log_token_usages(rid, state.get("token_usages", []))
 
@@ -587,7 +693,8 @@ async def _run_analyse_segment(run_id: UUID):
         # Surface the retried research for a fresh approval instead of silently
         # redoing already-approved work.
         research_output = state.get("research_output", research_output)
-        citations = _extract(research_output)
+        seen_sources = _collect_sources()
+        citations = _extract(research_output, seen_sources)
         stage_scores = await _safe_eval(research_output, research_output, topic, log, run_id=rid, agent_name="eval_research")  # M4
         async with AsyncSessionLocal() as db:
             run_obj = await db.get(Run, run_id)
@@ -597,6 +704,7 @@ async def _run_analyse_segment(run_id: UUID):
                 "citations": citations,
                 "eval_scores": stage_scores,
                 _GRAPH_KEY: {"plan_output": stash.get("plan_output", ""), "retry_count": retry_count},
+                _SOURCES_KEY: seen_sources,
             }
             flag_modified(run_obj, "metrics")
             await db.commit()
@@ -621,6 +729,7 @@ async def _run_analyse_segment(run_id: UUID):
             **(run_obj.metrics or {}),
             "eval_scores": stage_scores,
             _GRAPH_KEY: {"plan_output": stash.get("plan_output", ""), "retry_count": retry_count},
+            _SOURCES_KEY: _collect_sources(),
         }
         flag_modified(run_obj, "metrics")
         await db.commit()
@@ -639,6 +748,8 @@ async def _run_write_segment(run_id: UUID):
         log.info("write_segment_stale_resume")
         return
 
+    budget = _Budget()
+
     user_feedback = await _pop_instruction(rid)
 
     async with AsyncSessionLocal() as db:
@@ -653,6 +764,9 @@ async def _run_write_segment(run_id: UUID):
         run_format      = run.format
         workspace_id    = run.workspace_id
         stash           = _read_graph_stash(run)
+        # The report's citations are extracted in this segment, but the sources
+        # backing them were retrieved back in research — carry them forward.
+        reset_seen_sources(list((run.metrics or {}).get(_SOURCES_KEY, [])))
 
     execution_brief = build_execution_brief(topic, vertical, vertical_inputs)
 
@@ -684,13 +798,14 @@ async def _run_write_segment(run_id: UUID):
     await emit(rid, "status", {"status": "writing"})
     await emit(rid, "agent_start", {"stage": "writing"})
 
-    state = await _resume_graph_at(supervisor, entry_state, config, recursion_limit=25)
+    state = await _resume_graph_at(supervisor, entry_state, config, recursion_limit=25, budget=budget)
     await emit(rid, "agent_end", {"stage": "writing"})
     await _log_token_usages(rid, state.get("token_usages", []))
 
     final_output    = state.get("final_output", "")
     eval_scores     = await _safe_eval(final_output, research_output, topic, log, run_id=rid, agent_name="eval_final")
-    final_citations = _extract(final_output)
+    seen_sources    = _collect_sources()
+    final_citations = _extract(final_output, seen_sources)
 
     async with AsyncSessionLocal() as db:
         run_obj = await db.get(Run, run_id)
@@ -701,6 +816,7 @@ async def _run_write_segment(run_id: UUID):
             **(run_obj.metrics or {}),
             "citations": list(merged.values()),
             "eval_scores": eval_scores,
+            _SOURCES_KEY: seen_sources,
         }
         flag_modified(run_obj, "metrics")
         await db.commit()
@@ -737,9 +853,16 @@ async def _finalize(run_id: UUID):
 
 # ── small helpers ─────────────────────────────────────────────────────────────
 
-def _extract(text: str) -> list:
+def _extract(text: str, seen_sources: list[str] | None = None) -> list:
     from tools.rag import extract_citations
-    return extract_citations(text or "")
+    return extract_citations(text or "", seen_sources)
+
+
+def _collect_sources() -> list[str]:
+    """Every source this run has retrieved: what this segment just fetched, plus
+    whatever earlier segments seeded the ledger with at entry."""
+    from utils.source_ledger import take_seen_sources
+    return take_seen_sources()
 
 
 async def _safe_eval(

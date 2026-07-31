@@ -6,6 +6,7 @@ from pydantic import Field
 from tenacity import retry, stop_after_attempt, wait_exponential
 from logger import logger
 from utils.cache import tool_cache
+from utils.source_ledger import record_retrieved_url
 from tools.untrusted import wrap_untrusted
 
 class SearxngSearchTool(BaseTool):
@@ -42,6 +43,9 @@ class SearxngSearchTool(BaseTool):
             # in the researcher's ReAct context across iterations, so trimming it
             # here compounds — keeps the pass under Groq's free 12K tokens/min.
             for r in results.get("results", [])[:4]:
+                # Ledger only the results the agent is actually shown, so a
+                # citation counts as verified when the run really saw it.
+                record_retrieved_url(r.get("url", ""))
                 output.append(f"- [{r.get('title', '')}]({r.get('url', '')})\n  {r.get('content', '')[:150]}")
             return wrap_untrusted("\n".join(output)) if output else "No search results found for this query."
         except Exception as e:
@@ -85,6 +89,7 @@ class TavilySearchTool(BaseTool):
             if results.get("answer"):
                 output.append(f"**Summary:** {results['answer']}\n")
             for r in results.get("results", []):
+                record_retrieved_url(r.get("url", ""))
                 output.append(f"- [{r['title']}]({r['url']})\n  {r.get('content', '')[:300]}")
             return wrap_untrusted("\n".join(output)) if output else "No search results found for this query."
         except Exception as e:

@@ -35,6 +35,13 @@ services:
       db:
         condition: service_healthy
     restart: on-failure
+    # The same source mount backend/celery/beat get. Without it, a plain
+    # `docker compose up` (no --build) ran migrations from the image's baked-in
+    # copy while the API served the mounted source: a new revision was invisible
+    # here, migrate re-ran the old head, service_completed_successfully passed,
+    # and the API booted against a schema missing the new column.
+    volumes:
+      - ./backend:/app
 
   backend:
     build: ./backend
@@ -119,20 +126,25 @@ services:
     image: searxng/searxng:latest
     ports:
       - "8081:8080"
+    # Mount the single file read-only, NOT `./searxng:/etc/searxng:rw`. The
+    # image entrypoint runs `chown -R searxng:searxng` on whatever directory is
+    # mounted at /etc/searxng (its FORCE_OWNERSHIP defaults to true), and with a
+    # root Docker daemon that reached through the bind mount and left the
+    # tracked host directory owned by uid 977 — after which `git checkout --
+    # searxng/settings.yml` failed with "unable to unlink". Mounting the file
+    # alone keeps the host directory out of the container's reach (/etc/searxng
+    # is then the image's own dir, already searxng-owned, so nothing is
+    # chowned), and :ro stops the container rewriting tracked content.
     volumes:
-      - ./searxng:/etc/searxng:rw
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
       - SEARXNG_BASE_URL=http://localhost:8081/
-    # settings.yml ships with a placeholder secret_key so no real secret is
-    # committed to git; generate a real one in-place on first boot, then hand
-    # off to the image's own entrypoint.
-    entrypoint: >
-      sh -c "
-        if grep -q ultrasecretkey /etc/searxng/settings.yml; then
-          sed -i \"s/ultrasecretkey/$$(openssl rand -hex 32)/\" /etc/searxng/settings.yml;
-        fi;
-        exec /usr/local/searxng/entrypoint.sh
-      "
+      # SearXNG reads server.secret_key from this env var and it takes
+      # precedence over the yml (searx/settings_defaults.py), so no real secret
+      # need be committed and nothing has to be rewritten on disk at boot. This
+      # instance is local-only and not publicly exposed; export SEARXNG_SECRET
+      # in your shell to override.
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-local-dev-searxng-secret-not-for-production}
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
       interval: 5s
@@ -248,8 +260,13 @@ services:
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
       # NextAuth runs inside this container and must use Docker DNS to reach the API.
       - BACKEND_INTERNAL_URL=http://backend:8000
-      # Must match the backend's BACKEND_JWT_SECRET (backend/.env = dummy-secret)
-      # or the JWT that /api/backend-token mints is rejected with 401.
+      # Must match the backend's BACKEND_JWT_SECRET or the JWT that
+      # /api/backend-token mints is rejected: the stack boots healthy, login
+      # succeeds, and every authenticated request 401s with nothing pointing at
+      # the cause. backend/.env.example and frontend/.env.local.example ship
+      # this same throwaway value so a fresh clone needs no edits. Rotating it
+      # means changing all three together (the backend reads its own
+      # ./backend/.env via env_file, so it cannot inherit this one).
       - BACKEND_JWT_SECRET=dummy-secret
     depends_on:
       backend:

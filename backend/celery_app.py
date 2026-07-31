@@ -19,8 +19,10 @@ celery_app.conf.update(
     # awaiting_* status and the next segment is queued on approval). So this limit
     # bounds pure compute for a single segment, not a whole multi-gate run, and no
     # longer has to exceed any HITL timeout.
-    task_soft_time_limit=600,   # SIGTERM after 10 min; task can clean up
-    task_time_limit=660,         # SIGKILL after 11 min if still running
+    # Sourced from config so run_service can derive its LLM retry budget from the
+    # same numbers — the two used to drift apart and the budget overran the limit.
+    task_soft_time_limit=settings.TASK_SOFT_TIME_LIMIT_SEC,
+    task_time_limit=settings.TASK_TIME_LIMIT_SEC,
     # Each task runs its own event loop via asyncio.run(). The module-level
     # async SQLAlchemy engine (database.py) binds its asyncpg pool to the first
     # task's loop, so a second task reusing the same worker child fails with

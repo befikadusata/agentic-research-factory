@@ -23,11 +23,12 @@ def test_rag_no_vertical_filter(mock_collection):
 
     with patch("tools.rag._get_client", return_value=_mock_vecs_setup(mock_collection)), \
          patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag._keyword_search", return_value=[]), \
          patch("tools.rag.generate_sub_queries", return_value=["query"]):
         tool._run("query")
 
     _, kwargs = mock_collection.query.call_args
-    assert kwargs.get("query_filter") is None
+    assert kwargs.get("filters") is None
 
 
 def test_rag_vertical_filter_applied(mock_collection):
@@ -36,11 +37,15 @@ def test_rag_vertical_filter_applied(mock_collection):
 
     with patch("tools.rag._get_client", return_value=_mock_vecs_setup(mock_collection)), \
          patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag._keyword_search", return_value=[]) as keyword, \
          patch("tools.rag.generate_sub_queries", return_value=["query"]):
         tool._run("query")
 
     _, kwargs = mock_collection.query.call_args
-    assert kwargs.get("query_filter") == {"vertical": {"$eq": "lead_intel"}}
+    assert kwargs.get("filters") == {"vertical": {"$eq": "lead_intel"}}
+    # The keyword half must honour the same vertical, or hybrid retrieval
+    # leaks chunks the vector half is filtering out.
+    assert keyword.call_args[0][-1] == "lead_intel"
 
 
 def test_rag_returns_graceful_string_on_vecs_error():
@@ -60,18 +65,22 @@ def test_rag_fanout_calls_collection_once_per_subquery(mock_collection):
 
     with patch("tools.rag._get_client", return_value=_mock_vecs_setup(mock_collection)), \
          patch("tools.rag._embed", return_value=[[0.1] * 384] * 3), \
+         patch("tools.rag._keyword_search", return_value=[]) as keyword, \
          patch("tools.rag.generate_sub_queries", return_value=["q1", "q2", "q3"]):
         tool._run("original query")
 
     assert mock_collection.query.call_count == 3
+    assert keyword.call_count == 3
 
 
 def test_rag_fanout_deduplicates_chunks(mock_collection):
     from tools.rag import RAGTool
     tool = RAGTool(collection_name="ws_test")
 
-    dup_chunk = ("abc-123", None, {"text": "shared chunk", "source": "doc.pdf", "page": "1"})
-    unique_chunk = ("xyz-456", None, {"text": "unique chunk", "source": "doc.pdf", "page": "2"})
+    # Records are (id, metadata) 2-tuples — the shape vecs returns when
+    # include_value=False.
+    dup_chunk = ("abc-123", {"text": "shared chunk", "source": "doc.pdf", "page": "1"})
+    unique_chunk = ("xyz-456", {"text": "unique chunk", "source": "doc.pdf", "page": "2"})
     mock_collection.query.side_effect = [
         [dup_chunk, unique_chunk],
         [dup_chunk],
@@ -83,11 +92,55 @@ def test_rag_fanout_deduplicates_chunks(mock_collection):
     with patch("tools.rag._get_client", return_value=_mock_vecs_setup(mock_collection)), \
          patch("tools.rag._embed", return_value=[[0.1] * 384] * 2), \
          patch("tools.rag.generate_sub_queries", return_value=["q1", "q2"]), \
+         patch("tools.rag._keyword_search", return_value=[]), \
          patch("tools.rag._reranker", return_value=reranker_mock):
         tool._run("original query")
 
     pairs_passed = reranker_mock.predict.call_args[0][0]
     assert len(pairs_passed) == 2
+    # Dedup must survive into the rerank pool with real text attached.
+    assert sorted(text for _, text in pairs_passed) == ["shared chunk", "unique chunk"]
+
+
+def test_rag_merges_keyword_results_with_vector_results(mock_collection):
+    """Chunks only the lexical half finds must reach the rerank pool."""
+    from tools.rag import RAGTool
+    tool = RAGTool(collection_name="ws_test")
+
+    vector_hit = ("vec-1", {"text": "semantic chunk", "source": "a.pdf", "page": "1"})
+    keyword_hit = ("kw-1", {"text": "ZX-9000 exact match", "source": "b.pdf", "page": "2"})
+    mock_collection.query.return_value = [vector_hit]
+
+    reranker_mock = MagicMock()
+    reranker_mock.predict.return_value = [0.4, 0.9]
+
+    with patch("tools.rag._get_client", return_value=_mock_vecs_setup(mock_collection)), \
+         patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag.generate_sub_queries", return_value=["q1"]), \
+         patch("tools.rag._keyword_search", return_value=[keyword_hit]), \
+         patch("tools.rag._reranker", return_value=reranker_mock):
+        result = tool._run("ZX-9000")
+
+    assert sorted(text for _, text in reranker_mock.predict.call_args[0][0]) == [
+        "ZX-9000 exact match",
+        "semantic chunk",
+    ]
+    # Reranker scored the keyword hit highest, so it must lead the output.
+    assert result.index("ZX-9000 exact match") < result.index("semantic chunk")
+
+
+def test_rag_rejects_unsafe_collection_name():
+    """Collection names reach SQL as identifiers, so they must be validated."""
+    from tools.rag import RAGTool
+    tool = RAGTool(collection_name='ws"; DROP TABLE vecs.docs; --')
+
+    with patch("tools.rag._get_client") as client, \
+         patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag.generate_sub_queries", return_value=["query"]):
+        result = tool._run("query")
+
+    assert "unavailable" in result.lower()
+    client.assert_not_called()
 
 
 def test_embed_uses_gemini_when_key_configured():
