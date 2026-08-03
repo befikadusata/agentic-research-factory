@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import { base, devServerSuite } from "./playwright.base";
 
 /**
  * Demo-mode e2e, run separately from the main suite (`npm run test:e2e:demo`).
@@ -20,25 +21,12 @@ const DEMO_PORT = 3100;
 const DEMO_URL = `http://localhost:${DEMO_PORT}`;
 
 export default defineConfig({
-  testDir: "./e2e",
+  ...devServerSuite,
   testMatch: "demo.spec.ts",
-  fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  // `next dev` compiles each route the first time it is requested, and these
-  // tests are the first thing to touch every route. With the default 5s
-  // expect timeout the whole suite fails on compile latency alone, so the
-  // budget here is deliberately generous — a slow assertion is not a failing
-  // one. Capped workers for the same reason: parallel cold compiles thrash.
-  workers: process.env.CI ? 1 : 3,
-  timeout: 90_000,
-  expect: { timeout: 20_000 },
-  reporter: [["html", { open: "never" }]],
   use: {
+    ...base.use,
     baseURL: DEMO_URL,
-    trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: `npm run demo -- -p ${DEMO_PORT}`,
     url: DEMO_URL,
