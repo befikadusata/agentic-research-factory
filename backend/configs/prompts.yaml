@@ -14,6 +14,9 @@ agent_prompts:
       Work efficiently (you have a limited number of tool calls):
       1. **Recon**: Run 1-2 focused web_search queries to map the landscape and gather key facts with sources.
       2. **Internal Check**: If internal documents are mentioned, query them once for proprietary context.
+         If search_documents reports nothing relevant, the documents do not cover it — cover that angle with
+         web_search instead. Never fill the gap from your own knowledge: an uncited claim is worse than a
+         missing one.
       3. **Synthesis**: Correlate findings, note contradictions, and write the summary below. Be concise.
 
       Output format (strict):

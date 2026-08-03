@@ -111,7 +111,9 @@ Documents uploaded via the UI `/upload` route are processed through a high-preci
 3. **Cross-Encoder Re-ranking**:
    - Up to 10 candidates per sub-query per retrieval half are pulled from PostgreSQL and deduplicated by chunk ID.
    - Candidates are re-scored using `cross-encoder/ms-marco-MiniLM-L-6-v2` to determine exact contextual relevance.
-   - Chunks scoring below `RAG_MIN_RERANK_SCORE` (default `0.0`, that model's own relevance boundary) are dropped, and the top 5 survivors go to the requesting agent node. When nothing clears the floor retrieval abstains with "No relevant documents found." rather than returning the least-bad chunks of an irrelevant pool — the recall-first pool is almost never empty, so without this an off-topic question still yielded citable-looking excerpts.
+   - If the pool's **best** score falls below `RAG_MIN_RERANK_SCORE`, retrieval abstains and tells the agent to use `web_search` instead; otherwise the top 5 chunks go to the requesting agent node. The recall-first pool is almost never empty, so without this gate a question the documents never address still yielded citable-looking excerpts.
+   - The gate is pool-level and deliberately narrow. Calibration ([`evals/rerank_calibration.py`](../backend/evals/rerank_calibration.py)) shows this model's absolute scores separate *"the corpus isn't about this"* (off-topic pairs cluster near −11.2) but **not** *"answers the question"* from *"same topic, doesn't"* — those ranges overlap almost entirely. A per-chunk filter would therefore drop relevant chunks that happen to score low while keeping their neighbours. Ordering, not thresholding, is what selects among chunks that clear the gate.
+   - The default of `−11.0` is measured, not assumed. See the config comment for the distribution; an earlier `0.0` default (the model's MS MARCO boundary) would have hidden 9 of 12 genuinely relevant passages.
 4. **Scoping**:
    - Each workspace uses its own collection, with optional metadata filtering by research vertical.
 

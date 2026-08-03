@@ -149,6 +149,22 @@ def _keyword_search(vx, name: str, query: str, limit: int, vertical: Optional[st
     return [(row[0], row[1]) for row in rows]
 
 
+# What the agent is told when internal retrieval has nothing to offer. The
+# wording is the fallback mechanism: a ReAct agent's next action is chosen from
+# tool output, so a bare "No relevant documents found." is a dead end it may
+# answer around — from memory, uncited. Naming web_search makes the handoff the
+# obvious next step, which is the whole point of abstaining rather than
+# returning weak chunks. Both abstention paths (empty pool, and a pool whose
+# best chunk misses the bar) return this, because they mean the same thing to
+# the agent.
+_NO_DOCUMENTS_MESSAGE = (
+    "No relevant information found in the uploaded documents for this query. "
+    "The uploaded documents do not appear to cover this topic — do not infer an "
+    "answer from them. Use the web_search tool to source this instead, and cite "
+    "what it returns."
+)
+
+
 class RAGTool(BaseTool):
     name: str = "search_documents"
     description: str = (
@@ -204,7 +220,7 @@ class RAGTool(BaseTool):
                 _collect(_keyword_search(vx, name, sq, 10, self.vertical))
 
             if not merged:
-                return "No relevant documents found."
+                return _NO_DOCUMENTS_MESSAGE
 
             # Re-rank merged deduplicated pool against original query
             reranker = _reranker()
@@ -219,25 +235,31 @@ class RAGTool(BaseTool):
             # Abstain rather than return the least-bad chunks. The pool is built
             # recall-first (sub-query fan-out UNION keyword search), so it is
             # nearly always non-empty — a workspace's documents will match
-            # *something* lexically for almost any query. Without a floor the
-            # only way this returned "nothing found" was an empty pool, so an
-            # off-topic question got confidently-formatted irrelevant excerpts,
-            # which the writer then cited. The cross-encoder score is the one
-            # signal that says whether a chunk actually answers the query.
-            kept = [
-                (rec, score)
-                for rec, score in scored_results
-                if float(score) >= settings.RAG_MIN_RERANK_SCORE
-            ][:5]
-
-            if not kept:
+            # *something* lexically for almost any query. Without a gate the only
+            # way this returned "nothing found" was an empty pool, so a question
+            # the documents say nothing about still produced
+            # confidently-formatted excerpts, which the writer then cited.
+            #
+            # The gate is on the pool's BEST score, not applied per chunk.
+            # Calibration (evals/rerank_calibration.py) shows this model's
+            # absolute scores separate "the corpus isn't about this" from
+            # everything else, but do NOT separate "answers the question" from
+            # "same topic, doesn't" — those ranges overlap almost entirely. So a
+            # per-chunk filter would drop relevant chunks that happen to score
+            # low while keeping their higher-scoring neighbours: silent, uneven,
+            # and worse than not filtering. One decision for the whole pool —
+            # answer or hand off — is what the scores can actually support.
+            # Ranking, not thresholding, is what orders the chunks that survive.
+            if top_score < settings.RAG_MIN_RERANK_SCORE:
                 logger.info(
                     "rag_search_abstained",
                     candidates=len(merged),
                     top_score=top_score,
                     threshold=settings.RAG_MIN_RERANK_SCORE,
                 )
-                return "No relevant documents found."
+                return _NO_DOCUMENTS_MESSAGE
+
+            kept = scored_results[:5]
 
             output = []
             for (_, metadata), _score in kept:

@@ -115,17 +115,31 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "gemini-embedding-2"
     EMBEDDING_DIMENSION: int = 384
 
-    # Minimum cross-encoder score for a chunk to be shown to an agent. Retrieval
-    # abstains ("No relevant documents found.") when nothing clears this, instead
-    # of returning the top-5 of a uniformly irrelevant pool.
+    # Score the best-reranked chunk must reach before retrieval answers at all.
+    # Below it, RAGTool abstains and tells the agent to use web search instead.
     #
-    # cross-encoder/ms-marco-MiniLM-L-6-v2 emits unbounded raw logits, roughly
-    # -11..+11, trained so a relevant query/passage pair lands above 0 and an
-    # irrelevant one well below. 0.0 is therefore the model's own decision
-    # boundary rather than a tuned constant — deliberately, since there is no
-    # retrieval eval set to tune against yet. Raise it for stricter grounding,
-    # lower it (negative) to loosen.
-    RAG_MIN_RERANK_SCORE: float = 0.0
+    # MEASURED, not assumed — see backend/evals/rerank_calibration.py, which
+    # scores labelled pairs with the real cross-encoder. This shipped at 0.0 on
+    # the reasoning that ms-marco-MiniLM-L-6-v2 is trained to put relevant pairs
+    # above zero. It is, on MS MARCO web text; on business-document prose it is
+    # not. Measured over 34 labelled pairs:
+    #
+    #   relevant       min -11.374  median  -2.654  max  +6.592
+    #   hard_negative  min -11.356  median  -7.665  max  +2.985
+    #   off_topic      min -11.353  median -11.297  max -11.014
+    #
+    # A 0.0 cut would have hidden 9 of 12 genuinely relevant passages. Worse, the
+    # relevant and hard-negative ranges overlap almost entirely, so NO absolute
+    # threshold separates "answers the question" from "same topic, doesn't". That
+    # job belongs to the reranker's ordering, not to a cut-off.
+    #
+    # What absolute score *does* separate cleanly is the off-topic band: a query
+    # the corpus never discusses lands near -11.2, tightly clustered. So this is
+    # deliberately a weak gate with a narrow job — catch "these documents are not
+    # about this at all" and hand off to web search. -11.0 sits just above that
+    # band: it costs one relevant pair (the -11.374 outlier) and admits one
+    # off-topic pair (-11.014), which is the best available trade in this data.
+    RAG_MIN_RERANK_SCORE: float = -11.0
 
     # Optional in development; required in production (enforced by validate_config).
     TAVILY_API_KEY: str | None = None

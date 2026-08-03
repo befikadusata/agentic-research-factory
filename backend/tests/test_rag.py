@@ -131,7 +131,7 @@ def test_rag_merges_keyword_results_with_vector_results(mock_collection):
 
 # ── rerank threshold / abstention ─────────────────────────────────────────────
 
-def _run_with_scores(mock_collection, hits, scores, threshold=0.0):
+def _run_with_scores(mock_collection, hits, scores, threshold=-11.0):
     """Drive RAGTool._run over a fixed candidate pool and reranker scores."""
     import tools.rag as rag
 
@@ -149,35 +149,67 @@ def _run_with_scores(mock_collection, hits, scores, threshold=0.0):
         return tool._run("query")
 
 
-def test_rag_abstains_when_nothing_clears_threshold(mock_collection):
-    """The pool is built recall-first, so a lexical match on an off-topic query
-    nearly always returns *something*. Before the threshold the only way to get
-    'nothing found' was an empty pool, so an unanswerable question got
-    confidently-formatted irrelevant excerpts that the writer then cited."""
+def test_rag_abstains_on_adversarial_query_the_corpus_never_covers(mock_collection):
+    """The pool is built recall-first, so an off-topic query still matches
+    *something* lexically. Before the gate the only way to get 'nothing found'
+    was an empty pool, so a question the documents say nothing about produced
+    confidently-formatted excerpts that the writer then cited.
+
+    Scores here are the off-topic band measured in evals/rerank_calibration.py."""
     hits = [
         ("a", {"text": "unrelated chunk", "source": "a.pdf", "page": 1}),
         ("b", {"text": "also unrelated", "source": "b.pdf", "page": 2}),
     ]
-    result = _run_with_scores(mock_collection, hits, [-8.2, -5.1])
-    assert result == "No relevant documents found."
+    result = _run_with_scores(mock_collection, hits, [-11.3, -11.2], threshold=-11.0)
+    assert "No relevant information found" in result
 
 
-def test_rag_keeps_only_chunks_above_threshold(mock_collection):
+def test_rag_abstention_directs_the_agent_to_web_search(mock_collection):
+    """The message *is* the fallback. A ReAct agent picks its next action from
+    tool output, so a dead-end string invites it to answer from memory instead
+    of reaching for the tool that can actually source the claim."""
+    hits = [("a", {"text": "unrelated chunk", "source": "a.pdf", "page": 1})]
+    result = _run_with_scores(mock_collection, hits, [-11.3], threshold=-11.0)
+    assert "web_search" in result
+
+
+def test_rag_empty_pool_gives_the_same_fallback_instruction(mock_collection):
+    """Both abstention paths mean the same thing to the agent."""
+    import tools.rag as rag
+
+    tool = rag.RAGTool(collection_name="ws_test")
+    mock_collection.query.return_value = []
+    with patch("tools.rag._get_client", return_value=_mock_vecs_setup(mock_collection)), \
+         patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag.generate_sub_queries", return_value=["q1"]), \
+         patch("tools.rag._keyword_search", return_value=[]):
+        result = tool._run("query")
+
+    assert "web_search" in result
+
+
+def test_rag_gate_is_on_the_pool_best_not_per_chunk(mock_collection):
+    """Calibration shows relevant and same-topic-but-wrong chunks overlap almost
+    entirely in absolute score, so a per-chunk filter would silently drop
+    relevant chunks that happen to score low. Once the pool clears the gate,
+    ranking — not thresholding — decides what comes back."""
     hits = [
-        ("a", {"text": "relevant chunk", "source": "a.pdf", "page": 3}),
-        ("b", {"text": "borderline chunk", "source": "b.pdf", "page": 4}),
+        ("a", {"text": "strong chunk", "source": "a.pdf", "page": 3}),
+        ("b", {"text": "weak but relevant chunk", "source": "b.pdf", "page": 4}),
     ]
-    result = _run_with_scores(mock_collection, hits, [4.5, -2.0])
-    assert "relevant chunk" in result
-    assert "borderline chunk" not in result
+    result = _run_with_scores(mock_collection, hits, [4.5, -9.0], threshold=-11.0)
+    assert "strong chunk" in result
+    assert "weak but relevant chunk" in result
+    # Ordering still reflects the scores.
+    assert result.index("strong chunk") < result.index("weak but relevant chunk")
 
 
 def test_rag_threshold_is_configurable(mock_collection):
-    """A stricter floor drops a chunk that the default (0.0) would have kept."""
+    """A stricter gate abstains on a pool the default would have answered."""
     hits = [("a", {"text": "weakly relevant", "source": "a.pdf", "page": 1})]
-    assert "weakly relevant" in _run_with_scores(mock_collection, hits, [1.2])
-    assert _run_with_scores(mock_collection, hits, [1.2], threshold=5.0) == (
-        "No relevant documents found."
+    assert "weakly relevant" in _run_with_scores(mock_collection, hits, [1.2], threshold=-11.0)
+    assert "No relevant information found" in _run_with_scores(
+        mock_collection, hits, [1.2], threshold=5.0
     )
 
 
