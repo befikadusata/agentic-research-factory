@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import { base, devServerSuite } from "./playwright.base";
 
 // Its own port rather than Next's default 3000, for the same reason
 // playwright.demo.config.ts claims 3100: an unrelated project owning 3000 is
@@ -7,24 +8,13 @@ const PORT = 3200;
 const APP_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
-  testDir: "./e2e",
+  ...devServerSuite,
   // demo.spec.ts needs NEXT_PUBLIC_DEMO=1 — it runs from playwright.demo.config.ts.
   testIgnore: ["**/debug*.spec.ts", "**/docker-auth.spec.ts", "**/demo.spec.ts"],
-  fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: [["html", { open: "never" }]],
   use: {
+    ...base.use,
     baseURL: APP_URL,
-    trace: "on-first-retry",
   },
-  projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-    },
-  ],
   webServer: {
     command: `npm run dev -- -p ${PORT}`,
     url: APP_URL,

@@ -115,6 +115,74 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "gemini-embedding-2"
     EMBEDDING_DIMENSION: int = 384
 
+    # Cache embedding vectors in Redis, keyed by (provider, model, dimension,
+    # text). Off under pytest — a shared cache would make "did this call the
+    # embedder?" assertions depend on what an earlier test happened to warm, and
+    # the cache has its own tests that enable it explicitly.
+    EMBEDDING_CACHE_ENABLED: bool = True
+
+    # How many chunks either side of a retrieved chunk to hand the agent with it.
+    #
+    # Retrieval ranks 1000-character windows because that is what the embedder and
+    # the re-ranker can read in full (see docs/optimizations.md), but 1000
+    # characters is not a unit of meaning. The window that scores highest is
+    # regularly the one that names the thing, while the sentence qualifying it sits
+    # in the next window and never reaches the agent. Retrieving small and reading
+    # large is the standard answer, and it costs one indexed lookup.
+    #
+    # Expansion never crosses a page boundary, so the citation stays exact — see
+    # tools/rag.expand_context. 0 disables it and restores chunk-at-a-time output.
+    RAG_NEIGHBOUR_RADIUS: int = 1
+
+    # Score the best-reranked chunk must reach before retrieval answers at all.
+    # Below it, RAGTool abstains and tells the agent to use web search instead.
+    #
+    # MEASURED, and measured twice, because the first measurement asked the wrong
+    # question.
+    #
+    # It shipped at 0.0 on the reasoning that ms-marco-MiniLM-L-6-v2 is trained to
+    # put relevant pairs above zero. True on MS MARCO web text, false on
+    # business-document prose: backend/evals/rerank_calibration.py scored 34
+    # labelled pairs and found 0.0 would hide 9 of 12 relevant passages. That
+    # moved the default to -11.0, just above the tight off-topic band those pairs
+    # clustered in (-11.35 to -11.01).
+    #
+    # backend/evals/retrieval_eval.py then ran the real pipeline over a real
+    # corpus and showed -11.0 barely gates anything: it rejected 1 of 10
+    # unanswerable queries. The gap is not noise, it is a category error. The
+    # calibration scores a chosen (query, passage) pair. The gate compares against
+    # the best chunk retrieval could find anywhere in the corpus — and a
+    # recall-first pool searching 54 chunks surfaces something far more plausible
+    # than a passage picked to be off-topic. Best-of-pool scores sit well above
+    # isolated-pair scores, so a threshold set from pair scores sits far too low.
+    #
+    # Best-chunk score over 62 answerable and 10 unanswerable queries:
+    #
+    #   answerable    min -11.161  median  +2.063  max +10.314
+    #   unanswerable  min -11.231  median -10.256  max  -7.589
+    #
+    #   threshold   abstains on answerable   admits unanswerable
+    #     -11.0            1/62                     9/10
+    #      -9.0            1/62                     3/10
+    #      -8.5            1/62                     1/10
+    #      -7.5            7/62                     0/10
+    #
+    # -9.0 buys six of those nine back for nothing: false abstentions do not move
+    # until -8.0, and the single one at -9.0 is a colloquial paraphrase that -11.0
+    # already missed. It is not pushed lower to -8.5 on purpose — the lowest
+    # answerable query that still passes scores -8.351, so -8.5 would sit 0.15
+    # from a real answer and is tuned to this corpus rather than robust to the
+    # next one. -9.0 keeps 0.65 of headroom.
+    #
+    # The three unanswerable queries -9.0 still admits are company-financial
+    # questions against a corpus full of company financials. That is the known
+    # limit, not a bad number: both instruments agree that relevant and
+    # same-topic-but-wrong overlap almost entirely, so NO absolute threshold
+    # separates "answers the question" from "is about the same subject". The gate
+    # catches "these documents are not about this at all" and nothing finer.
+    # Ordering, not thresholding, is what selects among chunks that clear it.
+    RAG_MIN_RERANK_SCORE: float = -9.0
+
     # Optional in development; required in production (enforced by validate_config).
     TAVILY_API_KEY: str | None = None
     FIRECRAWL_API_KEY: str | None = None
@@ -191,6 +259,7 @@ if os.environ.get("TESTING") == "1":
     if _target == settings.DATABASE_URL:
         raise RuntimeError("TEST_DATABASE_URL must differ from DATABASE_URL")
     settings.DATABASE_URL = _target
+    settings.EMBEDDING_CACHE_ENABLED = False
 
 # Older configs named this SUPABASE_DB_URL. Without this the value would be
 # ignored and the derivation below would silently repoint the vector store at

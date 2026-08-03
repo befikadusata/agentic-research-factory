@@ -129,6 +129,104 @@ def test_rag_merges_keyword_results_with_vector_results(mock_collection):
     assert result.index("ZX-9000 exact match") < result.index("semantic chunk")
 
 
+# ── rerank threshold / abstention ─────────────────────────────────────────────
+
+def _run_with_scores(mock_collection, hits, scores, threshold=-11.0):
+    """Drive RAGTool._run over a fixed candidate pool and reranker scores."""
+    import tools.rag as rag
+
+    mock_collection.query.return_value = list(hits)
+    reranker_mock = MagicMock()
+    reranker_mock.predict.return_value = list(scores)
+
+    tool = rag.RAGTool(collection_name="ws_test")
+    with patch("tools.rag._get_client", return_value=_mock_vecs_setup(mock_collection)), \
+         patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag.generate_sub_queries", return_value=["q1"]), \
+         patch("tools.rag._keyword_search", return_value=[]), \
+         patch("tools.rag._reranker", return_value=reranker_mock), \
+         patch.object(rag.settings, "RAG_MIN_RERANK_SCORE", threshold):
+        return tool._run("query")
+
+
+def test_rag_abstains_on_adversarial_query_the_corpus_never_covers(mock_collection):
+    """The pool is built recall-first, so an off-topic query still matches
+    *something* lexically. Before the gate the only way to get 'nothing found'
+    was an empty pool, so a question the documents say nothing about produced
+    confidently-formatted excerpts that the writer then cited.
+
+    Scores here are the off-topic band measured in evals/rerank_calibration.py."""
+    hits = [
+        ("a", {"text": "unrelated chunk", "source": "a.pdf", "page": 1}),
+        ("b", {"text": "also unrelated", "source": "b.pdf", "page": 2}),
+    ]
+    result = _run_with_scores(mock_collection, hits, [-11.3, -11.2], threshold=-11.0)
+    assert "No relevant information found" in result
+
+
+def test_rag_abstention_directs_the_agent_to_web_search(mock_collection):
+    """The message *is* the fallback. A ReAct agent picks its next action from
+    tool output, so a dead-end string invites it to answer from memory instead
+    of reaching for the tool that can actually source the claim."""
+    hits = [("a", {"text": "unrelated chunk", "source": "a.pdf", "page": 1})]
+    result = _run_with_scores(mock_collection, hits, [-11.3], threshold=-11.0)
+    assert "web_search" in result
+
+
+def test_rag_empty_pool_gives_the_same_fallback_instruction(mock_collection):
+    """Both abstention paths mean the same thing to the agent."""
+    import tools.rag as rag
+
+    tool = rag.RAGTool(collection_name="ws_test")
+    mock_collection.query.return_value = []
+    with patch("tools.rag._get_client", return_value=_mock_vecs_setup(mock_collection)), \
+         patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag.generate_sub_queries", return_value=["q1"]), \
+         patch("tools.rag._keyword_search", return_value=[]):
+        result = tool._run("query")
+
+    assert "web_search" in result
+
+
+def test_rag_gate_is_on_the_pool_best_not_per_chunk(mock_collection):
+    """Calibration shows relevant and same-topic-but-wrong chunks overlap almost
+    entirely in absolute score, so a per-chunk filter would silently drop
+    relevant chunks that happen to score low. Once the pool clears the gate,
+    ranking — not thresholding — decides what comes back."""
+    hits = [
+        ("a", {"text": "strong chunk", "source": "a.pdf", "page": 3}),
+        ("b", {"text": "weak but relevant chunk", "source": "b.pdf", "page": 4}),
+    ]
+    result = _run_with_scores(mock_collection, hits, [4.5, -9.0], threshold=-11.0)
+    assert "strong chunk" in result
+    assert "weak but relevant chunk" in result
+    # Ordering still reflects the scores.
+    assert result.index("strong chunk") < result.index("weak but relevant chunk")
+
+
+def test_rag_threshold_is_configurable(mock_collection):
+    """A stricter gate abstains on a pool the default would have answered."""
+    hits = [("a", {"text": "weakly relevant", "source": "a.pdf", "page": 1})]
+    assert "weakly relevant" in _run_with_scores(mock_collection, hits, [1.2], threshold=-11.0)
+    assert "No relevant information found" in _run_with_scores(
+        mock_collection, hits, [1.2], threshold=5.0
+    )
+
+
+# ── page-number rendering ─────────────────────────────────────────────────────
+
+def test_rag_output_renders_real_page_numbers(mock_collection):
+    hits = [("a", {"text": "chunk text", "source": "report.pdf", "page": 7})]
+    assert "SOURCE: report.pdf (Page: 7)" in _run_with_scores(mock_collection, hits, [3.0])
+
+
+def test_rag_output_falls_back_to_na_for_null_page(mock_collection):
+    """Chunks ingested before page provenance existed carry the key with a null
+    value, so `.get("page", "N/A")` never fired and citations read 'Page: None'."""
+    hits = [("a", {"text": "chunk text", "source": "legacy.pdf", "page": None})]
+    assert "SOURCE: legacy.pdf (Page: N/A)" in _run_with_scores(mock_collection, hits, [3.0])
+
+
 def test_rag_rejects_unsafe_collection_name():
     """Collection names reach SQL as identifiers, so they must be validated."""
     from tools.rag import RAGTool
@@ -148,13 +246,35 @@ def test_embed_uses_gemini_when_key_configured():
     import tools.rag as rag
 
     with patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
-         patch("tools.rag._gemini_embed", return_value=[0.2] * 384) as gemini, \
+         patch("tools.rag._gemini_embed", return_value=[[0.2] * 384, [0.2] * 384]) as gemini, \
          patch("tools.rag._embedder") as local:
         result = rag._embed(["a", "b"])
 
-    assert gemini.call_count == 2
+    # One call for both texts, not one per text — the whole point of batching.
+    assert gemini.call_count == 1
+    assert gemini.call_args[0][0] == ["a", "b"]
     local.assert_not_called()
     assert result == [[0.2] * 384, [0.2] * 384]
+
+
+def test_embed_splits_oversized_batches_at_the_api_limit():
+    """Gemini rejects a batch over 100 outright, so ingest of a large document
+    must be chunked rather than sent whole."""
+    import tools.rag as rag
+
+    texts = [f"chunk {i}" for i in range(250)]
+    sizes = []
+
+    def fake(batch):
+        sizes.append(len(batch))
+        return [[0.1] * 384] * len(batch)
+
+    with patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
+         patch("tools.rag._gemini_embed", side_effect=fake):
+        result = rag._embed(texts)
+
+    assert sizes == [100, 100, 50]
+    assert len(result) == 250
 
 
 def test_embed_raises_instead_of_falling_back_to_local_model():
@@ -183,6 +303,92 @@ def test_embed_uses_local_model_when_no_gemini_key():
 
     gemini.assert_not_called()
     assert result == [[0.3] * 384]
+
+
+def test_embed_collapses_duplicate_texts_within_one_call():
+    """Sub-query expansion emits near-duplicates and often the original query
+    verbatim as its fallback, so the same string arrives more than once."""
+    import tools.rag as rag
+
+    with patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
+         patch("tools.rag._gemini_embed", return_value=[[0.1] * 384, [0.2] * 384]) as gemini:
+        result = rag._embed(["a", "b", "a"])
+
+    assert gemini.call_args[0][0] == ["a", "b"]
+    # Position is what callers rely on: result[i] must be the vector for texts[i].
+    assert result == [[0.1] * 384, [0.2] * 384, [0.1] * 384]
+
+
+def test_embed_returns_empty_without_calling_the_model():
+    import tools.rag as rag
+
+    with patch("tools.rag._gemini_embed") as gemini, patch("tools.rag._embedder") as local:
+        assert rag._embed([]) == []
+
+    gemini.assert_not_called()
+    local.assert_not_called()
+
+
+# ── ingest ────────────────────────────────────────────────────────────────────
+
+def _ingest(chunks):
+    """Run ingest_documents against a mocked collection; return the records."""
+    import tools.rag as rag
+
+    collection = MagicMock()
+    client = MagicMock()
+    client.get_or_create_collection.return_value = collection
+
+    with patch("tools.rag._get_client", return_value=client), \
+         patch("tools.rag._embed", return_value=[[0.1] * 384] * len(chunks)), \
+         patch("tools.rag._ensure_fts_index"), \
+         patch("tools.rag._ensure_neighbour_index"):
+        rag.ingest_documents(chunks, collection_name="ws_test")
+
+    return collection.upsert.call_args.kwargs["records"]
+
+
+def test_ingest_numbers_chunks_in_reading_order():
+    """The ordinal is what neighbour expansion navigates by, so it has to be the
+    chunk's position in the document rather than anything about its content."""
+    records = _ingest(
+        [{"text": f"chunk {i}", "metadata": {"source": "a.pdf", "page": 1}} for i in range(3)]
+    )
+
+    assert [metadata["ordinal"] for _, _, metadata in records] == [0, 1, 2]
+
+
+def test_ingest_numbers_each_document_separately():
+    """LlamaParse returns several files in one list, and the eval corpus is five
+    documents. A single counter would make the last chunk of one document adjacent
+    to the first chunk of the next."""
+    records = _ingest([
+        {"text": "a1", "metadata": {"source": "a.pdf", "page": 1}},
+        {"text": "b1", "metadata": {"source": "b.pdf", "page": 1}},
+        {"text": "a2", "metadata": {"source": "a.pdf", "page": 1}},
+    ])
+
+    assert [(m["source"], m["ordinal"]) for _, _, m in records] == [
+        ("a.pdf", 0), ("b.pdf", 0), ("a.pdf", 1),
+    ]
+
+
+def test_ingest_builds_the_neighbour_index():
+    import tools.rag as rag
+
+    collection = MagicMock()
+    client = MagicMock()
+    client.get_or_create_collection.return_value = collection
+
+    with patch("tools.rag._get_client", return_value=client), \
+         patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag._ensure_fts_index"), \
+         patch("tools.rag._ensure_neighbour_index") as neighbour_index:
+        rag.ingest_documents(
+            [{"text": "t", "metadata": {"source": "a.pdf", "page": 1}}], collection_name="ws_test"
+        )
+
+    assert neighbour_index.call_args[0][1] == "ws_test"
 
 
 class _FakeArray:

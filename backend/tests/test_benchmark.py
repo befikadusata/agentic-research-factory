@@ -27,7 +27,10 @@ from database import AsyncSessionLocal
 from models import Run, RunCost, RunStatus, Workspace
 from services.run_service import execute_run
 
-# 4 topics (1 from each category in eval_set.md)
+# One topic per vertical config — unscoped, plus b2b_sales / marketing / founder
+# — all on the lead_intel format. Carried over from the 20-topic eval set that
+# docs/evaluation held until ff6abcf retired it as completed notes; four is what
+# a test can afford to actually run.
 BENCHMARK_SUBSET = [
     {"topic": "Kubernetes cost optimization for SaaS", "format": "lead_intel", "vertical": None},
     {"topic": "https://linear.app", "format": "lead_intel", "vertical": "b2b_sales"},
