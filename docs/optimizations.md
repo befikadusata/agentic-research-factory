@@ -57,6 +57,7 @@ These numbers are reasoned from model input limits, not tuned against a retrieva
 Two instruments, measuring different things, and the difference between them turned out to matter more than either number.
 
 - **[`evals/rerank_calibration.py`](../backend/evals/rerank_calibration.py)** scores 34 labelled `(query, passage)` pairs with the real cross-encoder. It establishes the score distribution on business-document prose — and that relevant and same-topic-but-wrong overlap almost entirely, which is what rules out a per-chunk relevance filter.
+- **[`evals/retrieval_baselines.py`](../backend/evals/retrieval_baselines.py)** supplies the ablations the pipeline is measured against — naive dense top-k and dense + re-ranking — so each stage has to justify its cost rather than being paid for on the strength of the paper it came from. Run through `--compare`.
 - **[`evals/retrieval_eval.py`](../backend/evals/retrieval_eval.py)** ingests a 54-chunk corpus through the real ingest path and runs 62 golden queries plus 10 unanswerable ones through the real `retrieve()`. It reports hit@{1,3,5,10}, MRR, NDCG@k, and **pool recall** — whether the chunk was in the candidate pool at any depth, which is what says whether a miss is a recall failure (the fan-out lost it, and no re-ranker change recovers it) or a ranking failure. It also reports **coverage**, the fraction of a query's answering chunks that reach the agent, once over the ranking and once over what neighbour expansion actually delivers. Results are sliced by query kind: `lookup`, `paraphrase`, `exact-term`, `multi-chunk`, `near-miss`.
 
 ```
@@ -70,9 +71,24 @@ hit@k asks whether retrieval found *an* answer; coverage asks whether it found t
 
 Sub-query expansion is pinned off by default so a re-run measures retrieval rather than that day's LLM rewrite; `--expand` measures the production path, and the report always states which was used.
 
+**Compared against what.** `--compare` runs [`evals/retrieval_baselines.py`](../backend/evals/retrieval_baselines.py): the same corpus and queries against naive dense top-k, then dense + re-ranking, then production. Each variant adds one stage, so the differences say what each stage is worth. On this corpus the answer is uncomfortable:
+
+```
+variant           hit@1  hit@5    MRR  ndcg@5  recall  cover   pool   rejects unanswerable
+dense             0.871  0.984  0.930   0.923   1.000  0.984   10.0   0/10 (no gate)
+dense+rerank      0.790  0.968  0.858   0.852   1.000  0.960   10.0            7/10
+hybrid+rerank     0.790  0.903  0.846   0.813   1.000  0.895   13.4            7/10
+```
+
+**Naive dense retrieval outranks the full pipeline here, and both stages above it cost accuracy.** The cause is the same one the lexical-half note gives: 54 chunks is small enough that the dense half alone reaches pool recall 1.000, so there is no recall left to recover — the lexical fan-out can only contribute distractors, and the cross-encoder can only reorder a list that was already right. `ms-marco-MiniLM-L-6-v2` is a small model trained on web QA, and on business prose it is simply a weaker judge than the embedder.
+
+What the pipeline does win, categorically, is the last column. Dense top-k has no abstention gate available to it — cosine similarity is not on the cross-encoder's scale — so it answers all ten unanswerable queries with confidently-formatted excerpts, which is the fabricated-citation failure the gate exists to stop. On this corpus that is the whole of what the cross-encoder buys, and it is enough to keep it.
+
+The rest of the pipeline is running on an untested bet: that dense recall stops being perfect as a workspace grows past a few dozen chunks, at which point the fan-out starts recovering answers instead of adding noise. That bet is plausible and standard, and it is *not* evidence — this harness cannot settle it, and it should not be described as if it had. `tests/test_retrieval_eval.py` asserts on the gap rather than on a winner, so it stays quiet if the pipeline improves and fires if it drifts further behind the baseline.
+
 **The threshold was set from the wrong instrument.** The calibration put off-topic pairs in a tight band near −11.2, so −11.0 looked like the natural cut. Against the real pipeline it rejected **1 of 10** unanswerable queries. The gate never sees a passage in isolation — it sees the best chunk retrieval could find anywhere in the corpus, and best-of-pool scores run far above isolated-pair scores. Moving to −9.0 takes correct rejections from 1/10 to 7/10 at no measured cost in false abstentions (1/62 either way, and that one is a colloquial paraphrase −11.0 already missed). It is deliberately not pushed to −8.5, where the numbers look better still, because the lowest answerable query that passes scores −8.351 and a threshold 0.15 away from a real answer is tuned to this corpus rather than robust to the next one.
 
-**Known limits.** 54 chunks is small enough that the vector half alone achieves pool recall 1.000, so this corpus cannot demonstrate the lexical half's contribution to recall — it can only show its cost, and it does: fixing the any-term bug widened the mean pool from 10.0 to 13.3 and moved hit@5 from 0.968 down to 0.903, because the extra candidates are distractors the re-ranker sometimes prefers. That trade inverts at production corpus sizes, where vector recall stops being perfect, but this harness cannot show it.
+**Known limits.** 54 chunks is small enough that the vector half alone achieves pool recall 1.000, so this corpus cannot demonstrate the lexical half's contribution to recall — it can only show its cost, and it does: fixing the any-term bug widened the mean pool from 10.0 to 13.3 and moved hit@5 from 0.968 down to 0.903, because the extra candidates are distractors the re-ranker sometimes prefers. (The ablation above confirms this from the other direction: `dense+rerank` scores 0.968, which is exactly what production measured while the lexical half was silently dead.) That trade should invert at production corpus sizes, where vector recall stops being perfect, but this harness cannot show it.
 
 Neighbour expansion has the same shape of limit, for a different reason. Every chunk in this corpus is a self-contained paragraph, so nothing in it is a sentence severed from its qualifier — which is the case expansion exists for. What the harness can say is that expansion costs nothing measurable (coverage rose, no ranking metric moved) and delivers 7.8 chunks where the ranking alone delivered 5. The mechanism is verified separately, by round-tripping a real passage through the configured splitter and asserting the stitch reproduces it exactly.
 

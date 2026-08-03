@@ -129,7 +129,7 @@ Documents uploaded via the UI `/upload` route are processed through a high-preci
 
 ## 4. Retrieval Evaluation
 
-Two harnesses, both opt-in behind `RUN_MODEL_EVALS=1` because they load real models:
+Three instruments, all opt-in behind `RUN_MODEL_EVALS=1` because they load real models. The third, [`evals/retrieval_baselines.py`](../backend/evals/retrieval_baselines.py), is not a harness but a set of ablations — naive dense top-k and dense + re-ranking — that the pipeline is measured against via `--compare`. The other two:
 
 | | [`evals/rerank_calibration.py`](../backend/evals/rerank_calibration.py) | [`evals/retrieval_eval.py`](../backend/evals/retrieval_eval.py) |
 |---|---|---|
@@ -144,7 +144,9 @@ Two harnesses, both opt-in behind `RUN_MODEL_EVALS=1` because they load real mod
 
 The two disagreed about the threshold, and the disagreement was the finding. Calibration put off-topic pairs near −11.2, so −11.0 looked correct; against the real pipeline it rejected 1 of 10 unanswerable queries. The gate never scores an isolated passage — it scores the best chunk retrieval found in the whole corpus, which runs far higher. The threshold is now set from the pipeline measurement, and `tests/test_rerank_calibration.py` keeps the discrepancy executable so the pair-level number cannot be re-adopted on the strength of how carefully it was measured.
 
-Both are regression guards rather than leaderboards, so the assertions in `tests/test_retrieval_eval.py` sit deliberately below the measured numbers: they should fire when retrieval breaks and stay quiet when a dependency bump moves a metric by a point.
+The ablation reports one result worth knowing before reading any of the others: on this 54-chunk corpus, **naive dense top-k outranks the full pipeline** (hit@5 0.984 against 0.903), because dense recall is already perfect at this scale and every stage above it can only add distractors. What production wins is the abstention gate, which dense has no scale to implement and which stops all ten unanswerable queries from returning citable-looking excerpts. The fan-out is justified by an untested expectation that dense recall degrades on larger corpora, not by a measurement. `docs/optimizations.md` carries the numbers and the argument.
+
+These are regression guards rather than leaderboards, so the assertions in `tests/test_retrieval_eval.py` sit deliberately below the measured numbers: they should fire when retrieval breaks and stay quiet when a dependency bump moves a metric by a point. The ablation assertion is on the *gap* to the baseline for the same reason — it fires if the pipeline drifts further behind, not if it improves.
 
 ---
 

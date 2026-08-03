@@ -15,6 +15,9 @@ a failure and train everyone to ignore it.
 Measured at the time of writing, Gemini embeddings + pinned sub-queries:
 hit@1 0.790, hit@5 0.903, hit@10 0.968, MRR 0.846, pool recall 1.000,
 coverage 0.895 ranked / 0.903 delivered, 7.8 chunks in 4.6 blocks.
+
+The ablation tests below run every variant in `evals/retrieval_baselines.py`
+and roughly triple the runtime, which is why they take their own fixture.
 """
 import os
 
@@ -26,6 +29,36 @@ pytestmark = pytest.mark.skipif(
 )
 
 EVAL_TEST_COLLECTION = "retrieval_eval_test"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def embedding_cache_on():
+    """Turn the embedding cache back on, for this file only.
+
+    config.py disables it under pytest so a shared store cannot make "did this
+    call the embedder?" assertions depend on what an earlier test warmed. No test
+    here makes that kind of assertion — they measure retrieval quality — and
+    embeddings are deterministic, so a warm cache cannot move a number.
+
+    What it prevents is real: this file embeds the corpus once and the 72 queries
+    once per ablation variant, which cold is a burst of roughly 270 API calls and
+    trips the provider's per-minute quota mid-run. Entries land in the normal
+    keyspace because they are the normal vectors for the configured model.
+    """
+    from unittest.mock import patch
+
+    from config import settings
+    from utils.embedding_cache import EmbeddingCache
+
+    with patch.object(settings, "EMBEDDING_CACHE_ENABLED", True):
+        cache = EmbeddingCache()
+
+    if not cache.enabled:  # no Redis; the eval still runs, just cold
+        yield
+        return
+
+    with patch("tools.rag.embedding_cache", cache):
+        yield
 
 
 @pytest.fixture(scope="module")
@@ -135,6 +168,60 @@ def test_configured_threshold_rejects_most_unanswerable_queries(measured):
         f"threshold {settings.RAG_MIN_RERANK_SCORE} rejects only "
         f"{gate['correct_abstentions']}/{len(adversarial)} unanswerable queries"
     )
+
+
+@pytest.fixture(scope="module")
+def ablation(measured):
+    """Every variant in `retrieval_baselines`, over the corpus `measured` built."""
+    from evals.retrieval_eval import compare_variants
+
+    return {row["variant"].name: row for row in compare_variants(EVAL_TEST_COLLECTION)}
+
+
+def test_the_gate_is_what_the_re_ranker_actually_buys(ablation):
+    """The one column where the pipeline categorically beats naive RAG.
+
+    Dense top-k has no abstention gate available to it — cosine similarity is not
+    on the cross-encoder's scale — so it answers every unanswerable query with
+    confidently-formatted, citable-looking excerpts. That is the failure that
+    motivated the gate, and it is the thing the cross-encoder is genuinely in the
+    pipeline for on a corpus this size."""
+    assert ablation["dense"]["gate"] is None
+    reranked = ablation["dense+rerank"]["gate"]
+    assert reranked["correct_abstentions"] >= 0.6 * reranked["adversarial_total"]
+
+
+def test_the_pipeline_does_not_fall_further_behind_naive_dense_retrieval(ablation):
+    """Records an uncomfortable measurement so it cannot be quietly forgotten.
+
+    On this corpus naive dense retrieval *outranks* production: hit@5 0.984
+    against 0.903, MRR 0.930 against 0.846. 54 chunks is small enough that the
+    dense half alone reaches pool recall 1.000, so the lexical fan-out can only
+    add distractors and the re-ranker can only reorder an already-correct list.
+    The pipeline's bet is that this inverts as a corpus grows and dense recall
+    stops being perfect — a bet this harness cannot settle.
+
+    So the assertion is on the *gap*, not on a winner: it stays quiet if the
+    pipeline improves and fires if it drifts further behind the baseline, which
+    would mean the fan-out has started adding noise rather than recall."""
+    dense = ablation["dense"]["summary"]
+    production = ablation["hybrid+rerank"]["summary"]
+
+    gap = dense["hit@5"] - production["hit@5"]
+    assert gap <= 0.15, (
+        f"production trails naive dense retrieval by {gap:.3f} on hit@5 "
+        f"({production['hit@5']:.3f} against {dense['hit@5']:.3f})"
+    )
+
+
+def test_every_variant_reaches_the_same_recall_ceiling(ablation):
+    """Why the ablation reads the way it does: all three find the answer
+    somewhere. With the ceiling already at 1.000 for the cheapest variant, the
+    stages above it have nothing left to recover and can only lose ground."""
+    for name, row in ablation.items():
+        assert row["summary"]["pool_recall"] >= 0.95, (
+            f"{name} pool recall fell to {row['summary']['pool_recall']:.3f}"
+        )
 
 
 def test_pair_level_threshold_would_barely_gate_anything(measured):

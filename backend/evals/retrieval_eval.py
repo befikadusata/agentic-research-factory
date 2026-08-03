@@ -54,6 +54,15 @@ The embedder is whatever config selects, and the report names it. Gemini and
 `all-MiniLM-L6-v2` produce different retrieval, so a number carried across a
 change of embedder is meaningless.
 
+## Compared against what
+
+`--compare` runs the ablations in [`retrieval_baselines.py`](retrieval_baselines.py)
+over the same corpus: naive dense top-k, dense + re-ranking, and production. A
+hit@5 of 0.903 means nothing until plain vector search over the same 54 chunks
+has been asked the same questions, and on this corpus it does better — see the
+"Known limits" note in docs/optimizations.md, which is where that result is
+discussed rather than buried.
+
 ## What it does not measure
 
 Answer quality. A chunk being retrieved is not the writer using it, and this
@@ -64,6 +73,7 @@ LLM-mediated and needs a different instrument.
 import argparse
 import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Callable, Optional
 
 from evals.retrieval_corpus import (
     ADVERSARIAL,
@@ -73,6 +83,15 @@ from evals.retrieval_corpus import (
     Golden,
     gains_for,
 )
+
+if TYPE_CHECKING:  # importing tools.rag at module scope would load the models
+    from tools.rag import Candidate
+
+# (query, collection_name) -> ranked candidates. `retrieve` is the production
+# one; evals/retrieval_baselines.py supplies the ablations it is measured
+# against. Everything downstream of this signature — metrics, expansion,
+# reporting — is retriever-agnostic on purpose.
+Retriever = Callable[[str, str], "list[Candidate]"]
 
 EVAL_COLLECTION = "retrieval_eval"
 
@@ -233,14 +252,24 @@ def _eval_ids(metadatas) -> list[str]:
     return ids
 
 
-def _rank(query: str, collection_name: str, expand: bool) -> _Ranking:
+def _rank(
+    query: str,
+    collection_name: str,
+    expand: bool,
+    retriever: Optional[Retriever] = None,
+) -> _Ranking:
     from tools.rag import _RESULTS_RETURNED, expand_context, retrieve
 
-    candidates = retrieve(
-        query,
-        collection_name,
-        sub_queries=None if expand else [query],
-    )
+    if retriever is None:
+        candidates = retrieve(
+            query,
+            collection_name,
+            sub_queries=None if expand else [query],
+        )
+    else:
+        # A baseline from evals/retrieval_baselines.py. It pins its own query
+        # handling, so `expand` does not apply to it.
+        candidates = retriever(query, collection_name)
     ranked_ids = _eval_ids(candidate.metadata for candidate in candidates)
 
     # The ranking is what the metrics score; this is what the agent would read.
@@ -258,10 +287,14 @@ def _rank(query: str, collection_name: str, expand: bool) -> _Ranking:
     )
 
 
-def run_golden(collection_name: str = EVAL_COLLECTION, expand: bool = False) -> list[QueryResult]:
+def run_golden(
+    collection_name: str = EVAL_COLLECTION,
+    expand: bool = False,
+    retriever: Optional[Retriever] = None,
+) -> list[QueryResult]:
     results = []
     for golden in GOLDEN:
-        ranking = _rank(golden.query, collection_name, expand)
+        ranking = _rank(golden.query, collection_name, expand, retriever)
         results.append(
             QueryResult(
                 golden=golden,
@@ -276,11 +309,13 @@ def run_golden(collection_name: str = EVAL_COLLECTION, expand: bool = False) -> 
 
 
 def run_adversarial(
-    collection_name: str = EVAL_COLLECTION, expand: bool = False
+    collection_name: str = EVAL_COLLECTION,
+    expand: bool = False,
+    retriever: Optional[Retriever] = None,
 ) -> list[AdversarialResult]:
     results = []
     for query in ADVERSARIAL:
-        ranking = _rank(query, collection_name, expand)
+        ranking = _rank(query, collection_name, expand, retriever)
         results.append(
             AdversarialResult(
                 query=query,
@@ -379,7 +414,69 @@ def by_kind(results: list[QueryResult]) -> dict[str, dict]:
     return {kind: summarise(group) for kind, group in sorted(grouped.items())}
 
 
+def compare_variants(collection_name: str = EVAL_COLLECTION) -> list[dict]:
+    """Run every ablation in `retrieval_baselines` over the same corpus.
+
+    Returns one row per variant with its summary and, where the variant's scores
+    are on the cross-encoder's scale, what the configured gate would do to it.
+    """
+    from config import settings
+    from evals.retrieval_baselines import VARIANTS
+
+    rows = []
+    for variant in VARIANTS:
+        golden = run_golden(collection_name, retriever=variant.rank)
+        adversarial = run_adversarial(collection_name, retriever=variant.rank)
+        rows.append(
+            {
+                "variant": variant,
+                "summary": summarise(golden),
+                "gate": (
+                    abstention_report(golden, adversarial, settings.RAG_MIN_RERANK_SCORE)
+                    if variant.gated
+                    else None
+                ),
+                "golden": golden,
+                "adversarial": adversarial,
+            }
+        )
+    return rows
+
+
 # ── report ───────────────────────────────────────────────────────────────────
+
+
+def _print_comparison(rows: list[dict], adversarial_total: int) -> None:
+    print("\n  ablation — same corpus, same queries, same candidate budget\n")
+    header = (
+        f"    {'variant':<16} {'hit@1':>6} {'hit@5':>6} {'MRR':>6} {'ndcg@5':>7} "
+        f"{'recall':>7} {'cover':>6} {'pool':>6}  {'rejects unanswerable':>20}"
+    )
+    print(header)
+    print("    " + "-" * (len(header) - 4))
+    for row in rows:
+        s, gate = row["summary"], row["gate"]
+        rejects = (
+            f"{gate['correct_abstentions']}/{gate['adversarial_total']}"
+            if gate
+            else f"0/{adversarial_total} (no gate)"
+        )
+        print(
+            f"    {row['variant'].name:<16} {s['hit@1']:>6.3f} {s['hit@5']:>6.3f} "
+            f"{s['mrr']:>6.3f} {s['ndcg@5']:>7.3f} {s['pool_recall']:>7.3f} "
+            f"{s['coverage@5']:>6.3f} {s['mean_pool_size']:>6.1f}  {rejects:>20}"
+        )
+    for row in rows:
+        print(f"    {row['variant'].name:<16} — {row['variant'].description}")
+
+    print("\n    what each stage buys (read the differences, not the rows):")
+    for earlier, later in zip(rows, rows[1:]):
+        a, b = earlier["summary"], later["summary"]
+        print(
+            f"      {earlier['variant'].name} -> {later['variant'].name}: "
+            f"hit@5 {b['hit@5'] - a['hit@5']:+.3f}  MRR {b['mrr'] - a['mrr']:+.3f}  "
+            f"ndcg@5 {b['ndcg@5'] - a['ndcg@5']:+.3f}"
+        )
 
 
 def main() -> None:
@@ -394,6 +491,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--skip-ingest", action="store_true", help="reuse the collection from a previous run"
+    )
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="also run the naive-RAG baseline and the ablations between it and production",
     )
     args = parser.parse_args()
 
@@ -492,6 +594,9 @@ def main() -> None:
         print(f"    [{where:>13}] ({result.golden.kind}) {result.golden.query}")
         if rank is None or rank > 5:
             print(f"                     top result was: {result.ranked_ids[0] if result.ranked_ids else '—'}")
+
+    if args.compare:
+        _print_comparison(compare_variants(args.collection), len(ADVERSARIAL))
     print()
 
 
