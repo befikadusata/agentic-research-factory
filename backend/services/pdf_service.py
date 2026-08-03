@@ -88,16 +88,49 @@ def _build_converter():
 
 
 def _parse_with_docling(path: str) -> list[dict]:
+    """Chunk a PDF page by page, so every chunk carries the page it came from.
+
+    A whole-document `export_to_markdown()` flattens away docling's provenance,
+    which is why this used to record `"page": None` for every chunk — the primary
+    parse path, so in practice *every* internal citation rendered "Page: N/A"
+    while the citation plumbing and the Sources panel sat there fully built.
+    Exporting one page at a time keeps the markdown structure the splitter needs
+    and gives each chunk a real page number.
+
+    The trade this makes deliberately: chunks no longer straddle a page break, so
+    a page's tail is a short chunk and there is no 200-char overlap across the
+    boundary. That is the right side to err on — a chunk spanning two pages can
+    only be labelled with one of them, and a citation pointing at the wrong page
+    is worse than a slightly smaller chunk.
+    """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
     converter = _build_converter()
     result = converter.convert(path)
-    md_text = result.document.export_to_markdown()
-    if not md_text.strip():
-        return []
+    document = result.document
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     filename = os.path.basename(path)
+
+    chunks: list[dict] = []
+    for page_no in sorted(getattr(document, "pages", None) or {}):
+        page_md = document.export_to_markdown(page_no=page_no)
+        if not page_md.strip():
+            continue
+        chunks.extend(
+            {"text": chunk, "metadata": {"source": filename, "page": page_no}}
+            for chunk in splitter.split_text(page_md)
+        )
+    if chunks:
+        return chunks
+
+    # No page provenance (docling populates `pages` per backend, and some inputs
+    # yield none). Better to ingest without page numbers than not at all — this
+    # is the pre-existing behaviour, now the exception rather than the rule.
+    md_text = document.export_to_markdown()
+    if not md_text.strip():
+        return []
+    logger.info("docling_parse_without_page_provenance", path=path)
     return [
         {"text": chunk, "metadata": {"source": filename, "page": None}}
         for chunk in splitter.split_text(md_text)

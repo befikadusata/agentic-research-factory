@@ -103,15 +103,15 @@ Documents uploaded via the UI `/upload` route are processed through a high-preci
 
 1. **Document Ingestion**:
    - PDFs are converted to Markdown with Docling. LlamaParse is an optional fallback when Docling fails and `LLAMA_CLOUD_API_KEY` is configured.
-   - Text chunks are parsed with a `RecursiveCharacterTextSplitter` (size = 1000, overlap = 200) to preserve paragraph flow.
+   - Each page is exported and split separately with a `RecursiveCharacterTextSplitter` (size = 1000, overlap = 200), so every chunk carries the page it came from and citations can name a real page. A chunk therefore never straddles a page break; documents with no page provenance fall back to a whole-document split with no page number.
    - Embeddings use the configured Gemini embedding model when a Gemini key is present; otherwise they use the local `all-MiniLM-L6-v2` model. Vectors are stored in workspace-scoped `vecs` collections — tables in the `vecs` schema of the PostgreSQL instance named by `VECTOR_DB_URL`, which defaults to the application database.
 2. **Hybrid Search**:
-   - Queries are rewritten/expanded via a dedicated LLM rewriter ([`query_rewriter.py`](../backend/services/query_rewriter.py)).
+   - Queries are expanded into semantically distinct sub-queries by an LLM ([`query_rewriter.py`](../backend/services/query_rewriter.py)), falling back to the original query on any failure.
    - Each sub-query is dispatched twice: against the dense `HNSW` vector index, and against a GIN full-text index (`ts_rank_cd`) for exact-term recall. Results merge into one deduplicated pool.
 3. **Cross-Encoder Re-ranking**:
-   - 20 candidate document chunks are retrieved from PostgreSQL.
-   - Candidate chunks are re-scored using `cross-encoder/ms-marco-MiniLM-L-6-v2` to determine exact contextual relevance.
-   - The top 5 chunks are returned to the requesting agent node.
+   - Up to 10 candidates per sub-query per retrieval half are pulled from PostgreSQL and deduplicated by chunk ID.
+   - Candidates are re-scored using `cross-encoder/ms-marco-MiniLM-L-6-v2` to determine exact contextual relevance.
+   - Chunks scoring below `RAG_MIN_RERANK_SCORE` (default `0.0`, that model's own relevance boundary) are dropped, and the top 5 survivors go to the requesting agent node. When nothing clears the floor retrieval abstains with "No relevant documents found." rather than returning the least-bad chunks of an irrelevant pool — the recall-first pool is almost never empty, so without this an off-topic question still yielded citable-looking excerpts.
 4. **Scoping**:
    - Each workspace uses its own collection, with optional metadata filtering by research vertical.
 

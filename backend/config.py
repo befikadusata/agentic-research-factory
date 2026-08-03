@@ -115,6 +115,18 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "gemini-embedding-2"
     EMBEDDING_DIMENSION: int = 384
 
+    # Minimum cross-encoder score for a chunk to be shown to an agent. Retrieval
+    # abstains ("No relevant documents found.") when nothing clears this, instead
+    # of returning the top-5 of a uniformly irrelevant pool.
+    #
+    # cross-encoder/ms-marco-MiniLM-L-6-v2 emits unbounded raw logits, roughly
+    # -11..+11, trained so a relevant query/passage pair lands above 0 and an
+    # irrelevant one well below. 0.0 is therefore the model's own decision
+    # boundary rather than a tuned constant — deliberately, since there is no
+    # retrieval eval set to tune against yet. Raise it for stricter grounding,
+    # lower it (negative) to loosen.
+    RAG_MIN_RERANK_SCORE: float = 0.0
+
     # Optional in development; required in production (enforced by validate_config).
     TAVILY_API_KEY: str | None = None
     FIRECRAWL_API_KEY: str | None = None

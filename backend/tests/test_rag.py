@@ -129,6 +129,72 @@ def test_rag_merges_keyword_results_with_vector_results(mock_collection):
     assert result.index("ZX-9000 exact match") < result.index("semantic chunk")
 
 
+# ── rerank threshold / abstention ─────────────────────────────────────────────
+
+def _run_with_scores(mock_collection, hits, scores, threshold=0.0):
+    """Drive RAGTool._run over a fixed candidate pool and reranker scores."""
+    import tools.rag as rag
+
+    mock_collection.query.return_value = list(hits)
+    reranker_mock = MagicMock()
+    reranker_mock.predict.return_value = list(scores)
+
+    tool = rag.RAGTool(collection_name="ws_test")
+    with patch("tools.rag._get_client", return_value=_mock_vecs_setup(mock_collection)), \
+         patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag.generate_sub_queries", return_value=["q1"]), \
+         patch("tools.rag._keyword_search", return_value=[]), \
+         patch("tools.rag._reranker", return_value=reranker_mock), \
+         patch.object(rag.settings, "RAG_MIN_RERANK_SCORE", threshold):
+        return tool._run("query")
+
+
+def test_rag_abstains_when_nothing_clears_threshold(mock_collection):
+    """The pool is built recall-first, so a lexical match on an off-topic query
+    nearly always returns *something*. Before the threshold the only way to get
+    'nothing found' was an empty pool, so an unanswerable question got
+    confidently-formatted irrelevant excerpts that the writer then cited."""
+    hits = [
+        ("a", {"text": "unrelated chunk", "source": "a.pdf", "page": 1}),
+        ("b", {"text": "also unrelated", "source": "b.pdf", "page": 2}),
+    ]
+    result = _run_with_scores(mock_collection, hits, [-8.2, -5.1])
+    assert result == "No relevant documents found."
+
+
+def test_rag_keeps_only_chunks_above_threshold(mock_collection):
+    hits = [
+        ("a", {"text": "relevant chunk", "source": "a.pdf", "page": 3}),
+        ("b", {"text": "borderline chunk", "source": "b.pdf", "page": 4}),
+    ]
+    result = _run_with_scores(mock_collection, hits, [4.5, -2.0])
+    assert "relevant chunk" in result
+    assert "borderline chunk" not in result
+
+
+def test_rag_threshold_is_configurable(mock_collection):
+    """A stricter floor drops a chunk that the default (0.0) would have kept."""
+    hits = [("a", {"text": "weakly relevant", "source": "a.pdf", "page": 1})]
+    assert "weakly relevant" in _run_with_scores(mock_collection, hits, [1.2])
+    assert _run_with_scores(mock_collection, hits, [1.2], threshold=5.0) == (
+        "No relevant documents found."
+    )
+
+
+# ── page-number rendering ─────────────────────────────────────────────────────
+
+def test_rag_output_renders_real_page_numbers(mock_collection):
+    hits = [("a", {"text": "chunk text", "source": "report.pdf", "page": 7})]
+    assert "SOURCE: report.pdf (Page: 7)" in _run_with_scores(mock_collection, hits, [3.0])
+
+
+def test_rag_output_falls_back_to_na_for_null_page(mock_collection):
+    """Chunks ingested before page provenance existed carry the key with a null
+    value, so `.get("page", "N/A")` never fired and citations read 'Page: None'."""
+    hits = [("a", {"text": "chunk text", "source": "legacy.pdf", "page": None})]
+    assert "SOURCE: legacy.pdf (Page: N/A)" in _run_with_scores(mock_collection, hits, [3.0])
+
+
 def test_rag_rejects_unsafe_collection_name():
     """Collection names reach SQL as identifiers, so they must be validated."""
     from tools.rag import RAGTool

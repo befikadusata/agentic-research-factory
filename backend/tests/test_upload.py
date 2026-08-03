@@ -208,6 +208,90 @@ async def test_parse_pdf_returns_empty_when_both_fail():
     assert chunks == []
 
 
+# ── docling page provenance ───────────────────────────────────────────────────
+
+def _fake_docling_document(pages_markdown: dict[int, str]):
+    """A DoclingDocument stand-in whose per-page export mirrors `pages_markdown`."""
+    document = MagicMock()
+    document.pages = {page_no: MagicMock() for page_no in pages_markdown}
+
+    def export(page_no=None, **kwargs):
+        if page_no is None:
+            return "\n\n".join(pages_markdown[p] for p in sorted(pages_markdown))
+        return pages_markdown.get(page_no, "")
+
+    document.export_to_markdown.side_effect = export
+    result = MagicMock()
+    result.document = document
+    return result
+
+
+def test_parse_with_docling_tags_each_chunk_with_its_page():
+    """The primary parse path used to record page=None for every chunk, so every
+    internal citation rendered 'Page: N/A' even though the citation pipeline and
+    the Sources panel were fully built."""
+    converted = _fake_docling_document({
+        1: "# Intro\n\nFirst page body about the research question.",
+        2: "## Method\n\nSecond page body describing the approach.",
+    })
+
+    with patch("services.pdf_service._build_converter") as build:
+        build.return_value.convert.return_value = converted
+        from services.pdf_service import _parse_with_docling
+        chunks = _parse_with_docling("/tmp/paper.pdf")
+
+    by_page = {c["metadata"]["page"] for c in chunks}
+    assert by_page == {1, 2}
+    assert all(c["metadata"]["source"] == "paper.pdf" for c in chunks)
+    # Chunks must not straddle a page break, or the page number would be a lie.
+    page_1_text = " ".join(c["text"] for c in chunks if c["metadata"]["page"] == 1)
+    assert "Second page body" not in page_1_text
+
+
+def test_parse_with_docling_skips_empty_pages():
+    converted = _fake_docling_document({
+        1: "Real content on the first page.",
+        2: "   \n  ",
+        3: "More content on the third page.",
+    })
+
+    with patch("services.pdf_service._build_converter") as build:
+        build.return_value.convert.return_value = converted
+        from services.pdf_service import _parse_with_docling
+        chunks = _parse_with_docling("/tmp/gappy.pdf")
+
+    assert {c["metadata"]["page"] for c in chunks} == {1, 3}
+
+
+def test_parse_with_docling_falls_back_to_whole_document_without_pages():
+    """Some inputs yield no page provenance. Ingesting without page numbers
+    beats not ingesting at all — the old behaviour, now the exception."""
+    converted = _fake_docling_document({})
+    converted.document.pages = {}
+    converted.document.export_to_markdown.side_effect = None
+    converted.document.export_to_markdown.return_value = "Flat document text with no pages."
+
+    with patch("services.pdf_service._build_converter") as build:
+        build.return_value.convert.return_value = converted
+        from services.pdf_service import _parse_with_docling
+        chunks = _parse_with_docling("/tmp/flat.pdf")
+
+    assert len(chunks) == 1
+    assert chunks[0]["metadata"]["page"] is None
+
+
+def test_parse_with_docling_returns_empty_for_blank_document():
+    converted = _fake_docling_document({})
+    converted.document.pages = {}
+    converted.document.export_to_markdown.side_effect = None
+    converted.document.export_to_markdown.return_value = "   \n  "
+
+    with patch("services.pdf_service._build_converter") as build:
+        build.return_value.convert.return_value = converted
+        from services.pdf_service import _parse_with_docling
+        assert _parse_with_docling("/tmp/blank.pdf") == []
+
+
 # ── ingest_service ────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

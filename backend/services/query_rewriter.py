@@ -22,32 +22,10 @@ def _record_cost(response) -> None:
         logger.warning("query_rewriter_cost_record_failed", error=str(e))
 
 
-def rewrite_query(original_query: str) -> str:
-    """Rewrite a user query for better vector database retrieval.
-    Falls back to the original query if the LLM call fails.
-    """
-    prompt = (
-        f"Given the user's search query: '{original_query}'\n"
-        "Rewrite it to be a more comprehensive, descriptive search query suitable for a vector database retrieval system.\n"
-        "Ensure it captures the core intent and any implied context.\n"
-        "Return ONLY the rewritten query text."
-    )
-    try:
-        llm = get_completion_settings("query_rewriter")
-        response = completion(
-            model=llm.model,
-            api_key=llm.api_key,
-            base_url=llm.base_url,
-            fallbacks=list(llm.fallbacks),
-            temperature=0.1,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=120,
-        )
-        _record_cost(response)
-        return response.choices[0].message.content.strip().strip("\"'")
-    except Exception as e:
-        logger.warning("query_rewriter_failed", error=str(e))
-        return original_query
+# A single-rewrite `rewrite_query()` lived here and had no caller: sub-query
+# expansion below superseded it, covering ambiguity better than one rewrite
+# could. Reinstating it would put an extra LLM round trip — and an extra failure
+# mode — in front of a fan-out that already handles the same problem.
 
 
 def generate_sub_queries(original_query: str, n: int = 3) -> list[str]:

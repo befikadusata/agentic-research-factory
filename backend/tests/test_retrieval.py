@@ -1,44 +1,6 @@
-"""Tests for Sprint 4 retrieval hardening: query_rewriter fallback + citation extraction."""
+"""Tests for Sprint 4 retrieval hardening: sub-query expansion + citation extraction."""
 import pytest
 from unittest.mock import MagicMock, patch
-
-
-# ── query_rewriter ────────────────────────────────────────────────────────────
-
-def test_rewrite_query_success():
-    mock_response = MagicMock()
-    mock_response.choices[0].message.content = '"expanded search query"'
-    with patch("services.query_rewriter.completion", return_value=mock_response), \
-         patch("services.query_rewriter.get_completion_settings", return_value=MagicMock(model="m", api_key="k", base_url=None)):
-        from services.query_rewriter import rewrite_query
-        result = rewrite_query("original query")
-    assert result == "expanded search query"
-
-
-def test_rewrite_query_strips_quotes():
-    mock_response = MagicMock()
-    mock_response.choices[0].message.content = "'quoted result'"
-    with patch("services.query_rewriter.completion", return_value=mock_response), \
-         patch("services.query_rewriter.get_completion_settings", return_value=MagicMock(model="m", api_key="k", base_url=None)):
-        from services.query_rewriter import rewrite_query
-        result = rewrite_query("original")
-    assert result == "quoted result"
-
-
-def test_rewrite_query_fallback_on_exception():
-    with patch("services.query_rewriter.completion", side_effect=Exception("API error")), \
-         patch("services.query_rewriter.get_completion_settings", return_value=MagicMock(model="m", api_key="k", base_url=None)):
-        from services.query_rewriter import rewrite_query
-        result = rewrite_query("test topic")
-    assert result == "test topic"
-
-
-def test_rewrite_query_fallback_on_key_error():
-    """Covers the case where get_completion_settings itself fails."""
-    with patch("services.query_rewriter.get_completion_settings", side_effect=RuntimeError("missing key")):
-        from services.query_rewriter import rewrite_query
-        result = rewrite_query("fallback query")
-    assert result == "fallback query"
 
 
 # ── extract_citations ─────────────────────────────────────────────────────────

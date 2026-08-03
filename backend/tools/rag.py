@@ -214,15 +214,47 @@ class RAGTool(BaseTool):
             scored_results = sorted(
                 zip(merged, scores), key=lambda x: x[1], reverse=True
             )
-            top_results = [rec for rec, _ in scored_results[:5]]
+            top_score = float(scored_results[0][1])
+
+            # Abstain rather than return the least-bad chunks. The pool is built
+            # recall-first (sub-query fan-out UNION keyword search), so it is
+            # nearly always non-empty — a workspace's documents will match
+            # *something* lexically for almost any query. Without a floor the
+            # only way this returned "nothing found" was an empty pool, so an
+            # off-topic question got confidently-formatted irrelevant excerpts,
+            # which the writer then cited. The cross-encoder score is the one
+            # signal that says whether a chunk actually answers the query.
+            kept = [
+                (rec, score)
+                for rec, score in scored_results
+                if float(score) >= settings.RAG_MIN_RERANK_SCORE
+            ][:5]
+
+            if not kept:
+                logger.info(
+                    "rag_search_abstained",
+                    candidates=len(merged),
+                    top_score=top_score,
+                    threshold=settings.RAG_MIN_RERANK_SCORE,
+                )
+                return "No relevant documents found."
 
             output = []
-            for _, metadata in top_results:
+            for (_, metadata), _score in kept:
                 text = metadata.get("text", "No text content found.")
                 source = metadata.get("source", "Unknown Source")
-                page = metadata.get("page", "N/A")
+                # `or`, not a .get default: chunks ingested before page
+                # provenance existed carry the key with a null value, so a
+                # default would never fire and the citation read "Page: None".
+                page = metadata.get("page") or "N/A"
                 output.append(f"SOURCE: {source} (Page: {page})\n---\n{text}")
 
+            logger.info(
+                "rag_search_complete",
+                candidates=len(merged),
+                returned=len(kept),
+                top_score=top_score,
+            )
             return "\n\n================\n\n".join(output)
         except Exception as e:
             logger.warning("rag_search_failed", error=str(e))
