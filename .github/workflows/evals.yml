@@ -1,0 +1,141 @@
+name: Model evals
+
+# The RAG quality evals, which ci.yml does not run: it invokes a bare
+# `uv run pytest`, and these 16 tests skip themselves unless RUN_MODEL_EVALS is
+# set. They are separated from ci.yml rather than added as a job to it because
+# they need their own triggers — a nightly schedule and a path filter — and
+# putting a `schedule` on ci.yml would drag the lint, e2e and image-build jobs
+# into every nightly run for nothing.
+#
+# Why this is not on pull_request, which is the obvious thing to want. CI never
+# gets a warm embedding cache — the redis service below starts empty every run —
+# so each run embeds the corpus and 72 queries per variant against the live API,
+# roughly 270 requests. The Gemini free tier allows 1000 embed requests per day
+# (quota EmbedContentRequestsPerDayPerUserPerProjectPerModel-FreeTier), and that
+# budget is shared with whatever local development spends against the same key.
+# Three runs a day is the whole ceiling. A path-filtered pull_request trigger was
+# written here first and removed after measuring it: two RAG pull requests plus
+# the nightly run plus one developer re-running the evals locally exhausts the
+# day, and the failure surfaces as recall floors breaking, which reads exactly
+# like the regression this suite exists to catch. Once the key is on a paid tier
+# the trigger below is the right place to add `pull_request`, with the paths
+# filter that was here: backend/tools/rag.py, backend/evals/**, backend/config.py
+# and the two eval test files.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 03:00 UTC daily. Nothing depends on the hour beyond it being off-peak.
+    - cron: "0 3 * * *"
+
+# A second push to the same branch supersedes the first. These runs cost real
+# API quota, so paying for a result nobody will read is worse than usual.
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  retrieval-evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: research_factory_test
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # tools/rag.py loads all-MiniLM-L6-v2 and ms-marco-MiniLM-L-6-v2 from the
+      # Hub on first use. Cached on the lockfile so a dependency bump that could
+      # change how they are loaded re-downloads them.
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: ${{ runner.os }}-hf-${{ hashFiles('backend/uv.lock') }}
+
+      # rag.py picks the embedding provider by whether GEMINI_API_KEY is set and
+      # falls back to the local MiniLM embedder in silence when it is not. That
+      # fallback retrieves measurably less: pool recall 0.935 against this
+      # suite's 0.95 floor, where Gemini reaches 1.000. Without this guard a
+      # missing secret would fail two tests with a message about retrieval
+      # quality collapsing, which is not what went wrong.
+      - name: Require the Gemini key
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "::error::GEMINI_API_KEY is not configured for this repository. These evals are calibrated on Gemini embeddings; tools/rag.py would silently fall back to the local MiniLM embedder and fail the recall floors for a reason that has nothing to do with the change under test."
+            exit 1
+          fi
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: "postgresql+asyncpg://user:password@localhost:5432/research_factory_test"
+          BACKEND_JWT_SECRET: "test-secret"
+        run: uv run alembic upgrade head
+
+      - name: Run retrieval and rerank evals
+        env:
+          # The gate these 16 tests skip themselves behind.
+          RUN_MODEL_EVALS: "1"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DATABASE_URL: "postgresql+asyncpg://user:password@localhost:5432/research_factory_test"
+          REDIS_URL: "redis://localhost:6379"
+          # Same placeholders ci.yml uses: config.py requires them at import,
+          # and no eval here reaches an LLM — the sub-queries are pinned so the
+          # measured numbers cannot move with a model's mood.
+          LLM_MODEL: "gpt-4o"
+          LLM_API_KEY: "mock"
+          TAVILY_API_KEY: "mock"
+          FIRECRAWL_API_KEY: "mock"
+          LLAMA_CLOUD_API_KEY: "mock"
+          BACKEND_JWT_SECRET: "test-secret"
+        # Running out of embedding quota mid-run does not look like running out
+        # of quota. The corpus ingests partially, retrieval measures what little
+        # made it in, and the suite fails on its recall floors — the exact
+        # signature of the regression it is meant to detect. This distinguishes
+        # the two, because reading it wrong costs an afternoon.
+        run: |
+          set -o pipefail
+          if ! uv run pytest tests/test_retrieval_eval.py tests/test_rerank_calibration.py -v 2>&1 | tee eval-output.txt; then
+            if grep -qE "RESOURCE_EXHAUSTED|429 Too Many Requests" eval-output.txt; then
+              echo "::error::Ran out of Gemini embedding quota, so retrieval quality was never measured. The free tier allows 1000 embed requests per day and one cold run costs roughly 270, shared with local development against the same key. This is NOT a retrieval regression — do not go looking for one."
+            fi
+            exit 1
+          fi
