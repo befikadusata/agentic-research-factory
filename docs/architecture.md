@@ -95,6 +95,14 @@ Instead of a linear sequential queue, the system utilizes a **Supervisor Routing
 7. **Editor**: Reviews draft articles for grammar, stylistic polish, and formatting.
 8. **Lead Intel Agent**: An isolated agent that runs solo for `lead_intel` tasks, focusing on web profiling and sales intelligence.
 
+### Adding a playbook
+
+Playbooks (verticals) are data, not code paths. A new one is an entry in the `VERTICALS` registry in [`backend/configs/verticals.py`](../backend/configs/verticals.py); no agent, router, or graph change is required.
+
+The `VerticalConfig` shape in that file is the contract, and each key is consumed by a different stage: `input_schema` renders the form fields on `/new` and is validated on submission by [`schemas.py`](../backend/schemas.py), `prompt_focus` is injected into the researcher and analyst prompts, `output_sections` is enforced by the writer and editor, `quality_rubric` is what the LLM-as-Judge scores against, and `task_type` decides which branch the supervisor routes down.
+
+The frontend reads the registry over `/verticals` rather than duplicating it, so a playbook added server-side appears in the UI — including its badge — without a frontend release. `frontend/lib/types.ts` keeps a bundled copy as the fallback for when that request cannot be answered.
+
 ---
 
 ## 3. High-Precision Retrieval-Augmented Generation (RAG)
@@ -102,6 +110,7 @@ Instead of a linear sequential queue, the system utilizes a **Supervisor Routing
 Documents uploaded via the UI `/upload` route are processed through a high-precision pipeline:
 
 1. **Document Ingestion**:
+   - The uploaded PDF is written to `/tmp/research_factory_uploads/<doc_id>.pdf` and its path recorded on the document row ([`upload.py`](../backend/routers/upload.py)). Parsing is asynchronous — the API returns `pending` and a Celery task reads the file back off disk later — so the API and worker must see the same filesystem. The file is **not** deleted after ingestion; it lives until the host or container clears `/tmp`, which on a container restart means the row outlives the file it points at.
    - PDFs are converted to Markdown with Docling. LlamaParse is an optional fallback when Docling fails and `LLAMA_CLOUD_API_KEY` is configured.
    - Each page is exported and split separately with a `RecursiveCharacterTextSplitter` (size = 1000, overlap = 200), so every chunk carries the page it came from and citations can name a real page. A chunk therefore never straddles a page break; documents with no page provenance fall back to a whole-document split with no page number.
    - Every chunk also carries an `ordinal`, its position within its own document, assigned in `ingest_documents` so all parsers get it identically. It is what neighbour expansion navigates by (§3.4). Chunks ingested before it existed have none and are never expanded.

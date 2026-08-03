@@ -215,6 +215,7 @@ npm run test:e2e:demo
 - Model and search output varies by provider, model version, and source availability.
 - The displayed quality score is an LLM-as-judge assessment, not a guarantee of factual correctness; the human checkpoint and citations remain the primary review controls.
 - Uploaded-document RAG uses a separate synchronous `vecs` connection, derived from `DATABASE_URL` unless `VECTOR_DB_URL` overrides it.
+- Uploaded PDFs are written under `/tmp` and are not deleted after ingestion, so they persist for the life of the container and a restart can leave a document row pointing at a file that is gone. Embeddings are unaffected — they are already in PostgreSQL — but re-ingesting that document requires re-uploading it.
 - Firecrawl is resource-intensive and therefore excluded from the default Compose profile.
 - Search, scraping, parsing, and evaluation degrade independently where possible; model exhaustion and core database failure terminate a run.
 
