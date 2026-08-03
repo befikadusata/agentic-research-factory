@@ -1,23 +1,23 @@
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install
 
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine AS development
+FROM node:24-alpine AS development
 WORKDIR /app
 COPY package.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install
 COPY . .
 EXPOSE 3000
 CMD ["npm", "run", "dev"]
 
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/package.json ./package.json

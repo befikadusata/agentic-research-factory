@@ -101,7 +101,7 @@ PostgreSQL, no Redis, no LLM provider key, no OAuth client.
 
 ```bash
 cd frontend
-npm install --legacy-peer-deps
+npm install
 npm run demo          # http://localhost:3000
 ```
 
@@ -196,7 +196,7 @@ Run the route-intercepted frontend flows:
 
 ```bash
 cd frontend
-npm install --legacy-peer-deps
+npm install
 npx playwright install chromium
 npx playwright test
 ```
