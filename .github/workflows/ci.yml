@@ -85,7 +85,7 @@ jobs:
           cache-dependency-path: frontend/package.json
       
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm install
       
       - name: Lint
         run: npm run lint
@@ -107,7 +107,7 @@ jobs:
           cache-dependency-path: frontend/package.json
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm install
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
