@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "gemini-embedding-2"
     EMBEDDING_DIMENSION: int = 384
 
+    # Cache embedding vectors in Redis, keyed by (provider, model, dimension,
+    # text). Off under pytest — a shared cache would make "did this call the
+    # embedder?" assertions depend on what an earlier test happened to warm, and
+    # the cache has its own tests that enable it explicitly.
+    EMBEDDING_CACHE_ENABLED: bool = True
+
     # Score the best-reranked chunk must reach before retrieval answers at all.
     # Below it, RAGTool abstains and tells the agent to use web search instead.
     #
@@ -240,6 +246,7 @@ if os.environ.get("TESTING") == "1":
     if _target == settings.DATABASE_URL:
         raise RuntimeError("TEST_DATABASE_URL must differ from DATABASE_URL")
     settings.DATABASE_URL = _target
+    settings.EMBEDDING_CACHE_ENABLED = False
 
 # Older configs named this SUPABASE_DB_URL. Without this the value would be
 # ignored and the derivation below would silently repoint the vector store at

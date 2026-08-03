@@ -246,13 +246,35 @@ def test_embed_uses_gemini_when_key_configured():
     import tools.rag as rag
 
     with patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
-         patch("tools.rag._gemini_embed", return_value=[0.2] * 384) as gemini, \
+         patch("tools.rag._gemini_embed", return_value=[[0.2] * 384, [0.2] * 384]) as gemini, \
          patch("tools.rag._embedder") as local:
         result = rag._embed(["a", "b"])
 
-    assert gemini.call_count == 2
+    # One call for both texts, not one per text — the whole point of batching.
+    assert gemini.call_count == 1
+    assert gemini.call_args[0][0] == ["a", "b"]
     local.assert_not_called()
     assert result == [[0.2] * 384, [0.2] * 384]
+
+
+def test_embed_splits_oversized_batches_at_the_api_limit():
+    """Gemini rejects a batch over 100 outright, so ingest of a large document
+    must be chunked rather than sent whole."""
+    import tools.rag as rag
+
+    texts = [f"chunk {i}" for i in range(250)]
+    sizes = []
+
+    def fake(batch):
+        sizes.append(len(batch))
+        return [[0.1] * 384] * len(batch)
+
+    with patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
+         patch("tools.rag._gemini_embed", side_effect=fake):
+        result = rag._embed(texts)
+
+    assert sizes == [100, 100, 50]
+    assert len(result) == 250
 
 
 def test_embed_raises_instead_of_falling_back_to_local_model():
@@ -281,6 +303,30 @@ def test_embed_uses_local_model_when_no_gemini_key():
 
     gemini.assert_not_called()
     assert result == [[0.3] * 384]
+
+
+def test_embed_collapses_duplicate_texts_within_one_call():
+    """Sub-query expansion emits near-duplicates and often the original query
+    verbatim as its fallback, so the same string arrives more than once."""
+    import tools.rag as rag
+
+    with patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
+         patch("tools.rag._gemini_embed", return_value=[[0.1] * 384, [0.2] * 384]) as gemini:
+        result = rag._embed(["a", "b", "a"])
+
+    assert gemini.call_args[0][0] == ["a", "b"]
+    # Position is what callers rely on: result[i] must be the vector for texts[i].
+    assert result == [[0.1] * 384, [0.2] * 384, [0.1] * 384]
+
+
+def test_embed_returns_empty_without_calling_the_model():
+    import tools.rag as rag
+
+    with patch("tools.rag._gemini_embed") as gemini, patch("tools.rag._embedder") as local:
+        assert rag._embed([]) == []
+
+    gemini.assert_not_called()
+    local.assert_not_called()
 
 
 class _FakeArray:

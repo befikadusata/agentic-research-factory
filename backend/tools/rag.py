@@ -8,6 +8,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from config import settings
 from logger import logger
 from services.query_rewriter import generate_sub_queries
+from utils.embedding_cache import embedding_cache
 from utils.source_ledger import canonical_url
 import vecs
 from vecs import IndexMeasure, IndexMethod
@@ -58,15 +59,45 @@ def _reranker():
         _reranker_model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return _reranker_model
 
+# Gemini's documented ceiling for batchEmbedContents. The API rejects anything
+# larger outright ("at most 100 requests can be in one batch"), so this is a hard
+# limit rather than a tuning knob.
+_GEMINI_BATCH_LIMIT = 100
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def _gemini_embed(text: str) -> list[float]:
+def _gemini_embed(texts: list[str]) -> list[list[float]]:
+    """Embed up to `_GEMINI_BATCH_LIMIT` texts in one call.
+
+    This was one HTTP round trip per text, which made ingest cost a request per
+    chunk: a 200-chunk PDF meant 200 sequential calls, each with its own
+    connection setup and retry envelope. `batchEmbedContents` takes the whole
+    list, so the same document is 2 calls.
+
+    The retry wraps the batch rather than individual texts, so a 429 re-sends up
+    to 100 embeddings. That is the right trade even so — the alternative is a
+    per-text request rate far more likely to hit the quota in the first place.
+    """
     if not settings.GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not configured")
+    if len(texts) > _GEMINI_BATCH_LIMIT:
+        raise ValueError(f"batch of {len(texts)} exceeds Gemini's limit of {_GEMINI_BATCH_LIMIT}")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.EMBEDDING_MODEL}:embedContent"
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{settings.EMBEDDING_MODEL}:batchEmbedContents"
+    )
     payload = {
-        "content": {"parts": [{"text": text}]},
-        "outputDimensionality": settings.EMBEDDING_DIMENSION,
+        "requests": [
+            {
+                # Required per sub-request, and must carry the `models/` prefix
+                # even though the same model is named in the URL.
+                "model": f"models/{settings.EMBEDDING_MODEL}",
+                "content": {"parts": [{"text": text}]},
+                "outputDimensionality": settings.EMBEDDING_DIMENSION,
+            }
+            for text in texts
+        ]
     }
     response = httpx.post(
         url,
@@ -75,17 +106,41 @@ def _gemini_embed(text: str) -> list[float]:
             "x-goog-api-key": settings.GEMINI_API_KEY,
         },
         json=payload,
-        timeout=60,
+        timeout=120,
     )
     response.raise_for_status()
-    data = response.json()
-    embedding = data.get("embedding", {})
-    values = embedding.get("values")
-    if not values:
-        raise RuntimeError("Gemini embedding response did not include values")
-    return values
+    embeddings = response.json().get("embeddings") or []
 
-def _embed(texts: list[str]) -> list[list[float]]:
+    # Results are positional, so a short response would silently pair vectors
+    # with the wrong chunks — worse than an error, because retrieval would keep
+    # working and simply return the wrong documents.
+    if len(embeddings) != len(texts):
+        raise RuntimeError(
+            f"Gemini returned {len(embeddings)} embeddings for {len(texts)} inputs"
+        )
+
+    vectors = []
+    for embedding in embeddings:
+        values = embedding.get("values")
+        if not values:
+            raise RuntimeError("Gemini embedding response did not include values")
+        vectors.append(values)
+    return vectors
+
+
+def _embedding_model_id() -> str:
+    """Identity of the vector space, for cache keys.
+
+    Must change whenever the vectors would. Provider, model, and dimension all
+    appear because a cache that ignored any of them would hand back vectors from
+    a different space — the exact mixing `_embed` refuses to do at runtime.
+    """
+    if settings.GEMINI_API_KEY:
+        return f"gemini:{settings.EMBEDDING_MODEL}:{settings.EMBEDDING_DIMENSION}"
+    return f"local:all-MiniLM-L6-v2:{settings.EMBEDDING_DIMENSION}"
+
+
+def _embed_uncached(texts: list[str]) -> list[list[float]]:
     # The embedder is chosen by config ALONE, never by runtime success. A per-call
     # fallback from Gemini to the local model would store vectors from two
     # different models in the same 384-dim collection — query and document vectors
@@ -94,10 +149,52 @@ def _embed(texts: list[str]) -> list[list[float]]:
     # raises loudly rather than quietly switching models. The local model is used
     # only when Gemini is not configured at all.
     if settings.GEMINI_API_KEY:
-        return [_gemini_embed(text) for text in texts]
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), _GEMINI_BATCH_LIMIT):
+            vectors.extend(_gemini_embed(texts[start : start + _GEMINI_BATCH_LIMIT]))
+        return vectors
 
     model = _embedder()
     return model.encode(texts).tolist()
+
+
+def _embed(texts: list[str]) -> list[list[float]]:
+    """Embed texts, serving what the cache already holds and computing the rest.
+
+    Also collapses duplicates within a single call before computing. Sub-query
+    expansion regularly emits the same string twice, and the original query as
+    well when it falls back — without this, one call pays for the same vector
+    two or three times.
+    """
+    if not texts:
+        return []
+
+    model_id = _embedding_model_id()
+    vectors = embedding_cache.get_many(model_id, texts)
+
+    # Unique texts still needing a vector, in first-seen order.
+    pending: dict[str, None] = {}
+    for text, vector in zip(texts, vectors):
+        if vector is None:
+            pending[text] = None
+
+    if pending:
+        pending_texts = list(pending)
+        computed = _embed_uncached(pending_texts)
+        by_text = dict(zip(pending_texts, computed))
+        vectors = [
+            vector if vector is not None else by_text[text]
+            for text, vector in zip(texts, vectors)
+        ]
+        embedding_cache.set_many(model_id, list(by_text.items()))
+
+    logger.debug(
+        "embed_complete",
+        requested=len(texts),
+        computed=len(pending),
+        cached=len(texts) - sum(1 for t in texts if t in pending),
+    )
+    return vectors
 
 
 def _ensure_fts_index(vx, name: str) -> None:
