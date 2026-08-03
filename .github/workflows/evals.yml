@@ -7,20 +7,27 @@ name: Model evals
 # putting a `schedule` on ci.yml would drag the lint, e2e and image-build jobs
 # into every nightly run for nothing.
 #
-# Why this is not on pull_request, which is the obvious thing to want. CI never
-# gets a warm embedding cache — the redis service below starts empty every run —
-# so each run embeds the corpus and 72 queries per variant against the live API,
-# roughly 270 requests. The Gemini free tier allows 1000 embed requests per day
-# (quota EmbedContentRequestsPerDayPerUserPerProjectPerModel-FreeTier), and that
-# budget is shared with whatever local development spends against the same key.
-# Three runs a day is the whole ceiling. A path-filtered pull_request trigger was
-# written here first and removed after measuring it: two RAG pull requests plus
-# the nightly run plus one developer re-running the evals locally exhausts the
-# day, and the failure surfaces as recall floors breaking, which reads exactly
-# like the regression this suite exists to catch. Once the key is on a paid tier
-# the trigger below is the right place to add `pull_request`, with the paths
-# filter that was here: backend/tools/rag.py, backend/evals/**, backend/config.py
-# and the two eval test files.
+# The cost that shapes this file. A cold run embeds the corpus and 72 queries
+# per variant against the live API: roughly 270 requests, against a Gemini free
+# tier of 1000 embed requests per day (quota
+# EmbedContentRequestsPerDayPerUserPerProjectPerModel-FreeTier), shared with
+# whatever local development spends on the same key. Measured rather than
+# assumed — read off the 429 body after exhausting it.
+#
+# So the embedding cache is carried between runs (see the cache steps below),
+# taking the steady-state cost to near zero: the corpus and the eval queries are
+# fixed strings, so after one warm-up run there is almost nothing left to embed.
+# Only a change to the corpus, the chunking or the model pays again.
+#
+# Nightly and manual only, deliberately, even though the cache makes a
+# path-filtered `pull_request` trigger affordable in principle — a pull request
+# can restore the cache the nightly run saved on main, so it would usually cost
+# nothing. That is worth enabling once a nightly run has demonstrated the cache
+# working end to end, and not before: if the cache silently fails to restore,
+# every trigger becomes a 270-request cold run and the day's budget is gone by
+# mid-morning. The paths filter to reinstate when that is proven:
+# backend/tools/rag.py, backend/evals/**, backend/config.py, and the two eval
+# test files.
 
 on:
   workflow_dispatch:
@@ -52,15 +59,8 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+      # Redis is NOT a service container — it is started by hand below so its
+      # data directory can be carried between runs. See the cache steps.
     defaults:
       run:
         working-directory: backend
@@ -88,6 +88,45 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: ${{ runner.os }}-hf-${{ hashFiles('backend/uv.lock') }}
+
+      # The embedding cache, carried between runs, is what keeps this job inside
+      # the free tier. utils/embedding_cache.py keys entries on a SHA-256 of
+      # (provider, model, dimension, text), so a restored entry can never be
+      # stale in a way that matters: change the model or the corpus and the key
+      # changes with it, missing the cache and re-embedding. That is the only
+      # reason a cache this old is safe to trust.
+      #
+      # Caches are immutable, so the key carries run_id to always write a fresh
+      # entry, and restore-keys picks up the most recent previous one. A pull
+      # request can restore what the nightly run on main saved.
+      - name: Restore embedding cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/redis-data
+          key: emb-cache-${{ github.run_id }}
+          restore-keys: emb-cache-
+
+      # Run as the runner's own uid. The redis image otherwise writes its data
+      # directory as uid 999 mode 700, which the runner cannot read — the cache
+      # save would fail and every run would silently be a cold one, which is the
+      # exact failure this whole step exists to prevent. `--save ''` disables
+      # the periodic snapshot; the explicit SAVE after the tests is what writes.
+      - name: Start Redis on the restored cache
+        run: |
+          mkdir -p /tmp/redis-data
+          docker run -d --name redis \
+            --user "$(id -u):$(id -g)" \
+            -p 6379:6379 \
+            -v /tmp/redis-data:/data \
+            redis:7 redis-server --dir /data --save ''
+          # Via `docker exec` throughout: redis-cli is not guaranteed to be
+          # installed on the runner image, but it is certainly in the container.
+          for i in $(seq 1 30); do
+            docker exec redis redis-cli ping 2>/dev/null | grep -q PONG && break
+            sleep 1
+          done
+          docker exec redis redis-cli ping | grep -q PONG || { echo "::error::Redis did not come up"; exit 1; }
+          echo "embedding cache entries restored: $(docker exec redis redis-cli --scan --pattern 'emb:*' | wc -l)"
 
       # rag.py picks the embedding provider by whether GEMINI_API_KEY is set and
       # falls back to the local MiniLM embedder in silence when it is not. That
@@ -138,4 +177,17 @@ jobs:
               echo "::error::Ran out of Gemini embedding quota, so retrieval quality was never measured. The free tier allows 1000 embed requests per day and one cold run costs roughly 270, shared with local development against the same key. This is NOT a retrieval regression — do not go looking for one."
             fi
             exit 1
+          fi
+
+      # `always()`: a failed run still embedded things, and those vectors cost
+      # quota. Discarding them would make the next run pay for them again — and
+      # a run that died on quota is exactly the one whose partial work is worth
+      # keeping. This must be the last step that touches Redis; actions/cache
+      # uploads /tmp/redis-data in its post-job hook, after everything here.
+      - name: Persist the embedding cache
+        if: always()
+        run: |
+          if docker ps --format '{{.Names}}' | grep -q '^redis$'; then
+            docker exec redis redis-cli SAVE
+            echo "embedding cache entries saved: $(docker exec redis redis-cli --scan --pattern 'emb:*' | wc -l)"
           fi
