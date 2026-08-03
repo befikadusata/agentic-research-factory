@@ -13,7 +13,8 @@ to whatever today's run produced would turn every unrelated dependency bump into
 a failure and train everyone to ignore it.
 
 Measured at the time of writing, Gemini embeddings + pinned sub-queries:
-hit@1 0.790, hit@5 0.903, hit@10 0.968, MRR 0.846, pool recall 1.000.
+hit@1 0.790, hit@5 0.903, hit@10 0.968, MRR 0.846, pool recall 1.000,
+coverage 0.895 ranked / 0.903 delivered, 7.8 chunks in 4.6 blocks.
 """
 import os
 
@@ -78,6 +79,30 @@ def test_hybrid_retrieval_contributes_more_than_the_vector_half(measured):
         f"mean pool is {summary['mean_pool_size']:.1f} against a vector-half limit of "
         f"{_CANDIDATES_PER_QUERY} — the keyword half is contributing nothing"
     )
+
+
+def test_neighbour_expansion_never_delivers_less_than_the_ranking(measured):
+    """Expansion adds chunks around the results; it must never remove one.
+
+    The failure it guards is a stitching or grouping bug quietly dropping a
+    retrieved chunk on its way into a block — invisible in hit@k and MRR, which
+    score the ranking rather than what the agent is handed."""
+    summary, _, _ = measured
+    assert summary["context_coverage"] >= summary["coverage@5"], (
+        f"expansion delivers {summary['context_coverage']:.3f} of relevant chunks "
+        f"against {summary['coverage@5']:.3f} from the ranking alone"
+    )
+
+
+def test_neighbour_expansion_stays_within_its_budget(measured):
+    """Every search_documents call is prompt an agent pays for, several times per
+    node. `_MAX_CONTEXT_CHUNKS` is the ceiling; this checks the typical case sits
+    well under it rather than riding the cap."""
+    from tools.rag import _MAX_CONTEXT_CHUNKS
+
+    summary, _, _ = measured
+    assert summary["mean_delivered"] <= _MAX_CONTEXT_CHUNKS
+    assert summary["mean_blocks"] >= 1
 
 
 def test_configured_threshold_rarely_abstains_on_answerable_queries(measured):

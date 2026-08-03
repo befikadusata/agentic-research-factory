@@ -329,6 +329,68 @@ def test_embed_returns_empty_without_calling_the_model():
     local.assert_not_called()
 
 
+# ── ingest ────────────────────────────────────────────────────────────────────
+
+def _ingest(chunks):
+    """Run ingest_documents against a mocked collection; return the records."""
+    import tools.rag as rag
+
+    collection = MagicMock()
+    client = MagicMock()
+    client.get_or_create_collection.return_value = collection
+
+    with patch("tools.rag._get_client", return_value=client), \
+         patch("tools.rag._embed", return_value=[[0.1] * 384] * len(chunks)), \
+         patch("tools.rag._ensure_fts_index"), \
+         patch("tools.rag._ensure_neighbour_index"):
+        rag.ingest_documents(chunks, collection_name="ws_test")
+
+    return collection.upsert.call_args.kwargs["records"]
+
+
+def test_ingest_numbers_chunks_in_reading_order():
+    """The ordinal is what neighbour expansion navigates by, so it has to be the
+    chunk's position in the document rather than anything about its content."""
+    records = _ingest(
+        [{"text": f"chunk {i}", "metadata": {"source": "a.pdf", "page": 1}} for i in range(3)]
+    )
+
+    assert [metadata["ordinal"] for _, _, metadata in records] == [0, 1, 2]
+
+
+def test_ingest_numbers_each_document_separately():
+    """LlamaParse returns several files in one list, and the eval corpus is five
+    documents. A single counter would make the last chunk of one document adjacent
+    to the first chunk of the next."""
+    records = _ingest([
+        {"text": "a1", "metadata": {"source": "a.pdf", "page": 1}},
+        {"text": "b1", "metadata": {"source": "b.pdf", "page": 1}},
+        {"text": "a2", "metadata": {"source": "a.pdf", "page": 1}},
+    ])
+
+    assert [(m["source"], m["ordinal"]) for _, _, m in records] == [
+        ("a.pdf", 0), ("b.pdf", 0), ("a.pdf", 1),
+    ]
+
+
+def test_ingest_builds_the_neighbour_index():
+    import tools.rag as rag
+
+    collection = MagicMock()
+    client = MagicMock()
+    client.get_or_create_collection.return_value = collection
+
+    with patch("tools.rag._get_client", return_value=client), \
+         patch("tools.rag._embed", return_value=[[0.1] * 384]), \
+         patch("tools.rag._ensure_fts_index"), \
+         patch("tools.rag._ensure_neighbour_index") as neighbour_index:
+        rag.ingest_documents(
+            [{"text": "t", "metadata": {"source": "a.pdf", "page": 1}}], collection_name="ws_test"
+        )
+
+    assert neighbour_index.call_args[0][1] == "ws_test"
+
+
 class _FakeArray:
     """Mimics the numpy array returned by SentenceTransformer.encode()."""
     def __init__(self, data):

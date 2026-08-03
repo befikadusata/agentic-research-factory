@@ -104,6 +104,7 @@ Documents uploaded via the UI `/upload` route are processed through a high-preci
 1. **Document Ingestion**:
    - PDFs are converted to Markdown with Docling. LlamaParse is an optional fallback when Docling fails and `LLAMA_CLOUD_API_KEY` is configured.
    - Each page is exported and split separately with a `RecursiveCharacterTextSplitter` (size = 1000, overlap = 200), so every chunk carries the page it came from and citations can name a real page. A chunk therefore never straddles a page break; documents with no page provenance fall back to a whole-document split with no page number.
+   - Every chunk also carries an `ordinal`, its position within its own document, assigned in `ingest_documents` so all parsers get it identically. It is what neighbour expansion navigates by (§3.4). Chunks ingested before it existed have none and are never expanded.
    - Embeddings use the configured Gemini embedding model when a Gemini key is present; otherwise they use the local `all-MiniLM-L6-v2` model. The choice is made by config alone and never by runtime success — a per-call fallback would put vectors from two models in one collection, where they are no longer comparable. Vectors are stored in workspace-scoped `vecs` collections — tables in the `vecs` schema of the PostgreSQL instance named by `VECTOR_DB_URL`, which defaults to the application database.
    - Gemini embedding is batched at the API's 100-text ceiling rather than one request per chunk (6.9× faster on measured ingest), and vectors are cached in Redis keyed on provider + model + dimension + text, so repeated queries and re-ingested documents cost a local lookup instead of a round trip. The cache never raises; a Redis failure is indistinguishable from a miss.
 2. **Hybrid Search**:
@@ -116,7 +117,12 @@ Documents uploaded via the UI `/upload` route are processed through a high-preci
    - If the pool's **best** score falls below `RAG_MIN_RERANK_SCORE`, retrieval abstains and tells the agent to use `web_search` instead; otherwise the top 5 chunks go to the requesting agent node. The recall-first pool is almost never empty, so without this gate a question the documents never address still yielded citable-looking excerpts.
    - The gate is pool-level and deliberately narrow. This model's absolute scores separate *"the corpus isn't about this"* but **not** *"answers the question"* from *"same topic, doesn't"* — those ranges overlap almost entirely, in both the pair-level calibration and the pipeline eval. A per-chunk filter would therefore drop relevant chunks that happen to score low while keeping their neighbours. Ordering, not thresholding, is what selects among chunks that clear the gate.
    - The default of `−9.0` is measured against the pipeline, not against pairs — the distinction that decided the number. See §4.
-4. **Scoping**:
+4. **Context Assembly**:
+   - The surviving chunks are widened by `RAG_NEIGHBOUR_RADIUS` chunks either side before the agent sees them ([`tools.rag.expand_context`](../backend/tools/rag.py)). Retrieval ranks 1000-character windows because that is what the embedder and re-ranker read in full, but a window is not a unit of meaning — the chunk that names a limit and the sentence qualifying it are one paragraph and two chunks apart.
+   - Neighbours are fetched by `(source, ordinal)` in a single query, backed by a B-tree over both expressions. Expansion never crosses a page boundary, so every block carries one exact page citation.
+   - Contiguous chunks are merged into one block and stitched with their overlap removed, so a passage reads once rather than repeating a paragraph at every seam.
+   - Failure is never fatal: a missing ordinal, a radius of 0, or a lookup that raises all return the results unexpanded. Only the neighbours are budgeted (`_MAX_CONTEXT_CHUNKS`), so the retrieved chunks themselves are never dropped.
+5. **Scoping**:
    - Each workspace uses its own collection, with optional metadata filtering by research vertical.
 
 ---
@@ -130,9 +136,11 @@ Two harnesses, both opt-in behind `RUN_MODEL_EVALS=1` because they load real mod
 | Input | 34 labelled `(query, passage)` pairs | 54-chunk corpus, 62 golden + 10 unanswerable queries |
 | Runs retrieval? | No | Yes — real ingest, real `retrieve()` |
 | Answers | where the model puts a *given* pair | whether the pipeline *finds* the right chunk |
-| Reports | score distribution by label, threshold sweep | hit@{1,3,5,10}, MRR, NDCG@k, pool recall, abstention rates |
+| Reports | score distribution by label, threshold sweep | hit@{1,3,5,10}, MRR, NDCG@k, pool recall, coverage, abstention rates |
 
 `pool recall` — the relevant chunk being anywhere in the candidate pool — is reported separately from `hit@k` because it localises a failure. A miss with the chunk in the pool is a re-ranking problem; a miss with the chunk absent is a recall problem that no re-ranker change can fix.
+
+`coverage` is reported twice, over the ranking and over what neighbour expansion delivers, because they are different questions. hit@k asks whether retrieval found *an* answering chunk; coverage asks what fraction of them arrived, which is what a multi-chunk query needs and what §3.4 is meant to move.
 
 The two disagreed about the threshold, and the disagreement was the finding. Calibration put off-topic pairs near −11.2, so −11.0 looked correct; against the real pipeline it rejected 1 of 10 unanswerable queries. The gate never scores an isolated passage — it scores the best chunk retrieval found in the whole corpus, which runs far higher. The threshold is now set from the pipeline measurement, and `tests/test_rerank_calibration.py` keeps the discrepancy executable so the pair-level number cannot be re-adopted on the strength of how carefully it was measured.
 

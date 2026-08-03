@@ -29,6 +29,11 @@ collide with real documents.
   A miss with the chunk in the pool is a re-ranking failure. A miss with the
   chunk absent is a recall failure, and no amount of re-ranker tuning will fix
   it — the fan-out has to change.
+- **coverage** — of the chunks that answer a query, what fraction reached the
+  agent. Reported twice: over the top 5 as ranked, and over what neighbour
+  expansion actually delivers. hit@k asks whether retrieval found *an* answer;
+  this asks whether it found the whole one, which is the question a multi-chunk
+  query poses and the one expansion is meant to move.
 - **abstention behaviour** — on answerable queries, how often the gate wrongly
   refuses; on adversarial ones, how often it correctly does. This is the part
   `rerank_calibration.py` could not reach: it is the configured threshold
@@ -91,6 +96,20 @@ def hit_at_k(ranked_ids: list[str], relevant: set[str], k: int) -> float:
     return 1.0 if relevant.intersection(ranked_ids[:k]) else 0.0
 
 
+def coverage_at_k(ranked_ids: list[str], relevant: set[str], k: int) -> float:
+    """Fraction of a query's relevant chunks present in the top k.
+
+    hit@k is satisfied by one of them, which is the right question for a lookup
+    and the wrong one for "what do we know about X" — an answer assembled from
+    one of the two chunks that carry it is a half answer that reads whole. This
+    is the metric neighbour expansion is supposed to move, and the one that shows
+    what it costs when the extra chunks are the wrong ones.
+    """
+    if not relevant:
+        return 0.0
+    return len(relevant.intersection(ranked_ids[:k])) / len(relevant)
+
+
 def reciprocal_rank(ranked_ids: list[str], relevant: set[str]) -> float:
     """1/rank of the first relevant chunk (1-indexed), 0.0 if none appears."""
     for position, chunk_id in enumerate(ranked_ids, start=1):
@@ -130,6 +149,11 @@ class QueryResult:
     ranked_ids: list[str]
     top_score: float
     pool_size: int
+    # What RAGTool would actually hand the agent: the top _RESULTS_RETURNED
+    # chunks after neighbour expansion, in reading order, and how many blocks
+    # they collapsed into.
+    delivered_ids: list[str]
+    blocks: int
 
     @property
     def relevant(self) -> set[str]:
@@ -168,44 +192,86 @@ def ingest_corpus(collection_name: str = EVAL_COLLECTION) -> None:
     except Exception:
         pass  # first run, or a vecs version without it — get_or_create handles it
 
+    # Sorted into reading order before ingest. `ingest_documents` numbers chunks
+    # by their position in the list it is handed, which is how neighbour
+    # expansion knows what is adjacent to what, and the CORPUS literal below is
+    # grouped by subject rather than by page. A real parse arrives page by page,
+    # so sorting here makes the eval corpus behave like one. Stable, so the
+    # within-page order of the literal is preserved.
+    ordered = sorted(CORPUS, key=lambda chunk: (chunk.source, chunk.page))
+
     ingest_documents(
         [
             {
                 "text": chunk.text,
                 "metadata": {"source": chunk.source, "page": chunk.page, "eval_id": chunk.id},
             }
-            for chunk in CORPUS
+            for chunk in ordered
         ],
         collection_name=collection_name,
     )
 
 
-def _rank(query: str, collection_name: str, expand: bool):
-    from tools.rag import retrieve
+@dataclass
+class _Ranking:
+    ranked_ids: list[str]
+    delivered_ids: list[str]
+    blocks: int
+    top_score: float
+    pool_size: int
+
+
+def _eval_ids(metadatas) -> list[str]:
+    """Chunks carry `eval_id` through ingest; anything without one is not from
+    this corpus and would silently count as an irrelevant result, so assert
+    rather than tolerate it."""
+    ids = []
+    for metadata in metadatas:
+        eval_id = metadata.get("eval_id")
+        assert eval_id in CHUNKS_BY_ID, f"unexpected chunk in eval collection: {eval_id!r}"
+        ids.append(eval_id)
+    return ids
+
+
+def _rank(query: str, collection_name: str, expand: bool) -> _Ranking:
+    from tools.rag import _RESULTS_RETURNED, expand_context, retrieve
 
     candidates = retrieve(
         query,
         collection_name,
         sub_queries=None if expand else [query],
     )
-    # Chunks carry `eval_id` through ingest; anything without one is not from
-    # this corpus and would silently count as an irrelevant result, so assert
-    # rather than tolerate it.
-    ranked_ids = []
-    for candidate in candidates:
-        eval_id = candidate.metadata.get("eval_id")
-        assert eval_id in CHUNKS_BY_ID, f"unexpected chunk in eval collection: {eval_id!r}"
-        ranked_ids.append(eval_id)
+    ranked_ids = _eval_ids(candidate.metadata for candidate in candidates)
 
-    top_score = candidates[0].score if candidates else float("-inf")
-    return ranked_ids, top_score, len(candidates)
+    # The ranking is what the metrics score; this is what the agent would read.
+    # They differ by the top-k cut and by neighbour expansion, and measuring both
+    # is the only way to see whether expansion adds the right chunks.
+    blocks = expand_context(candidates[:_RESULTS_RETURNED], collection_name)
+    delivered_ids = _eval_ids(chunk for block in blocks for chunk in block.chunks)
+
+    return _Ranking(
+        ranked_ids=ranked_ids,
+        delivered_ids=delivered_ids,
+        blocks=len(blocks),
+        top_score=candidates[0].score if candidates else float("-inf"),
+        pool_size=len(candidates),
+    )
 
 
 def run_golden(collection_name: str = EVAL_COLLECTION, expand: bool = False) -> list[QueryResult]:
     results = []
     for golden in GOLDEN:
-        ranked_ids, top_score, pool_size = _rank(golden.query, collection_name, expand)
-        results.append(QueryResult(golden, ranked_ids, top_score, pool_size))
+        ranking = _rank(golden.query, collection_name, expand)
+        results.append(
+            QueryResult(
+                golden=golden,
+                ranked_ids=ranking.ranked_ids,
+                top_score=ranking.top_score,
+                pool_size=ranking.pool_size,
+                delivered_ids=ranking.delivered_ids,
+                blocks=ranking.blocks,
+            )
+        )
     return results
 
 
@@ -214,13 +280,13 @@ def run_adversarial(
 ) -> list[AdversarialResult]:
     results = []
     for query in ADVERSARIAL:
-        ranked_ids, top_score, pool_size = _rank(query, collection_name, expand)
+        ranking = _rank(query, collection_name, expand)
         results.append(
             AdversarialResult(
                 query=query,
-                top_score=top_score,
-                pool_size=pool_size,
-                top_chunk_id=ranked_ids[0] if ranked_ids else None,
+                top_score=ranking.top_score,
+                pool_size=ranking.pool_size,
+                top_chunk_id=ranking.ranked_ids[0] if ranking.ranked_ids else None,
             )
         )
     return results
@@ -242,6 +308,17 @@ def summarise(results: list[QueryResult]) -> dict:
         )
 
     summary["mrr"] = sum(reciprocal_rank(r.ranked_ids, r.relevant) for r in results) / n
+
+    # What the agent receives, before and after neighbour expansion. The pair is
+    # the measurement: `coverage@5` is the ranking's own contribution, and
+    # `context_coverage` is what expansion adds on top of it.
+    summary["coverage@5"] = sum(coverage_at_k(r.ranked_ids, r.relevant, 5) for r in results) / n
+    summary["context_coverage"] = (
+        sum(coverage_at_k(r.delivered_ids, r.relevant, len(r.delivered_ids)) for r in results) / n
+    )
+    summary["mean_delivered"] = sum(len(r.delivered_ids) for r in results) / n
+    summary["mean_blocks"] = sum(r.blocks for r in results) / n
+
     # Anywhere in the pool at any depth — the recall ceiling re-ranking works
     # against. hit@k can never exceed this.
     summary["pool_recall"] = sum(
@@ -353,11 +430,22 @@ def main() -> None:
     print(f"  MRR     {summary['mrr']:.3f}")
     print(f"  pool recall (any depth)  {summary['pool_recall']:.3f}   <- ceiling for hit@k")
 
+    print(
+        f"\n  what the agent receives (RAG_NEIGHBOUR_RADIUS = {settings.RAG_NEIGHBOUR_RADIUS})"
+    )
+    print(f"    relevant chunks covered by the top 5:  {summary['coverage@5']:.3f}")
+    print(f"    ...after neighbour expansion:          {summary['context_coverage']:.3f}")
+    print(
+        f"    mean {summary['mean_delivered']:.1f} chunks in "
+        f"{summary['mean_blocks']:.1f} blocks"
+    )
+
     print("\n  by query kind:")
     for kind, stats in by_kind(golden_results).items():
         print(
             f"    {kind:<12} n={stats['queries']:<3} hit@5={stats['hit@5']:.3f}  "
-            f"mrr={stats['mrr']:.3f}  pool recall={stats['pool_recall']:.3f}"
+            f"mrr={stats['mrr']:.3f}  pool recall={stats['pool_recall']:.3f}  "
+            f"coverage {stats['coverage@5']:.3f}->{stats['context_coverage']:.3f}"
         )
 
     print(f"\n  abstention gate at RAG_MIN_RERANK_SCORE = {gate['threshold']}")

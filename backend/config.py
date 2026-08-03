@@ -121,6 +121,19 @@ class Settings(BaseSettings):
     # the cache has its own tests that enable it explicitly.
     EMBEDDING_CACHE_ENABLED: bool = True
 
+    # How many chunks either side of a retrieved chunk to hand the agent with it.
+    #
+    # Retrieval ranks 1000-character windows because that is what the embedder and
+    # the re-ranker can read in full (see docs/optimizations.md), but 1000
+    # characters is not a unit of meaning. The window that scores highest is
+    # regularly the one that names the thing, while the sentence qualifying it sits
+    # in the next window and never reaches the agent. Retrieving small and reading
+    # large is the standard answer, and it costs one indexed lookup.
+    #
+    # Expansion never crosses a page boundary, so the citation stays exact — see
+    # tools/rag.expand_context. 0 disables it and restores chunk-at-a-time output.
+    RAG_NEIGHBOUR_RADIUS: int = 1
+
     # Score the best-reranked chunk must reach before retrieval answers at all.
     # Below it, RAGTool abstains and tells the agent to use web search instead.
     #

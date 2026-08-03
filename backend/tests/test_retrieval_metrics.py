@@ -14,6 +14,7 @@ import math
 import pytest
 
 from evals.retrieval_eval import (
+    coverage_at_k,
     dcg_at_k,
     hit_at_k,
     ndcg_at_k,
@@ -47,6 +48,28 @@ def test_hit_at_k_handles_short_ranking():
     k = len(ranked)."""
     assert hit_at_k(["a"], {"a"}, 10) == 1.0
     assert hit_at_k([], {"a"}, 10) == 0.0
+
+
+# ── coverage@k ───────────────────────────────────────────────────────────────
+
+def test_coverage_counts_how_many_relevant_chunks_arrived():
+    """Where hit@k stops at one, this is the difference between half an answer
+    and a whole one — the question a multi-chunk query actually asks."""
+    assert coverage_at_k(["a", "x", "b"], {"a", "b"}, 3) == 1.0
+    assert coverage_at_k(["a", "x", "y"], {"a", "b"}, 3) == pytest.approx(0.5)
+
+
+def test_coverage_respects_the_cutoff():
+    assert coverage_at_k(["a", "x", "b"], {"a", "b"}, 2) == pytest.approx(0.5)
+
+
+def test_coverage_agrees_with_hit_when_there_is_one_relevant_chunk():
+    for ranked in (["a", "b"], ["b", "a"], ["b", "c"]):
+        assert coverage_at_k(ranked, {"a"}, 2) == hit_at_k(ranked, {"a"}, 2)
+
+
+def test_coverage_of_nothing_relevant_is_zero_not_a_division_error():
+    assert coverage_at_k(["a"], set(), 5) == 0.0
 
 
 # ── MRR ──────────────────────────────────────────────────────────────────────

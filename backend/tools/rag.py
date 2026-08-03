@@ -238,6 +238,22 @@ def _as_any_terms(query: str) -> str:
     return " or ".join(query.split())
 
 
+def _ensure_neighbour_index(vx, name: str) -> None:
+    """B-tree backing neighbour lookup in `expand_context`.
+
+    Without it, pulling the chunks either side of a result is a sequential scan
+    of the whole collection on every search — cheap on a demo workspace and not
+    on a real one. The expression must match `_fetch_neighbours` exactly.
+    """
+    with vx.Session() as sess, sess.begin():
+        sess.execute(
+            sql_text(
+                f'CREATE INDEX IF NOT EXISTS "{name}_neighbour_idx" ON vecs."{name}" '
+                "((metadata->>'source'), (metadata->>'ordinal'))"
+            )
+        )
+
+
 def _keyword_search(vx, name: str, query: str, limit: int, vertical: Optional[str]):
     """Lexical half of the hybrid: ts_rank_cd over the same chunks.
 
@@ -384,6 +400,239 @@ def retrieve(
     return ranked
 
 
+# ---------------------------------------------------------------------------
+# Neighbour expansion — retrieve small, read large.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ContextBlock:
+    """One contiguous stretch of a document, ready to hand to an agent.
+
+    A block is one or more chunks that sit next to each other on the same page,
+    stitched back into continuous prose. `chunks` holds their metadata in reading
+    order — the caller needs it to know what the block actually contains.
+    """
+    source: str
+    page: object
+    text: str
+    chunks: list[dict]
+
+
+# Ceiling on chunks in one tool result, seeds included. `_RESULTS_RETURNED`
+# results with a radius of 1 could otherwise triple the output of a call an agent
+# makes several times per node. Seeds are never dropped — only the expansion is
+# budgeted — so hitting the cap degrades to today's behaviour rather than losing
+# a result.
+_MAX_CONTEXT_CHUNKS = 12
+
+# Bounds on the overlap `_stitch` will believe. The splitter is configured for
+# 200 characters of overlap; the probe allows twice that and refuses anything
+# shorter than the minimum, because two independent chunks routinely share a few
+# trailing characters by chance and splicing on that would delete real text.
+_MIN_STITCH_OVERLAP = 20
+_MAX_STITCH_OVERLAP = 400
+
+
+def _ordinal_of(metadata: dict) -> Optional[int]:
+    """Position of a chunk within its document, or None if it predates ordinals.
+
+    Chunks ingested before this existed carry no ordinal, and nothing backfills
+    them. They are returned unexpanded rather than treated as position 0, which
+    would make every one of them a neighbour of every other.
+    """
+    value = metadata.get("ordinal")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _stitch(left: str, right: str) -> str:
+    """Join two adjacent chunks, dropping the overlap they share.
+
+    Adjacent chunks repeat `chunk_overlap` characters by construction, so
+    concatenating them duplicates a paragraph or two — text an agent will read as
+    the document saying the same thing twice. The overlap is a literal shared
+    substring, so measuring it beats assuming the configured 200: the splitter
+    cuts at separators, which makes the real figure vary chunk to chunk.
+    """
+    limit = min(len(left), len(right), _MAX_STITCH_OVERLAP)
+    for n in range(limit, _MIN_STITCH_OVERLAP - 1, -1):
+        if left.endswith(right[:n]):
+            return left + right[n:]
+    return left + "\n\n" + right
+
+
+def _fetch_neighbours(vx, name: str, wanted: list[tuple[str, int]]) -> dict[tuple[str, int], dict]:
+    """Look up chunks by (source, ordinal) — one query for the whole batch."""
+    if not wanted:
+        return {}
+
+    clauses = []
+    params: dict = {}
+    for i, (source, ordinal) in enumerate(wanted):
+        clauses.append(f"(metadata->>'source' = :s{i} AND metadata->>'ordinal' = :o{i})")
+        params[f"s{i}"] = source
+        # ->> is text, and the JSONB value is a number, so compare as text.
+        params[f"o{i}"] = str(ordinal)
+
+    with vx.Session() as sess:
+        rows = sess.execute(
+            sql_text(f'SELECT metadata FROM vecs."{name}" WHERE {" OR ".join(clauses)}'),
+            params,
+        ).fetchall()
+
+    found: dict[tuple[str, int], dict] = {}
+    for (metadata,) in rows:
+        # Re-ingesting a document adds a second copy of every chunk rather than
+        # replacing it (ingest assigns a fresh uuid4 per chunk), so one key can
+        # match several rows. They are copies of the same text; take the first.
+        found.setdefault((metadata.get("source"), _ordinal_of(metadata)), metadata)
+    return found
+
+
+@dataclass
+class _Piece:
+    """A chunk on its way into a block: its position, and why it is here."""
+    source: str
+    page: object
+    ordinal: Optional[int]
+    metadata: dict
+    rank: Optional[int]  # rank of the result it came from; None for a neighbour
+
+
+def _blocks_from(pieces: list[_Piece]) -> list[ContextBlock]:
+    """Merge pieces into contiguous runs, ordered by the best result in each.
+
+    Runs break on a gap in ordinal and on a change of page, so a block is always
+    one continuous stretch of one page and can carry a single exact citation.
+    Chunks with no ordinal cannot be placed relative to anything and stay alone.
+    """
+    runs: list[list[_Piece]] = []
+
+    loose = [p for p in pieces if p.ordinal is None]
+    placeable = [p for p in pieces if p.ordinal is not None]
+
+    by_source: dict[str, list[_Piece]] = {}
+    for piece in placeable:
+        by_source.setdefault(piece.source, []).append(piece)
+
+    for source_pieces in by_source.values():
+        source_pieces.sort(key=lambda p: p.ordinal)
+        current: list[_Piece] = []
+        for piece in source_pieces:
+            if current and (
+                piece.ordinal != current[-1].ordinal + 1 or piece.page != current[-1].page
+            ):
+                runs.append(current)
+                current = []
+            current.append(piece)
+        if current:
+            runs.append(current)
+
+    runs.extend([piece] for piece in loose)
+
+    def _best_rank(run: list[_Piece]) -> int:
+        return min((p.rank for p in run if p.rank is not None), default=len(pieces))
+
+    blocks = []
+    for run in sorted(runs, key=_best_rank):
+        text = ""
+        for i, piece in enumerate(run):
+            chunk_text = piece.metadata.get("text", "")
+            text = chunk_text if i == 0 else _stitch(text, chunk_text)
+        blocks.append(
+            ContextBlock(
+                source=run[0].source,
+                page=run[0].page,
+                text=text,
+                chunks=[p.metadata for p in run],
+            )
+        )
+    return blocks
+
+
+def expand_context(
+    candidates: list[Candidate],
+    collection_name: str,
+    *,
+    radius: Optional[int] = None,
+) -> list[ContextBlock]:
+    """Widen the winning chunks into the passages they were cut out of.
+
+    The re-ranker scores 1000-character windows because that is what it and the
+    embedder can read in full, but the window that wins is often not the window
+    that answers: the chunk that names a limit and the sentence stating its
+    exception are one paragraph apart and two chunks apart. This pulls in
+    `radius` chunks either side of each result and stitches each contiguous run
+    back into one passage.
+
+    Expansion stops at a page boundary. The page number *is* the citation here —
+    it is why ingest splits page by page at all — and a passage spanning two pages
+    can only be labelled with one of them. That is also the cheapest correct rule:
+    chunks never straddle a page break, so a run is always wholly on one page.
+
+    Degrades rather than fails. Chunks ingested before ordinals existed, a radius
+    of 0, and a neighbour lookup that raises all produce the results unexpanded,
+    which is exactly the previous behaviour.
+    """
+    if not candidates:
+        return []
+
+    radius = settings.RAG_NEIGHBOUR_RADIUS if radius is None else radius
+
+    pieces = [
+        _Piece(
+            source=c.metadata.get("source", "Unknown Source"),
+            page=c.metadata.get("page"),
+            ordinal=_ordinal_of(c.metadata),
+            metadata=c.metadata,
+            rank=rank,
+        )
+        for rank, c in enumerate(candidates)
+    ]
+
+    if radius > 0:
+        # Requested in rank order and interleaved by distance, so when the budget
+        # binds it is the best results that got widened.
+        seeded = {(p.source, p.ordinal) for p in pieces if p.ordinal is not None}
+        wanted: list[tuple[str, int]] = []
+        pages: dict[tuple[str, int], object] = {}
+        for distance in range(1, radius + 1):
+            for piece in pieces:
+                if piece.ordinal is None:
+                    continue
+                for ordinal in (piece.ordinal - distance, piece.ordinal + distance):
+                    key = (piece.source, ordinal)
+                    if ordinal < 0 or key in seeded or key in pages:
+                        continue
+                    if len(pieces) + len(wanted) >= _MAX_CONTEXT_CHUNKS:
+                        continue
+                    wanted.append(key)
+                    pages[key] = piece.page
+
+        try:
+            found = _fetch_neighbours(_get_client(), _safe_collection(collection_name), wanted)
+        except Exception as e:
+            # Expansion is an enhancement; losing it must not lose the results.
+            logger.warning("rag_neighbour_lookup_failed", error=str(e))
+            found = {}
+
+        for key, metadata in found.items():
+            # A neighbour on another page is a different citation, so it is not a
+            # neighbour for this purpose.
+            if key not in pages or metadata.get("page") != pages[key]:
+                continue
+            pieces.append(
+                _Piece(
+                    source=key[0],
+                    page=metadata.get("page"),
+                    ordinal=_ordinal_of(metadata),
+                    metadata=metadata,
+                    rank=None,
+                )
+            )
+
+    return _blocks_from(pieces)
+
+
 class RAGTool(BaseTool):
     name: str = "search_documents"
     description: str = (
@@ -431,22 +680,24 @@ class RAGTool(BaseTool):
                 return _NO_DOCUMENTS_MESSAGE
 
             kept = ranked[:_RESULTS_RETURNED]
+            blocks = expand_context(kept, self.collection_name)
 
             output = []
-            for candidate in kept:
-                metadata = candidate.metadata
-                text = metadata.get("text", "No text content found.")
-                source = metadata.get("source", "Unknown Source")
+            for block in blocks:
+                text = block.text or "No text content found."
+                source = block.source or "Unknown Source"
                 # `or`, not a .get default: chunks ingested before page
                 # provenance existed carry the key with a null value, so a
                 # default would never fire and the citation read "Page: None".
-                page = metadata.get("page") or "N/A"
+                page = block.page or "N/A"
                 output.append(f"SOURCE: {source} (Page: {page})\n---\n{text}")
 
             logger.info(
                 "rag_search_complete",
                 candidates=len(ranked),
                 returned=len(kept),
+                blocks=len(blocks),
+                chunks_delivered=sum(len(b.chunks) for b in blocks),
                 top_score=top_score,
             )
             return "\n\n================\n\n".join(output)
@@ -468,24 +719,35 @@ def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", 
     texts = [c["text"] for c in chunks]
     embeddings = _embed(texts)
     
+    # Position of each chunk within its own document. Assigned here rather than by
+    # each parser so every ingest path gets it — docling, LlamaParse, and the eval
+    # corpus alike — and so a new producer cannot forget. It relies on the caller
+    # passing a document's chunks in reading order, which every caller does: this
+    # is a loop over one parsed file.
+    next_ordinal: dict = {}
+
     records = []
     for chunk, emb in zip(chunks, embeddings):
         record_id = str(uuid.uuid4())
         metadata = chunk["metadata"]
         metadata["text"] = chunk["text"]  # Store text in metadata for retrieval
+        source = metadata.get("source")
+        metadata["ordinal"] = next_ordinal.get(source, 0)
+        next_ordinal[source] = metadata["ordinal"] + 1
         if vertical: # Add vertical tag if provided
             metadata["vertical"] = vertical
         records.append((record_id, emb, metadata))
-    
+
     collection.upsert(records=records)
 
-    # Index both retrieval paths. create_index(replace=True) is the vecs
+    # Index all three read paths. create_index(replace=True) is the vecs
     # default and rebuilds in place, so re-ingesting into an existing
     # collection stays correct rather than accumulating stale indexes.
     collection.create_index(
         method=IndexMethod.hnsw, measure=IndexMeasure.cosine_distance
     )
     _ensure_fts_index(vx, name)
+    _ensure_neighbour_index(vx, name)
     logger.info("rag_ingest_complete", collection=collection_name)
 
 
