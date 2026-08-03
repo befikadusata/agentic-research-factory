@@ -118,28 +118,51 @@ class Settings(BaseSettings):
     # Score the best-reranked chunk must reach before retrieval answers at all.
     # Below it, RAGTool abstains and tells the agent to use web search instead.
     #
-    # MEASURED, not assumed — see backend/evals/rerank_calibration.py, which
-    # scores labelled pairs with the real cross-encoder. This shipped at 0.0 on
-    # the reasoning that ms-marco-MiniLM-L-6-v2 is trained to put relevant pairs
-    # above zero. It is, on MS MARCO web text; on business-document prose it is
-    # not. Measured over 34 labelled pairs:
+    # MEASURED, and measured twice, because the first measurement asked the wrong
+    # question.
     #
-    #   relevant       min -11.374  median  -2.654  max  +6.592
-    #   hard_negative  min -11.356  median  -7.665  max  +2.985
-    #   off_topic      min -11.353  median -11.297  max -11.014
+    # It shipped at 0.0 on the reasoning that ms-marco-MiniLM-L-6-v2 is trained to
+    # put relevant pairs above zero. True on MS MARCO web text, false on
+    # business-document prose: backend/evals/rerank_calibration.py scored 34
+    # labelled pairs and found 0.0 would hide 9 of 12 relevant passages. That
+    # moved the default to -11.0, just above the tight off-topic band those pairs
+    # clustered in (-11.35 to -11.01).
     #
-    # A 0.0 cut would have hidden 9 of 12 genuinely relevant passages. Worse, the
-    # relevant and hard-negative ranges overlap almost entirely, so NO absolute
-    # threshold separates "answers the question" from "same topic, doesn't". That
-    # job belongs to the reranker's ordering, not to a cut-off.
+    # backend/evals/retrieval_eval.py then ran the real pipeline over a real
+    # corpus and showed -11.0 barely gates anything: it rejected 1 of 10
+    # unanswerable queries. The gap is not noise, it is a category error. The
+    # calibration scores a chosen (query, passage) pair. The gate compares against
+    # the best chunk retrieval could find anywhere in the corpus — and a
+    # recall-first pool searching 54 chunks surfaces something far more plausible
+    # than a passage picked to be off-topic. Best-of-pool scores sit well above
+    # isolated-pair scores, so a threshold set from pair scores sits far too low.
     #
-    # What absolute score *does* separate cleanly is the off-topic band: a query
-    # the corpus never discusses lands near -11.2, tightly clustered. So this is
-    # deliberately a weak gate with a narrow job — catch "these documents are not
-    # about this at all" and hand off to web search. -11.0 sits just above that
-    # band: it costs one relevant pair (the -11.374 outlier) and admits one
-    # off-topic pair (-11.014), which is the best available trade in this data.
-    RAG_MIN_RERANK_SCORE: float = -11.0
+    # Best-chunk score over 62 answerable and 10 unanswerable queries:
+    #
+    #   answerable    min -11.161  median  +2.063  max +10.314
+    #   unanswerable  min -11.231  median -10.256  max  -7.589
+    #
+    #   threshold   abstains on answerable   admits unanswerable
+    #     -11.0            1/62                     9/10
+    #      -9.0            1/62                     3/10
+    #      -8.5            1/62                     1/10
+    #      -7.5            7/62                     0/10
+    #
+    # -9.0 buys six of those nine back for nothing: false abstentions do not move
+    # until -8.0, and the single one at -9.0 is a colloquial paraphrase that -11.0
+    # already missed. It is not pushed lower to -8.5 on purpose — the lowest
+    # answerable query that still passes scores -8.351, so -8.5 would sit 0.15
+    # from a real answer and is tuned to this corpus rather than robust to the
+    # next one. -9.0 keeps 0.65 of headroom.
+    #
+    # The three unanswerable queries -9.0 still admits are company-financial
+    # questions against a corpus full of company financials. That is the known
+    # limit, not a bad number: both instruments agree that relevant and
+    # same-topic-but-wrong overlap almost entirely, so NO absolute threshold
+    # separates "answers the question" from "is about the same subject". The gate
+    # catches "these documents are not about this at all" and nothing finer.
+    # Ordering, not thresholding, is what selects among chunks that clear it.
+    RAG_MIN_RERANK_SCORE: float = -9.0
 
     # Optional in development; required in production (enforced by validate_config).
     TAVILY_API_KEY: str | None = None

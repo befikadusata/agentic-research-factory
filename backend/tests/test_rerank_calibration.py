@@ -1,16 +1,26 @@
-"""Guards the measurement behind settings.RAG_MIN_RERANK_SCORE.
+"""Guards what the cross-encoder's absolute scores can and cannot tell you.
 
 Opt-in: this loads the real cross-encoder (~90MB) and scores 34 pairs, which is
 not something the normal suite should download or spend time on. Run it when
-touching the threshold, the reranker model, or the calibration set:
+touching the reranker model or the calibration set:
 
     RUN_MODEL_EVALS=1 uv run pytest tests/test_rerank_calibration.py
 
 What it protects is the *reasoning*, not a leaderboard number. The threshold
 shipped at 0.0 on an argument about how ms-marco-MiniLM-L-6-v2 was trained, and
 measurement showed that argument does not survive contact with business-document
-prose — 0.0 would have hidden 9 of 12 genuinely relevant passages. These
-assertions fail if that situation quietly returns.
+prose — 0.0 would have hidden 9 of 12 genuinely relevant passages.
+
+This file no longer *sets* `RAG_MIN_RERANK_SCORE`, and the change is worth
+stating plainly because it looks like a retreat and is not. These pairs measure
+the score of a chosen (query, passage) couple. The gate compares against the
+best chunk retrieval found anywhere in the corpus, which is a different and much
+higher quantity — so a threshold read off this distribution lands far too low,
+as `evals/retrieval_eval.py` demonstrated by rejecting 1 of 10 unanswerable
+queries at -11.0. The threshold is set there, against the pipeline, and
+`tests/test_retrieval_eval.py` guards it. What survives here is what pairs are
+genuinely evidence for: the shape of the model's score distribution on this kind
+of prose, and the overlap that rules out a per-chunk relevance filter.
 """
 import os
 
@@ -29,19 +39,31 @@ def scored():
     return score_pairs()
 
 
-def test_configured_threshold_does_not_hide_most_relevant_passages(scored):
-    """The failure mode that matters: internal documents going silently unused
-    while the agent falls back to the web and nobody sees an error."""
+def test_pair_scores_are_more_pessimistic_than_the_gate_they_informed(scored):
+    """Why the threshold is not set from this file.
+
+    At the configured threshold several individually relevant passages score
+    below the bar. Read as a prediction about production that says retrieval
+    abstains on answerable queries — and it is wrong: the pipeline abstains on
+    1 of 62. The gate never sees a passage in isolation. It sees the best of a
+    recall-first pool, and best-of-pool runs far above the score any single
+    passage earns on its own.
+
+    This assertion exists so the discrepancy is recorded rather than
+    rediscovered as a bug. If it ever stops holding — if pair scores and
+    best-of-pool scores converge — then this file could set the threshold again,
+    and that would be worth knowing.
+    """
     from config import settings
     from evals.rerank_calibration import errors_at
 
-    relevant_total = sum(1 for label, _ in scored if label == "relevant")
     missed = errors_at(scored, settings.RAG_MIN_RERANK_SCORE)["missed_relevant"]
 
-    assert missed <= 1, (
-        f"threshold {settings.RAG_MIN_RERANK_SCORE} hides {missed}/{relevant_total} "
-        "relevant passages — retrieval would abstain on documents that do answer "
-        "the query, and the abstention is invisible in production"
+    assert missed >= 2, (
+        f"pair-level and pipeline-level measurements have converged: threshold "
+        f"{settings.RAG_MIN_RERANK_SCORE} now hides only {missed} isolated relevant "
+        "passages. Re-check whether the pipeline eval and this file still disagree "
+        "before trusting either alone."
     )
 
 

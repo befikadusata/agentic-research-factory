@@ -108,18 +108,38 @@ Documents uploaded via the UI `/upload` route are processed through a high-preci
 2. **Hybrid Search**:
    - Queries are expanded into semantically distinct sub-queries by an LLM ([`query_rewriter.py`](../backend/services/query_rewriter.py)), falling back to the original query on any failure.
    - Each sub-query is dispatched twice: against the dense `HNSW` vector index, and against a GIN full-text index (`ts_rank_cd`) for exact-term recall. Results merge into one deduplicated pool.
+   - The full-text half matches **any** query term rather than all of them. `plainto_tsquery` ANDs its lexemes, which made the lexical half return nothing for question-shaped queries — the pool was the vector half's results alone, silently, for every query. `websearch_to_tsquery` over `or`-joined terms restores disjunction and keeps hyphenated identifiers (`ACM-429`) as phrases.
 3. **Cross-Encoder Re-ranking**:
    - Up to 10 candidates per sub-query per retrieval half are pulled from PostgreSQL and deduplicated by chunk ID.
-   - Candidates are re-scored using `cross-encoder/ms-marco-MiniLM-L-6-v2` to determine exact contextual relevance.
+   - Candidates are re-scored using `cross-encoder/ms-marco-MiniLM-L-6-v2` to determine exact contextual relevance. [`tools.rag.retrieve`](../backend/tools/rag.py) returns the whole ranked pool; the gate and the top-5 cut are applied by `RAGTool._run` above it, so the evaluation harness can measure the ranking rather than the truncation.
    - If the pool's **best** score falls below `RAG_MIN_RERANK_SCORE`, retrieval abstains and tells the agent to use `web_search` instead; otherwise the top 5 chunks go to the requesting agent node. The recall-first pool is almost never empty, so without this gate a question the documents never address still yielded citable-looking excerpts.
-   - The gate is pool-level and deliberately narrow. Calibration ([`evals/rerank_calibration.py`](../backend/evals/rerank_calibration.py)) shows this model's absolute scores separate *"the corpus isn't about this"* (off-topic pairs cluster near −11.2) but **not** *"answers the question"* from *"same topic, doesn't"* — those ranges overlap almost entirely. A per-chunk filter would therefore drop relevant chunks that happen to score low while keeping their neighbours. Ordering, not thresholding, is what selects among chunks that clear the gate.
-   - The default of `−11.0` is measured, not assumed. See the config comment for the distribution; an earlier `0.0` default (the model's MS MARCO boundary) would have hidden 9 of 12 genuinely relevant passages.
+   - The gate is pool-level and deliberately narrow. This model's absolute scores separate *"the corpus isn't about this"* but **not** *"answers the question"* from *"same topic, doesn't"* — those ranges overlap almost entirely, in both the pair-level calibration and the pipeline eval. A per-chunk filter would therefore drop relevant chunks that happen to score low while keeping their neighbours. Ordering, not thresholding, is what selects among chunks that clear the gate.
+   - The default of `−9.0` is measured against the pipeline, not against pairs — the distinction that decided the number. See §4.
 4. **Scoping**:
    - Each workspace uses its own collection, with optional metadata filtering by research vertical.
 
 ---
 
-## 4. Real-time Logging & Human-in-the-Loop (HITL) Signaling
+## 4. Retrieval Evaluation
+
+Two harnesses, both opt-in behind `RUN_MODEL_EVALS=1` because they load real models:
+
+| | [`evals/rerank_calibration.py`](../backend/evals/rerank_calibration.py) | [`evals/retrieval_eval.py`](../backend/evals/retrieval_eval.py) |
+|---|---|---|
+| Input | 34 labelled `(query, passage)` pairs | 54-chunk corpus, 62 golden + 10 unanswerable queries |
+| Runs retrieval? | No | Yes — real ingest, real `retrieve()` |
+| Answers | where the model puts a *given* pair | whether the pipeline *finds* the right chunk |
+| Reports | score distribution by label, threshold sweep | hit@{1,3,5,10}, MRR, NDCG@k, pool recall, abstention rates |
+
+`pool recall` — the relevant chunk being anywhere in the candidate pool — is reported separately from `hit@k` because it localises a failure. A miss with the chunk in the pool is a re-ranking problem; a miss with the chunk absent is a recall problem that no re-ranker change can fix.
+
+The two disagreed about the threshold, and the disagreement was the finding. Calibration put off-topic pairs near −11.2, so −11.0 looked correct; against the real pipeline it rejected 1 of 10 unanswerable queries. The gate never scores an isolated passage — it scores the best chunk retrieval found in the whole corpus, which runs far higher. The threshold is now set from the pipeline measurement, and `tests/test_rerank_calibration.py` keeps the discrepancy executable so the pair-level number cannot be re-adopted on the strength of how carefully it was measured.
+
+Both are regression guards rather than leaderboards, so the assertions in `tests/test_retrieval_eval.py` sit deliberately below the measured numbers: they should fire when retrieval breaks and stay quiet when a dependency bump moves a metric by a point.
+
+---
+
+## 5. Real-time Logging & Human-in-the-Loop (HITL) Signaling
 
 1. **Agent State Events**: As CrewAI agents execute actions, their logs are routed via Redis channels under a `run_log:{run_id}` prefix.
 2. **FastAPI Streaming**: The client opens an EventSource connection to the `/runs/{id}/stream` route. The SSE handler listens to Redis Pub/Sub events and flushes them to the browser.
@@ -131,7 +151,7 @@ Documents uploaded via the UI `/upload` route are processed through a high-preci
 
 ---
 
-## 5. Database Schema
+## 6. Database Schema
 
 The database schemas defined in [`backend/models.py`](../backend/models.py) govern isolation and resource utilization:
 

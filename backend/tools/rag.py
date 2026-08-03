@@ -2,6 +2,7 @@ from crewai.tools import BaseTool
 import uuid
 import re
 import httpx
+from dataclasses import dataclass
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 from config import settings
@@ -116,6 +117,30 @@ def _ensure_fts_index(vx, name: str) -> None:
         )
 
 
+def _as_any_terms(query: str) -> str:
+    """Rewrite a query so the lexical half matches ANY term rather than all.
+
+    `plainto_tsquery` ANDs every lexeme, which requires a chunk to contain every
+    content word of the query. That is fine for a bag of keywords and useless for
+    the question-shaped strings agents actually send: "What does ACM-429 mean?"
+    parses to 'acm' & '-429' & 'mean', so the one chunk documenting ACM-429 does
+    not match unless it also happens to say "mean". The retrieval eval caught
+    this as a candidate pool that was exactly the vector half's 10 results for
+    every single query — the lexical half was contributing nothing at all, and
+    the exact-identifier recall that justifies hybrid search was not being
+    delivered.
+
+    `websearch_to_tsquery` reads a bare `or` as the disjunction operator, so
+    joining the words with it gives 'acm' <-> '-429' | 'mean' — any term matches,
+    hyphenated identifiers stay a phrase, and `ts_rank_cd` below still ranks
+    chunks matching more of the query above chunks matching one common word.
+    It is also the one tsquery parser documented never to raise on arbitrary
+    input; a query of nothing but stopwords yields an empty tsquery that matches
+    nothing, which is the wanted answer rather than an error.
+    """
+    return " or ".join(query.split())
+
+
 def _keyword_search(vx, name: str, query: str, limit: int, vertical: Optional[str]):
     """Lexical half of the hybrid: ts_rank_cd over the same chunks.
 
@@ -124,7 +149,7 @@ def _keyword_search(vx, name: str, query: str, limit: int, vertical: Optional[st
     `Collection.query` yields with include_value=False.
     """
     where_vertical = "AND metadata->>'vertical' = :vertical" if vertical else ""
-    params = {"q": query, "limit": limit}
+    params = {"q": _as_any_terms(query), "limit": limit}
     if vertical:
         params["vertical"] = vertical
 
@@ -135,11 +160,11 @@ def _keyword_search(vx, name: str, query: str, limit: int, vertical: Optional[st
                 SELECT id, metadata
                 FROM vecs."{name}"
                 WHERE to_tsvector('english', metadata->>'text')
-                      @@ plainto_tsquery('english', :q)
+                      @@ websearch_to_tsquery('english', :q)
                   {where_vertical}
                 ORDER BY ts_rank_cd(
                     to_tsvector('english', metadata->>'text'),
-                    plainto_tsquery('english', :q)
+                    websearch_to_tsquery('english', :q)
                 ) DESC
                 LIMIT :limit
                 """
@@ -165,6 +190,103 @@ _NO_DOCUMENTS_MESSAGE = (
 )
 
 
+@dataclass
+class Candidate:
+    """One re-ranked chunk. `score` is the cross-encoder's raw logit — unbounded,
+    roughly −11..+11 for this model, and only meaningful relative to the
+    calibration in evals/rerank_calibration.py."""
+    chunk_id: str
+    metadata: dict
+    score: float
+
+
+# How many candidates each retrieval half pulls per sub-query, and how many
+# survive to the agent. The fan-out is deliberately wider than the output:
+# recall is bought cheaply here and spent by the re-ranker below.
+_CANDIDATES_PER_QUERY = 10
+_RESULTS_RETURNED = 5
+
+
+def retrieve(
+    query: str,
+    collection_name: str,
+    vertical: Optional[str] = None,
+    *,
+    sub_queries: Optional[list[str]] = None,
+) -> list[Candidate]:
+    """The retrieval pipeline proper: expand → hybrid fan-out → dedupe → re-rank.
+
+    Returns the *whole* pool in ranked order with scores attached. The abstention
+    gate and the top-5 cut are policy, applied by the caller — they live in
+    `RAGTool._run` because an evaluation harness needs the full ranking to
+    compute MRR and NDCG, and a rank metric computed over an already-truncated
+    list measures the truncation rather than the ranking.
+
+    Pass `sub_queries` to skip the LLM expansion — the harness pins them so a
+    re-run measures retrieval rather than that day's rewrite.
+    """
+    if sub_queries is None:
+        sub_queries = generate_sub_queries(query)
+    logger.info("rag_sub_queries", count=len(sub_queries), queries=sub_queries)
+
+    name = _safe_collection(collection_name)
+    vx = _get_client()
+    collection = vx.get_or_create_collection(
+        name=name,
+        dimension=settings.EMBEDDING_DIMENSION,
+    )
+
+    query_vecs = _embed(sub_queries)
+
+    q_filter = {"vertical": {"$eq": vertical}} if vertical else None
+
+    # Fan-out: one vector query per sub-query plus one keyword query, deduped by
+    # chunk ID. Recall is what matters here — precision is the cross-encoder's
+    # job below, so the two halves are merged unweighted rather than score-fused.
+    seen_ids: set = set()
+    merged: list = []
+
+    def _collect(records):
+        for chunk_id, metadata in records:
+            if chunk_id not in seen_ids:
+                seen_ids.add(chunk_id)
+                merged.append((chunk_id, metadata))
+
+    for vec in query_vecs:
+        # Records are (id, metadata) when include_value=False.
+        _collect(
+            collection.query(
+                data=vec,
+                limit=_CANDIDATES_PER_QUERY,
+                include_metadata=True,
+                include_value=False,
+                filters=q_filter,
+            )
+        )
+
+    for sq in sub_queries:
+        _collect(_keyword_search(vx, name, sq, _CANDIDATES_PER_QUERY, vertical))
+
+    if not merged:
+        return []
+
+    # Re-rank the merged deduplicated pool against the ORIGINAL query, not the
+    # sub-queries: the sub-queries exist to widen recall, and scoring against
+    # them would rank chunks by how well they answer a question nobody asked.
+    reranker = _reranker()
+    scores = reranker.predict([(query, metadata.get("text", "")) for _, metadata in merged])
+
+    ranked = sorted(
+        (
+            Candidate(chunk_id=chunk_id, metadata=metadata, score=float(score))
+            for (chunk_id, metadata), score in zip(merged, scores)
+        ),
+        key=lambda c: c.score,
+        reverse=True,
+    )
+    return ranked
+
+
 class RAGTool(BaseTool):
     name: str = "search_documents"
     description: str = (
@@ -177,60 +299,12 @@ class RAGTool(BaseTool):
     def _run(self, query: str) -> str:
         logger.info("rag_search_start", query=query, collection=self.collection_name, vertical=self.vertical)
         try:
-            sub_queries = generate_sub_queries(query)
-            logger.info("rag_sub_queries", count=len(sub_queries), queries=sub_queries)
+            ranked = retrieve(query, self.collection_name, self.vertical)
 
-            name = _safe_collection(self.collection_name)
-            vx = _get_client()
-            collection = vx.get_or_create_collection(
-                name=name,
-                dimension=settings.EMBEDDING_DIMENSION,
-            )
-
-            query_vecs = _embed(sub_queries)
-
-            q_filter = {"vertical": {"$eq": self.vertical}} if self.vertical else None
-
-            # Fan-out: one vector query per sub-query plus one keyword query,
-            # deduped by chunk ID. Recall is what matters here — precision is
-            # the cross-encoder's job below, so the two halves are merged
-            # unweighted rather than score-fused.
-            seen_ids: set = set()
-            merged: list = []
-
-            def _collect(records):
-                for chunk_id, metadata in records:
-                    if chunk_id not in seen_ids:
-                        seen_ids.add(chunk_id)
-                        merged.append((chunk_id, metadata))
-
-            for vec in query_vecs:
-                # Records are (id, metadata) when include_value=False.
-                _collect(
-                    collection.query(
-                        data=vec,
-                        limit=10,
-                        include_metadata=True,
-                        include_value=False,
-                        filters=q_filter,
-                    )
-                )
-
-            for sq in sub_queries:
-                _collect(_keyword_search(vx, name, sq, 10, self.vertical))
-
-            if not merged:
+            if not ranked:
                 return _NO_DOCUMENTS_MESSAGE
 
-            # Re-rank merged deduplicated pool against original query
-            reranker = _reranker()
-            pairs = [(query, metadata.get("text", "")) for _, metadata in merged]
-            scores = reranker.predict(pairs)
-
-            scored_results = sorted(
-                zip(merged, scores), key=lambda x: x[1], reverse=True
-            )
-            top_score = float(scored_results[0][1])
+            top_score = ranked[0].score
 
             # Abstain rather than return the least-bad chunks. The pool is built
             # recall-first (sub-query fan-out UNION keyword search), so it is
@@ -253,16 +327,17 @@ class RAGTool(BaseTool):
             if top_score < settings.RAG_MIN_RERANK_SCORE:
                 logger.info(
                     "rag_search_abstained",
-                    candidates=len(merged),
+                    candidates=len(ranked),
                     top_score=top_score,
                     threshold=settings.RAG_MIN_RERANK_SCORE,
                 )
                 return _NO_DOCUMENTS_MESSAGE
 
-            kept = scored_results[:5]
+            kept = ranked[:_RESULTS_RETURNED]
 
             output = []
-            for (_, metadata), _score in kept:
+            for candidate in kept:
+                metadata = candidate.metadata
                 text = metadata.get("text", "No text content found.")
                 source = metadata.get("source", "Unknown Source")
                 # `or`, not a .get default: chunks ingested before page
@@ -273,7 +348,7 @@ class RAGTool(BaseTool):
 
             logger.info(
                 "rag_search_complete",
-                candidates=len(merged),
+                candidates=len(ranked),
                 returned=len(kept),
                 top_score=top_score,
             )
