@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
-from sqlalchemy.orm import selectinload
 from uuid import UUID
-from typing import Optional
-from database import get_db
-from schemas import CreateRunRequest, RunResponse, RunDetailResponse
-from models import Run, WorkspaceMember, RunStatus, Document
-from services.run_dispatch import enqueue_run
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 from auth import get_current_user
+from database import get_db
+from models import Document, Run, RunStatus, WorkspaceMember
+from schemas import CreateRunRequest, RunDetailResponse, RunResponse
+from services.run_dispatch import enqueue_run
 
 router = APIRouter()
 
@@ -70,7 +71,7 @@ async def create_run(
         try:
             doc_uuids = [UUID(d) for d in body.doc_ids]
         except ValueError:
-            raise HTTPException(400, "Invalid doc_id")
+            raise HTTPException(400, "Invalid doc_id") from None
         result = await db.execute(select(Document).where(Document.id.in_(doc_uuids)))
         docs = result.scalars().all()
         if len(docs) != len(doc_uuids) or any(d.workspace_id != body.workspace_id for d in docs):
@@ -91,8 +92,8 @@ async def create_run(
 
 @router.get("", response_model=list[RunResponse])
 async def list_runs(
-    workspace_id: Optional[UUID] = Query(default=None),
-    status: Optional[RunStatus] = Query(default=None),
+    workspace_id: UUID | None = Query(default=None),
+    status: RunStatus | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),

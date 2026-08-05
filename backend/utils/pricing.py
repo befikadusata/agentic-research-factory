@@ -9,7 +9,6 @@ taken from each provider's public pricing page at time of writing — expect dri
 over time, not a live-updated feed.
 """
 from logger import logger
-
 from services.llm_router import MODEL_REGISTRY
 
 # (prompt_price_per_1k_usd, completion_price_per_1k_usd). Paid/legacy slugs the

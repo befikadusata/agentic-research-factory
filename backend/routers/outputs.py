@@ -1,15 +1,18 @@
+import os
+import tempfile
+from datetime import UTC
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import UUID
-from datetime import timezone
+from starlette.background import BackgroundTask
+
+from auth import assert_run_access, get_current_user
 from database import get_db
+from formatters import format_output
 from models import Run, RunStatus
 from services.pdf_service import markdown_to_pdf
-from auth import get_current_user, assert_run_access
-from formatters import format_output
-from starlette.background import BackgroundTask
-import tempfile, os
 
 router = APIRouter()
 
@@ -28,8 +31,8 @@ async def download_pdf(
     await assert_run_access(run, user_id, db)
     ts = run.updated_at
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    generated_at = ts.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        ts = ts.replace(tzinfo=UTC)
+    generated_at = ts.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
         path = f.name
     content = format_output(run.format, run.final_output)

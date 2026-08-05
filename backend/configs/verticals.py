@@ -5,7 +5,7 @@ Each vertical defines the structured context injected into agent prompts,
 the dynamic form fields shown in the frontend, and the output requirements
 enforced by the writer/editor.
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TypedDict
 
 
@@ -218,7 +218,7 @@ def build_execution_brief(topic: str, vertical: str | None, vertical_inputs: dic
 
     return (
         f"{topic}\n\n"
-        f"**Execution Date (UTC)**: {datetime.now(timezone.utc).date().isoformat()}\n\n"
+        f"**Execution Date (UTC)**: {datetime.now(UTC).date().isoformat()}\n\n"
         f"**Vertical Playbook**: {config['display_name']}\n\n"
         f"**Structured Context**:\n{inputs_lines}\n\n"
         f"**Research Focus**: {config['prompt_focus']}\n\n"

@@ -1,14 +1,15 @@
-from crewai.tools import BaseTool
 import asyncio
 from functools import lru_cache
+
+from crewai.tools import BaseTool
 from firecrawl import FirecrawlApp
-from config import settings
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+from config import settings
 from logger import logger
+from tools.untrusted import wrap_untrusted
 from utils.cache import tool_cache
 from utils.source_ledger import record_retrieved_url
-from tools.untrusted import wrap_untrusted
-from typing import List, Dict
 
 # Self-hosted Firecrawl authenticates nothing (USE_DB_AUTHENTICATION=false in
 # docker-compose.yml), but firecrawl-py 1.5.0 raises ValueError unless *some*
@@ -120,7 +121,7 @@ class BatchScrapeTool(_FirecrawlClientMixin, BaseTool):
         "Input: a list of URL strings. Use this to quickly get the full text of multiple articles at once."
     )
 
-    async def _scrape_single(self, url: str) -> Dict:
+    async def _scrape_single(self, url: str) -> dict:
         """Scrape a single URL with caching."""
         cached = tool_cache.get("scrape_webpage", url)
         if cached:
@@ -140,26 +141,25 @@ class BatchScrapeTool(_FirecrawlClientMixin, BaseTool):
             tool_cache.set("scrape_webpage", url, result)
             record_retrieved_url(url)
             return {"url": url, "content": result.get("markdown", "")[:6000]}
-        except (Exception, asyncio.TimeoutError) as e:
+        except (TimeoutError, Exception) as e:
             logger.warning("firecrawl_batch_scrape_failed", url=url, error=str(e))
             return {"url": url, "content": f"Error: {str(e)}"}
 
-    def _run(self, urls: List[str]) -> str:
+    def _run(self, urls: list[str]) -> str:
         """Sync wrapper for the async batch scrape."""
         if not _scraping_configured():
             logger.warning("firecrawl_not_configured", count=len(urls) if isinstance(urls, list) else 1)
             return _UNAVAILABLE.format(url="the requested pages", reason="not configured")
 
-        if not isinstance(urls, list):
-            if isinstance(urls, str):
-                if urls.startswith("[") and urls.endswith("]"):
-                    try:
-                        import ast
-                        urls = ast.literal_eval(urls)
-                    except:
-                        urls = [urls]
-                else:
+        if not isinstance(urls, list) and isinstance(urls, str):
+            if urls.startswith("[") and urls.endswith("]"):
+                try:
+                    import ast
+                    urls = ast.literal_eval(urls)
+                except Exception:
                     urls = [urls]
+            else:
+                urls = [urls]
         
         logger.info("firecrawl_batch_scrape_start", count=len(urls))
         
@@ -177,7 +177,7 @@ class BatchScrapeTool(_FirecrawlClientMixin, BaseTool):
             logger.warning("firecrawl_batch_run_error", error=str(e))
             return f"Batch scrape failed: {str(e)}"
 
-    async def _async_run(self, urls: List[str]) -> str:
+    async def _async_run(self, urls: list[str]) -> str:
         results = await asyncio.gather(*[self._scrape_single(u) for u in urls])
         output = []
         for res in results:

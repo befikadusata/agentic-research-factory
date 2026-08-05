@@ -198,6 +198,13 @@ cd backend
 uv run pytest
 ```
 
+Lint the backend (ruff, configured in `backend/pyproject.toml`; CI runs the same command):
+
+```bash
+cd backend
+uv run ruff check .        # add --fix to apply the safe autofixes
+```
+
 Run the route-intercepted frontend flows:
 
 ```bash

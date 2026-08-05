@@ -1,8 +1,10 @@
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from database import AsyncSessionLocal
-from models import RunCost
 from logger import logger
+from models import RunCost
+
 
 async def log_cost(db: AsyncSession, run_id: str, agent_name: str, input_tokens: int, output_tokens: int, total_cost: float):
     cost_entry = RunCost(

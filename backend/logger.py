@@ -1,7 +1,7 @@
-import structlog
-import logging
 import sys
 from contextvars import ContextVar
+
+import structlog
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 

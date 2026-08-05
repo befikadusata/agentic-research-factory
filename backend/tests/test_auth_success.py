@@ -1,8 +1,8 @@
-import pytest
 import time
+
 import jwt as pyjwt
-from httpx import AsyncClient, ASGITransport
-from main import app
+import pytest
+
 from config import settings
 
 

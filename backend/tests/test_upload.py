@@ -1,8 +1,10 @@
 import io
 import threading
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
+
 from models import Document, DocumentStatus, Workspace, WorkspaceMember
 
 
@@ -511,6 +513,7 @@ async def test_parse_pdf_timeout_abandons_the_parse_thread():
     still hung for the parse's full duration."""
     import asyncio
     import time
+
     import services.pdf_service as pdf_service
 
     started = threading.Event()

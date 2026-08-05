@@ -299,7 +299,7 @@ def score_pairs() -> list[tuple[str, float]]:
 
     model = _reranker()
     scores = model.predict([(query, passage) for query, passage, _ in PAIRS])
-    return [(label, float(score)) for (_, _, label), score in zip(PAIRS, scores)]
+    return [(label, float(score)) for (_, _, label), score in zip(PAIRS, scores, strict=True)]
 
 
 def summarise(scored: list[tuple[str, float]]) -> dict[str, LabelStats]:

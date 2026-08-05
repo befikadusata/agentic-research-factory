@@ -1,8 +1,10 @@
 import json
-import pytest
 import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from sqlalchemy import select
+
 from models import Run, RunCost, RunStatus
 
 
@@ -54,18 +56,22 @@ async def test_evaluate_output_strips_markdown_fence():
 async def test_evaluate_output_raises_on_malformed_json():
     from services.eval_service import evaluate_output
 
-    with patch("services.eval_service.acompletion", AsyncMock(return_value=_make_completion_response("not json"))):
-        with pytest.raises(json.JSONDecodeError):
-            await evaluate_output("content", "research", "topic")
+    with (
+        patch("services.eval_service.acompletion", AsyncMock(return_value=_make_completion_response("not json"))),
+        pytest.raises(json.JSONDecodeError),
+    ):
+        await evaluate_output("content", "research", "topic")
 
 
 @pytest.mark.asyncio
 async def test_evaluate_output_propagates_llm_exception():
     from services.eval_service import evaluate_output
 
-    with patch("services.eval_service.acompletion", AsyncMock(side_effect=RuntimeError("API down"))):
-        with pytest.raises(RuntimeError, match="API down"):
-            await evaluate_output("content", "research", "topic")
+    with (
+        patch("services.eval_service.acompletion", AsyncMock(side_effect=RuntimeError("API down"))),
+        pytest.raises(RuntimeError, match="API down"),
+    ):
+        await evaluate_output("content", "research", "topic")
 
 
 @pytest.mark.asyncio

@@ -1,10 +1,13 @@
-import pytest
 import asyncio
 import json
 import uuid
-from utils.redis_client import init_redis_pool, LOG_CHANNEL_PREFIX, HITL_INSTRUCTION_KEY
-from services.run_service import emit, approve_hitl
+
+import pytest
+
 import services.run_service as run_service
+from services.run_service import approve_hitl, emit
+from utils.redis_client import HITL_INSTRUCTION_KEY, LOG_CHANNEL_PREFIX, init_redis_pool
+
 
 @pytest.fixture
 async def redis_client():

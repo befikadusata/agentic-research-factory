@@ -1,5 +1,7 @@
-import pytest
 import uuid
+
+import pytest
+
 from models import Run, RunCost, RunStatus
 
 

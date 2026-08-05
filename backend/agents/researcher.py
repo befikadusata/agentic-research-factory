@@ -1,8 +1,10 @@
 from crewai import Agent, Task
-from tools.search import tavily_search_tool
-from tools.scraper import firecrawl_tool, batch_scrape_tool
+
 from configs.prompt_loader import get_prompt
 from services.llm_router import get_llm
+from tools.scraper import batch_scrape_tool, firecrawl_tool
+from tools.search import tavily_search_tool
+
 
 def researcher_agent(tools: list = None, max_iter: int = 2, max_tokens: int = 900) -> Agent:
     if tools is None:

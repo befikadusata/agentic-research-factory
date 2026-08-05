@@ -1,4 +1,5 @@
 from langfuse import Langfuse
+
 from config import settings
 
 langfuse_client = None

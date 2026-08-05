@@ -1,6 +1,7 @@
 """Tests for RAGTool vertical filter wiring."""
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def _mock_vecs_setup(mock_collection):
@@ -280,9 +281,8 @@ def test_embed_raises_instead_of_falling_back_to_local_model():
 
     with patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
          patch("tools.rag._gemini_embed", side_effect=RuntimeError("gemini 429")), \
-         patch("tools.rag._embedder") as local:
-        with pytest.raises(RuntimeError):
-            rag._embed(["a"])
+         patch("tools.rag._embedder") as local, pytest.raises(RuntimeError):
+        rag._embed(["a"])
 
     local.assert_not_called()
 

@@ -1,10 +1,13 @@
-import json
 import hashlib
-import redis
+import json
 from datetime import timedelta
-from typing import Any, Optional
-from logger import logger
+from typing import Any
+
+import redis
+
 from config import settings
+from logger import logger
+
 
 class ToolCache:
     def __init__(self, ttl_days: int = 7):
@@ -20,7 +23,7 @@ class ToolCache:
         hashed_key = hashlib.md5(key.encode()).hexdigest()
         return f"tool_cache:{tool_name}:{hashed_key}"
 
-    def get(self, tool_name: str, key: str) -> Optional[Any]:
+    def get(self, tool_name: str, key: str) -> Any | None:
         if not self.client:
             return None
             

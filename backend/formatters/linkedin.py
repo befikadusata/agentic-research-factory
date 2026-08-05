@@ -1,5 +1,6 @@
 import re
 
+
 def format_linkedin(raw_markdown: str) -> str:
     """Convert markdown to LinkedIn-friendly plain text (bold via ** only)."""
     text = raw_markdown

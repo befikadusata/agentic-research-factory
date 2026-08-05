@@ -1,7 +1,7 @@
 import pytest
 
-from config import settings
 import services.llm_router as lr
+from config import settings
 from services.llm_router import get_completion_settings, get_fallbacks, get_model
 
 

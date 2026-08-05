@@ -4,8 +4,8 @@ Search snippets and scraped pages are attacker-controlled; they're wrapped in an
 explicit, self-describing boundary that marks them as data before they enter the
 agent's ReAct context.
 """
-from tools.untrusted import wrap_untrusted
 import tools.search as search_mod
+from tools.untrusted import wrap_untrusted
 
 
 def test_wrap_marks_content_as_untrusted_data():

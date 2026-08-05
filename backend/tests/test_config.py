@@ -2,8 +2,8 @@ import re
 from pathlib import Path
 
 import pytest
-from config import Settings, validate_config
 
+from config import Settings, validate_config
 
 # A production-grade stand-in: not one of the shipped dev values and long
 # enough to clear the length floor, so these cases exercise the key checks

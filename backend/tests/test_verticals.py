@@ -1,10 +1,10 @@
-import pytest
-from httpx import AsyncClient
-from unittest.mock import patch, MagicMock, AsyncMock
-from services.run_service import execute_run
-from models import Run
 import uuid
-import asyncio
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from models import Run
+from services.run_service import execute_run
 
 
 @pytest.mark.asyncio

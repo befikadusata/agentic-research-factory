@@ -1,6 +1,6 @@
 """Unit tests for utils.context.compact_text: it must bound re-fed inter-agent
 context without dropping tail-anchored info (citations, conclusions)."""
-from utils.context import compact_text, _ELISION
+from utils.context import _ELISION, compact_text
 
 
 def test_under_budget_is_unchanged():

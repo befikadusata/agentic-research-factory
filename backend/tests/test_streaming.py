@@ -1,9 +1,12 @@
 import asyncio
+import contextlib
 import json
-import pytest
 import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from models import Run, RunStatus
 
 
@@ -138,8 +141,6 @@ def _parse_sse(text: str) -> list:
         if line.startswith("data:"):
             payload = line[5:].strip()
             if payload:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     events.append(json.loads(payload))
-                except json.JSONDecodeError:
-                    pass
     return events

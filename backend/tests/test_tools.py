@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def _make_tavily_response(answer: str = "summary", results: list = None):

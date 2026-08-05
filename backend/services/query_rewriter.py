@@ -1,8 +1,9 @@
 from litellm import completion
+
+from logger import logger
 from services.llm_router import get_completion_settings, reconcile_served_model
 from utils.cost_tracker import record_side_cost
 from utils.json_parse import parse_json
-from logger import logger
 
 
 def _record_cost(response) -> None:

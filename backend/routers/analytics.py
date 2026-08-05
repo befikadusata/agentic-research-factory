@@ -1,16 +1,17 @@
 from uuid import UUID
-from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+
+from auth import get_current_user
 from database import get_db
 from models import Run, RunCost, RunStatus, WorkspaceMember
-from auth import get_current_user
 
 router = APIRouter()
 
 
-async def _scope_to_caller(db: AsyncSession, user_id: str, workspace_id: Optional[UUID]):
+async def _scope_to_caller(db: AsyncSession, user_id: str, workspace_id: UUID | None):
     """Restrict analytics to the caller's own runs, or a workspace they belong to."""
     if workspace_id:
         member = await db.get(WorkspaceMember, (workspace_id, user_id))
@@ -22,7 +23,7 @@ async def _scope_to_caller(db: AsyncSession, user_id: str, workspace_id: Optiona
 
 @router.get("/metrics")
 async def get_global_metrics(
-    workspace_id: Optional[UUID] = Query(default=None),
+    workspace_id: UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
@@ -62,7 +63,7 @@ async def get_global_metrics(
 
 @router.get("/costs")
 async def get_cost_summary(
-    workspace_id: Optional[UUID] = Query(default=None),
+    workspace_id: UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):

@@ -2,30 +2,37 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
-from sqlalchemy import select, update as sa_update
+
+from sqlalchemy import select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
-from config import settings
-from database import AsyncSessionLocal
-from models import Run, RunStatus
-from logger import logger
 from tenacity import (
     AsyncRetrying,
-    stop_after_attempt,
-    wait_exponential,
     before_sleep_log,
     retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
 )
+
+from config import settings
 from configs.verticals import build_execution_brief, get_vertical
-from utils.blocking import run_in_daemon_thread
-from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX, HITL_INSTRUCTION_KEY
-from utils.cost_tracker import log_cost, run_cost_total
-from utils.source_ledger import reset_seen_sources
-from utils.pricing import calculate_cost
+from database import AsyncSessionLocal
+from logger import logger
+from models import Run, RunStatus
 from services.eval_service import evaluate_output
 from services.monitor_service import finalize_monitored_run
+from utils.blocking import run_in_daemon_thread
+from utils.cost_tracker import log_cost, run_cost_total
+from utils.pricing import calculate_cost
+from utils.redis_client import (
+    HITL_INSTRUCTION_KEY,
+    LOG_CHANNEL_PREFIX,
+    get_redis_client,
+)
+from utils.source_ledger import reset_seen_sources
 
 # Total LLM wall-clock one Celery task (one pipeline segment) may spend. Held
 # under task_soft_time_limit so a slow segment fails inside its own task —
@@ -76,7 +83,7 @@ _SOURCES_KEY = "_seen_sources"
 
 
 async def emit(run_id: str, event_type: str, data: dict):
-    entry = {"type": event_type, "data": data, "ts": datetime.now(timezone.utc).isoformat()}
+    entry = {"type": event_type, "data": data, "ts": datetime.now(UTC).isoformat()}
     try:
         async with AsyncSessionLocal() as db:
             run = await db.get(Run, UUID(run_id))
@@ -122,7 +129,7 @@ async def _set_status(run: Run, status: RunStatus, db: AsyncSession):
     if status == RunStatus.failed and run.status != RunStatus.failed:
         run.failed_at_status = run.status
     run.status = status
-    run.updated_at = datetime.now(timezone.utc)
+    run.updated_at = datetime.now(UTC)
     db.add(run)
     await db.commit()
 
@@ -137,7 +144,7 @@ async def _claim_status(run_id: UUID, expected: RunStatus, new: RunStatus) -> bo
         result = await db.execute(
             sa_update(Run)
             .where(Run.id == run_id, Run.status == expected)
-            .values(status=new, updated_at=datetime.now(timezone.utc))
+            .values(status=new, updated_at=datetime.now(UTC))
         )
         await db.commit()
         return result.rowcount > 0
@@ -177,7 +184,7 @@ async def reap_orphaned_runs() -> list[str]:
     keyed on the same status + stale timestamp, so a run a live task advanced
     between the scan and the write is skipped rather than clobbered.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.RUN_STUCK_TIMEOUT_MIN)
+    cutoff = datetime.now(UTC) - timedelta(minutes=settings.RUN_STUCK_TIMEOUT_MIN)
     reaped: list[str] = []
     async with AsyncSessionLocal() as db:
         rows = (
@@ -200,7 +207,7 @@ async def reap_orphaned_runs() -> list[str]:
                     status=RunStatus.failed,
                     failed_at_status=status,
                     error_message="Run reaped: stuck with no worker progress past the timeout.",
-                    updated_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(UTC),
                 )
             )
             if result.rowcount:
@@ -262,7 +269,7 @@ async def _invoke_supervisor_with_retry(
             )
             try:
                 return await asyncio.wait_for(call, timeout=slice_sec)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise StageTimeout(f"graph invoke exceeded {slice_sec:.0f}s") from None
 
 
@@ -323,7 +330,7 @@ def _make_step_cb(rid: str, loop: asyncio.AbstractEventLoop):
         data = {
             "agent":   agent_role,
             "message": str(step)[:300],
-            "ts":      datetime.now(timezone.utc).isoformat(),
+            "ts":      datetime.now(UTC).isoformat(),
         }
         coro = emit(rid, "log", data)
         try:
@@ -455,8 +462,9 @@ async def _run_start_segment(run_id: UUID):
     # Wait for referenced documents to be ingested
     context_docs = ""
     if doc_paths:
-        from models import Document, DocumentStatus
         from sqlalchemy import select as sa_select
+
+        from models import Document, DocumentStatus
 
         doc_ids = [UUID(d) for d in doc_paths if d]
         POLL_INTERVAL = 5
@@ -506,7 +514,7 @@ async def _run_start_segment(run_id: UUID):
     execution_brief = build_execution_brief(topic, vertical, vertical_inputs)
     task_type       = vertical_config["task_type"] if vertical_config else "research_report"
 
-    from agents.crew import supervisor, review_verdict
+    from agents.crew import review_verdict, supervisor
     from tools.rag import extract_citations
 
     initial_state = {
@@ -838,10 +846,10 @@ async def _finalize(run_id: UUID):
         if not run_obj:
             return
         final_output = run_obj.final_output or ""
-        latency_sec = (datetime.now(timezone.utc) - run_obj.created_at).total_seconds()
+        latency_sec = (datetime.now(UTC) - run_obj.created_at).total_seconds()
         run_obj.metrics = {**(run_obj.metrics or {}), "latency_sec": latency_sec}
         flag_modified(run_obj, "metrics")
-        run_obj.updated_at = datetime.now(timezone.utc)
+        run_obj.updated_at = datetime.now(UTC)
         db.add(run_obj)
         await db.commit()
 

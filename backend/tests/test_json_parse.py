@@ -4,7 +4,9 @@ Hand-stripping a single ``` fence then json.loads()'ing breaks on prose
 preambles, ```json variants, and trailing notes — all of which models emit.
 """
 import json
+
 import pytest
+
 from utils.json_parse import parse_json
 
 

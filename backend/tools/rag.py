@@ -1,18 +1,19 @@
-from crewai.tools import BaseTool
-import uuid
 import re
-import httpx
+import uuid
 from dataclasses import dataclass
-from typing import Optional
+
+import httpx
+import vecs
+from crewai.tools import BaseTool
+from sqlalchemy import text as sql_text
 from tenacity import retry, stop_after_attempt, wait_exponential
+from vecs import IndexMeasure, IndexMethod
+
 from config import settings
 from logger import logger
 from services.query_rewriter import generate_sub_queries
 from utils.embedding_cache import embedding_cache
 from utils.source_ledger import canonical_url
-import vecs
-from vecs import IndexMeasure, IndexMethod
-from sqlalchemy import text as sql_text
 
 # pgvector persistent vector store, via `vecs` (pgvector + psycopg2, no Supabase
 # SDK — any Postgres with the vector extension works, including the one Compose
@@ -162,17 +163,17 @@ def _embed(texts: list[str]) -> list[list[float]]:
 
     # Unique texts still needing a vector, in first-seen order.
     pending: dict[str, None] = {}
-    for text, vector in zip(texts, vectors):
+    for text, vector in zip(texts, vectors, strict=True):
         if vector is None:
             pending[text] = None
 
     if pending:
         pending_texts = list(pending)
         computed = _embed_uncached(pending_texts)
-        by_text = dict(zip(pending_texts, computed))
+        by_text = dict(zip(pending_texts, computed, strict=True))
         vectors = [
             vector if vector is not None else by_text[text]
-            for text, vector in zip(texts, vectors)
+            for text, vector in zip(texts, vectors, strict=True)
         ]
         embedding_cache.set_many(model_id, list(by_text.items()))
 
@@ -236,7 +237,7 @@ def _ensure_neighbour_index(vx, name: str) -> None:
         )
 
 
-def _keyword_search(vx, name: str, query: str, limit: int, vertical: Optional[str]):
+def _keyword_search(vx, name: str, query: str, limit: int, vertical: str | None):
     """Lexical half of the hybrid: ts_rank_cd over the same chunks.
 
     Catches exact identifiers — product names, tickers, error codes — that
@@ -303,9 +304,9 @@ _RESULTS_RETURNED = 5
 def retrieve(
     query: str,
     collection_name: str,
-    vertical: Optional[str] = None,
+    vertical: str | None = None,
     *,
-    sub_queries: Optional[list[str]] = None,
+    sub_queries: list[str] | None = None,
 ) -> list[Candidate]:
     """The retrieval pipeline proper: expand → hybrid fan-out → dedupe → re-rank.
 
@@ -371,7 +372,7 @@ def retrieve(
     ranked = sorted(
         (
             Candidate(chunk_id=chunk_id, metadata=metadata, score=float(score))
-            for (chunk_id, metadata), score in zip(merged, scores)
+            for (chunk_id, metadata), score in zip(merged, scores, strict=True)
         ),
         key=lambda c: c.score,
         reverse=True,
@@ -409,7 +410,7 @@ _MIN_STITCH_OVERLAP = 20
 _MAX_STITCH_OVERLAP = 400
 
 
-def _ordinal_of(metadata: dict) -> Optional[int]:
+def _ordinal_of(metadata: dict) -> int | None:
     """Position of a chunk within its document, or None if it predates ordinals.
 
     Nothing backfills older chunks, so they are returned unexpanded rather than
@@ -468,9 +469,9 @@ class _Piece:
     """A chunk on its way into a block: its position, and why it is here."""
     source: str
     page: object
-    ordinal: Optional[int]
+    ordinal: int | None
     metadata: dict
-    rank: Optional[int]  # rank of the result it came from; None for a neighbour
+    rank: int | None  # rank of the result it came from; None for a neighbour
 
 
 def _blocks_from(pieces: list[_Piece]) -> list[ContextBlock]:
@@ -528,7 +529,7 @@ def expand_context(
     candidates: list[Candidate],
     collection_name: str,
     *,
-    radius: Optional[int] = None,
+    radius: int | None = None,
 ) -> list[ContextBlock]:
     """Widen the winning chunks into the passages they were cut out of.
 
@@ -614,7 +615,7 @@ class RAGTool(BaseTool):
         "Input: a query string. Returns matching excerpts from the user's uploaded files with metadata."
     )
     collection_name: str = "default_workspace"
-    vertical: Optional[str] = None
+    vertical: str | None = None
 
     def _run(self, query: str) -> str:
         logger.info("rag_search_start", query=query, collection=self.collection_name, vertical=self.vertical)
@@ -697,7 +698,7 @@ def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", 
     next_ordinal: dict = {}
 
     records = []
-    for chunk, emb in zip(chunks, embeddings):
+    for chunk, emb in zip(chunks, embeddings, strict=True):
         record_id = str(uuid.uuid4())
         metadata = chunk["metadata"]
         metadata["text"] = chunk["text"]  # Store text in metadata for retrieval

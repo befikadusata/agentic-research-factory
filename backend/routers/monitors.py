@@ -1,16 +1,20 @@
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db
-from models import Monitor, Run, WorkspaceMember, Document
-from schemas import CreateMonitorRequest, UpdateMonitorRequest, MonitorResponse, RunResponse
-from services.run_dispatch import enqueue_run
 from auth import get_current_user
+from database import get_db
+from models import Document, Monitor, Run, WorkspaceMember
+from schemas import (
+    CreateMonitorRequest,
+    MonitorResponse,
+    RunResponse,
+    UpdateMonitorRequest,
+)
+from services.run_dispatch import enqueue_run
 
 router = APIRouter()
 
@@ -31,7 +35,7 @@ async def _accessible_monitor(db: AsyncSession, monitor_id: UUID, user_id: str) 
     return monitor
 
 
-async def _validate_docs(db: AsyncSession, doc_ids: list[str], workspace_id: Optional[UUID]):
+async def _validate_docs(db: AsyncSession, doc_ids: list[str], workspace_id: UUID | None):
     """Same guard create_run applies: every doc must exist and belong to the
     monitor's workspace."""
     if not doc_ids:
@@ -39,7 +43,7 @@ async def _validate_docs(db: AsyncSession, doc_ids: list[str], workspace_id: Opt
     try:
         doc_uuids = [UUID(d) for d in doc_ids]
     except ValueError:
-        raise HTTPException(400, "Invalid doc_id")
+        raise HTTPException(400, "Invalid doc_id") from None
     result = await db.execute(select(Document).where(Document.id.in_(doc_uuids)))
     docs = result.scalars().all()
     if len(docs) != len(doc_uuids) or any(d.workspace_id != workspace_id for d in docs):
@@ -72,7 +76,7 @@ async def create_monitor(
         interval_minutes=body.interval_minutes,
         enabled=body.enabled,
         notify_channel=body.notify_channel,
-        next_run_at=datetime.now(timezone.utc),
+        next_run_at=datetime.now(UTC),
     )
     db.add(monitor)
     await db.commit()
@@ -82,8 +86,8 @@ async def create_monitor(
 
 @router.get("", response_model=list[MonitorResponse])
 async def list_monitors(
-    workspace_id: Optional[UUID] = Query(default=None),
-    enabled: Optional[bool] = Query(default=None),
+    workspace_id: UUID | None = Query(default=None),
+    enabled: bool | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
@@ -150,7 +154,7 @@ async def update_monitor(
         # Re-enabling: fire on the next tick rather than honouring a stale
         # next_run_at that may be far in the past or future.
         if body.enabled and not monitor.enabled:
-            monitor.next_run_at = datetime.now(timezone.utc)
+            monitor.next_run_at = datetime.now(UTC)
         monitor.enabled = body.enabled
 
     await db.commit()
@@ -179,7 +183,7 @@ async def run_monitor_now(
         monitor_id=monitor.id,
     )
     monitor.last_run_id = run.id
-    monitor.last_run_at = datetime.now(timezone.utc)
+    monitor.last_run_at = datetime.now(UTC)
     await db.commit()
     return run
 

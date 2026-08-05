@@ -706,4 +706,4 @@ CHUNKS_BY_ID: dict[str, Chunk] = {chunk.id: chunk for chunk in CORPUS}
 def gains_for(golden: Golden) -> dict[str, int]:
     """Graded relevance for NDCG: 2 for a chunk that answers the query, 1 for a
     chunk that supports it without answering."""
-    return {**{cid: 1 for cid in golden.partial}, **{cid: 2 for cid in golden.relevant}}
+    return {**dict.fromkeys(golden.partial, 1), **dict.fromkeys(golden.relevant, 2)}

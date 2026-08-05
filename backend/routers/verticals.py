@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+
 from configs.verticals import VERTICALS
 
 router = APIRouter(prefix="/verticals", tags=["verticals"])

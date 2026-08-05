@@ -1,5 +1,4 @@
 """Tests for retrieval hardening: sub-query expansion + citation extraction."""
-import pytest
 from unittest.mock import MagicMock, patch
 
 

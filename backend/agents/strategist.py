@@ -1,6 +1,8 @@
 from crewai import Agent, Task
+
 from configs.prompt_loader import get_prompt
 from services.llm_router import get_llm
+
 
 def strategist_agent() -> Agent:
     prompt = get_prompt("strategist")

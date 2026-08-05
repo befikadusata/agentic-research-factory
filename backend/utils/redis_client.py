@@ -1,5 +1,8 @@
 import asyncio
+import contextlib
+
 import redis.asyncio as redis
+
 from config import settings
 
 LOG_CHANNEL_PREFIX   = "run_log:"
@@ -34,13 +37,11 @@ async def get_redis_client() -> redis.Redis:
     # Recreate if not yet initialised or if the event loop has changed (e.g. between tests)
     if _redis_client is None or current_loop is not _redis_loop:
         if _redis_client is not None:
-            try:
+            # On RuntimeError the old pool's connections belong to the previous
+            # (now-dead) event loop, so a graceful close can't run on it —
+            # nothing left to clean up on our side either.
+            with contextlib.suppress(RuntimeError):
                 await _redis_client.aclose()
-            except RuntimeError:
-                # The old pool's connections belong to the previous (now-dead)
-                # event loop, so a graceful close can't run on it — nothing left
-                # to clean up on our side either.
-                pass
         _redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
         _redis_loop = current_loop
     return _redis_client

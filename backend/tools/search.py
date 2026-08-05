@@ -1,13 +1,15 @@
-from crewai.tools import BaseTool
 import httpx
-from tavily import TavilyClient
-from config import settings
+from crewai.tools import BaseTool
 from pydantic import Field
+from tavily import TavilyClient
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+from config import settings
 from logger import logger
+from tools.untrusted import wrap_untrusted
 from utils.cache import tool_cache
 from utils.source_ledger import record_retrieved_url
-from tools.untrusted import wrap_untrusted
+
 
 class SearxngSearchTool(BaseTool):
     name: str = "web_search"

@@ -68,9 +68,11 @@ LLM-mediated and needs a different instrument.
 """
 
 import argparse
+import contextlib
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING
 
 from evals.retrieval_corpus import (
     ADVERSARIAL,
@@ -202,10 +204,9 @@ def ingest_corpus(collection_name: str = EVAL_COLLECTION) -> None:
     from tools.rag import _get_client, ingest_documents
 
     vx = _get_client()
-    try:
+    # First run, or a vecs version without delete_collection — get_or_create handles it.
+    with contextlib.suppress(Exception):
         vx.delete_collection(collection_name)
-    except Exception:
-        pass  # first run, or a vecs version without it — get_or_create handles it
 
     # Sorted into reading order before ingest. `ingest_documents` numbers chunks
     # by their position in the list it is handed, which is how neighbour
@@ -252,7 +253,7 @@ def _rank(
     query: str,
     collection_name: str,
     expand: bool,
-    retriever: Optional[Retriever] = None,
+    retriever: Retriever | None = None,
 ) -> _Ranking:
     from tools.rag import _RESULTS_RETURNED, expand_context, retrieve
 
@@ -286,7 +287,7 @@ def _rank(
 def run_golden(
     collection_name: str = EVAL_COLLECTION,
     expand: bool = False,
-    retriever: Optional[Retriever] = None,
+    retriever: Retriever | None = None,
 ) -> list[QueryResult]:
     results = []
     for golden in GOLDEN:
@@ -307,7 +308,7 @@ def run_golden(
 def run_adversarial(
     collection_name: str = EVAL_COLLECTION,
     expand: bool = False,
-    retriever: Optional[Retriever] = None,
+    retriever: Retriever | None = None,
 ) -> list[AdversarialResult]:
     results = []
     for query in ADVERSARIAL:
@@ -466,7 +467,9 @@ def _print_comparison(rows: list[dict], adversarial_total: int) -> None:
         print(f"    {row['variant'].name:<16} — {row['variant'].description}")
 
     print("\n    what each stage buys (read the differences, not the rows):")
-    for earlier, later in zip(rows, rows[1:]):
+    # strict=False is the point here: this walks consecutive pairs, so the two
+    # operands are deliberately of different length.
+    for earlier, later in zip(rows, rows[1:], strict=False):
         a, b = earlier["summary"], later["summary"]
         print(
             f"      {earlier['variant'].name} -> {later['variant'].name}: "

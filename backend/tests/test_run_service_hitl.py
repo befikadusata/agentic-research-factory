@@ -15,16 +15,18 @@ These verify:
     and reach finalize_monitored_run.
 """
 import uuid
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
+
+import pytest
 from sqlalchemy import select as sa_select
-import database
-from database import AsyncSessionLocal
-from models import Run, RunStatus, RunCost, Monitor
-from services.run_service import execute_run
+
 import agents.crew as crew_module
+import database
 import services.run_service as run_service_module
+from database import AsyncSessionLocal
+from models import Monitor, Run, RunCost, RunStatus
+from services.run_service import execute_run
 
 
 @pytest.fixture(autouse=True)
@@ -93,10 +95,10 @@ def _install_fake_graph(monkeypatch, review_sequence):
 
 
 async def _make_run(db, **overrides) -> Run:
-    fields = dict(
-        id=uuid.uuid4(), user_id="test_user", topic="test topic", format="report",
-        vertical=None, doc_paths=[], status=RunStatus.pending,
-    )
+    fields = {
+        "id": uuid.uuid4(), "user_id": "test_user", "topic": "test topic", "format": "report",
+        "vertical": None, "doc_paths": [], "status": RunStatus.pending,
+    }
     fields.update(overrides)
     run = Run(**fields)
     db.add(run)
@@ -216,7 +218,7 @@ async def test_autonomous_monitor_run_completes_without_approval(monkeypatch, re
         monitor = Monitor(
             id=uuid.uuid4(), user_id="test_user", name="watch", topic="test topic",
             format="report", interval_minutes=60,
-            next_run_at=datetime.now(timezone.utc),
+            next_run_at=datetime.now(UTC),
         )
         db.add(monitor)
         await db.commit()

@@ -7,13 +7,13 @@ filtering can't catch those; only comparing against the retrieved sources can.
 """
 import pytest
 
+from tools.rag import extract_citations
 from utils.source_ledger import (
     canonical_url,
     record_retrieved_url,
     reset_seen_sources,
     take_seen_sources,
 )
-from tools.rag import extract_citations
 
 
 @pytest.fixture(autouse=True)

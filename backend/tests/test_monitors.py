@@ -1,12 +1,12 @@
 import datetime as dt
-import pytest
-from uuid import UUID
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
-from sqlalchemy import select
+import pytest
+
 import database
-from models import Monitor, Run, RunStatus, Workspace, WorkspaceMember
-from services.monitor_service import finalize_monitored_run, _send_webhook
+from models import Monitor, Run, RunStatus
+from services.monitor_service import _send_webhook, finalize_monitored_run
 
 
 @pytest.fixture
@@ -83,7 +83,7 @@ async def test_get_monitor_404_for_non_owner(client, auth_as, db_session):
     import datetime as dt
     other = Monitor(user_id="someone-else", name="Theirs", topic="AMD watch",
                     format="report", interval_minutes=60,
-                    next_run_at=dt.datetime.now(dt.timezone.utc))
+                    next_run_at=dt.datetime.now(dt.UTC))
     db_session.add(other)
     await db_session.commit()
     await db_session.refresh(other)
@@ -151,7 +151,7 @@ async def test_delete_monitor_detaches_runs(client, mock_user, db_session):
 # fixture's separate engine trips asyncpg's cross-loop/greenlet guards.
 
 async def _make_monitor(**over):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     async with database.AsyncSessionLocal() as db:
         m = Monitor(user_id="test-user-123", name="Watch", topic="Nvidia",
                     format="report", interval_minutes=60, next_run_at=now, **over)
@@ -180,7 +180,7 @@ async def _run_metrics(run_id):
 
 @pytest.mark.asyncio
 async def test_finalize_noop_for_unmonitored_run(fresh_pool):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     run = await _make_run(None, "some output", now)
     with patch("services.monitor_service._diff_runs", new_callable=AsyncMock) as diff:
         await finalize_monitored_run(run.id)
@@ -190,7 +190,7 @@ async def test_finalize_noop_for_unmonitored_run(fresh_pool):
 
 @pytest.mark.asyncio
 async def test_finalize_baseline_no_previous_run(fresh_pool):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     m = await _make_monitor(notify_channel="alerts@example.com")
     run = await _make_run(m.id, "first output", now)
 
@@ -206,7 +206,7 @@ async def test_finalize_baseline_no_previous_run(fresh_pool):
 
 @pytest.mark.asyncio
 async def test_finalize_changed_stores_diff_and_alerts(fresh_pool):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     m = await _make_monitor(notify_channel="alerts@example.com")
     await _make_run(m.id, "old findings", now - dt.timedelta(hours=2))
     current = await _make_run(m.id, "new findings", now)
@@ -223,7 +223,7 @@ async def test_finalize_changed_stores_diff_and_alerts(fresh_pool):
 
 @pytest.mark.asyncio
 async def test_finalize_changed_but_no_channel_skips_alert(fresh_pool):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     m = await _make_monitor(notify_channel=None)
     await _make_run(m.id, "old", now - dt.timedelta(hours=2))
     current = await _make_run(m.id, "new", now)
@@ -237,7 +237,7 @@ async def test_finalize_changed_but_no_channel_skips_alert(fresh_pool):
 
 @pytest.mark.asyncio
 async def test_finalize_url_channel_routes_to_webhook(fresh_pool):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     m = await _make_monitor(notify_channel="https://hooks.example.com/abc")
     await _make_run(m.id, "old", now - dt.timedelta(hours=2))
     current = await _make_run(m.id, "new", now)

@@ -9,28 +9,41 @@ task_type routing:
 """
 import operator
 import re
-from datetime import datetime, timezone
-from typing import TypedDict, Literal, Optional, List, Annotated
+from contextlib import nullcontext
+from datetime import UTC, datetime
+from typing import Annotated, Literal, TypedDict
+
+from crewai import Crew, Process
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
+
+from config import settings
 from configs.verticals import get_vertical
 from logger import logger
+from services.llm_router import reset_actual_model, resolve_actual_model
+from utils.agent_output import strip_agent_scaffolding
+from utils.context import compact_text
+from utils.cost_tracker import reset_side_costs, take_side_costs
+from utils.langfuse_utils import get_langfuse
+from utils.pricing import calculate_cost
+
 
 class ResearchState(TypedDict):
     topic: str
-    vertical: Optional[str]
+    vertical: str | None
     vertical_inputs: dict
     task_type: Literal["research_report", "lead_intel"]
     context_docs: str
     workspace_id: str
-    collection_name: Optional[str]
+    collection_name: str | None
     output_format: str
     plan_output: str
     research_output: str
     analysis_output: str
     final_output: str
     review_output: str
-    user_feedback: Optional[str]
+    user_feedback: str | None
     retry_count: int
     # Run spend (USD) already persisted to run_costs *before* this graph
     # invocation started — seeded by run_service from the DB so the budget check
@@ -43,18 +56,7 @@ class ResearchState(TypedDict):
     # recycling, so state is rebuilt from the DB and re-entered mid-graph). When
     # present, route_entry sends START straight to this node instead of plan/
     # research. Empty/absent for a normal first invoke.
-    _resume_from: Optional[str]
-
-
-from contextlib import nullcontext
-from crewai import Crew, Process
-from config import settings
-from services.llm_router import resolve_actual_model, reset_actual_model
-from utils.agent_output import strip_agent_scaffolding
-from utils.context import compact_text
-from utils.cost_tracker import reset_side_costs, take_side_costs
-from utils.langfuse_utils import get_langfuse
-from utils.pricing import calculate_cost
+    _resume_from: str | None
 
 
 def _researcher_budget(retry_count: int) -> tuple[int, int]:
@@ -152,17 +154,16 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
 
 
 def node_plan(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.strategist import strategist_agent, planning_task
+    from agents.strategist import planning_task, strategist_agent
     agent = strategist_agent()
     task = planning_task(agent, state["topic"])
     return _run_crew_node([agent], [task], state, config, "plan_output", "strategist")
 
 
 def node_research(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.researcher import researcher_agent, research_task
-    from tools.search import tavily_search_tool
-    from tools.scraper import firecrawl_tool, batch_scrape_tool
+    from agents.researcher import research_task, researcher_agent
     from tools.rag import RAGTool
+    from tools.search import tavily_search_tool
 
     collection = state.get("collection_name") or "default_workspace"
     custom_rag = RAGTool(collection_name=collection, vertical=state.get("vertical"))
@@ -244,14 +245,14 @@ def lead_intel_contract_failures(
     if not source_years:
         failures.append("No publication/update date supports current personnel claims")
     else:
-        current_year = current_year or datetime.now(timezone.utc).year
+        current_year = current_year or datetime.now(UTC).year
         if max(source_years) < current_year - 1:
             failures.append("Target-buyer title is supported only by stale sources")
     return failures
 
 
 def node_lead_review(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.reviewer import reviewer_agent, review_task
+    from agents.reviewer import review_task, reviewer_agent
 
     vertical_config = get_vertical(state.get("vertical"))
     rubric = vertical_config["quality_rubric"] if vertical_config else "Verify buyer identity, freshness, sources, and purchase readiness."
@@ -275,7 +276,7 @@ def node_lead_review(state: ResearchState, config: RunnableConfig) -> dict:
 
 
 def node_analyse(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.analyst import analyst_agent, analysis_task
+    from agents.analyst import analysis_task, analyst_agent
     agent = analyst_agent()
     
     topic = state["topic"]
@@ -295,7 +296,7 @@ def node_analyse(state: ResearchState, config: RunnableConfig) -> dict:
 
 
 def node_review(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.reviewer import reviewer_agent, review_task
+    from agents.reviewer import review_task, reviewer_agent
     
     vertical_config = get_vertical(state.get("vertical"))
     rubric = vertical_config["quality_rubric"] if vertical_config else "Ensure accuracy, depth, and citation completeness."
@@ -310,7 +311,7 @@ def node_review(state: ResearchState, config: RunnableConfig) -> dict:
 
 
 def node_write(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.writer import writer_agent, write_task
+    from agents.writer import write_task, writer_agent
     agent = writer_agent()
     task = write_task(agent, state["topic"], state["output_format"])
     # Prior work is reference the writer draws from (not the deliverable itself),
@@ -325,7 +326,7 @@ def node_write(state: ResearchState, config: RunnableConfig) -> dict:
 
 
 def node_edit(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.editor import editor_agent, edit_task
+    from agents.editor import edit_task, editor_agent
     agent = editor_agent()
     task = edit_task(agent, state["topic"])
     task.description = f"Draft:\n{state['final_output']}\n\n" + task.description
@@ -363,7 +364,7 @@ _VERDICT_RE = re.compile(r"VERDICT\s*[:\-]\s*\[?\s*(PASS|FAIL)", re.IGNORECASE)
 _AUDIT_HEADER_RE = re.compile(r"Quality\s+Audit\s*[:\-]\s*\[?\s*(PASS|FAIL)", re.IGNORECASE)
 
 
-def review_verdict(review_output: str) -> Optional[str]:
+def review_verdict(review_output: str) -> str | None:
     """Extract the reviewer's binary verdict from its labeled field.
 
     Returns "PASS"/"FAIL", or None if no verdict field is present/parseable
@@ -427,8 +428,6 @@ def route_after_lead_review(state: ResearchState) -> str:
         return "lead_intel"
     return "end"
 
-
-from langgraph.checkpoint.memory import InMemorySaver
 
 # One process-lifetime checkpointer shared by every run; runs are isolated from
 # each other by thread_id (the run id), and run_service purges a run's entries

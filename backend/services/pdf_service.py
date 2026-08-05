@@ -1,8 +1,10 @@
 import asyncio
 import html as html_lib
 import os
+
 import markdown
 import weasyprint
+
 from config import settings
 from logger import logger
 from utils.blocking import call_with_timeout
@@ -73,10 +75,10 @@ def _build_converter():
     Models are baked into the image and located via DOCLING_ARTIFACTS_PATH, so
     this constructor does no network I/O.
     """
-    from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions, LayoutOptions
     from docling.datamodel.layout_model_specs import DOCLING_LAYOUT_V2
+    from docling.datamodel.pipeline_options import LayoutOptions, PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
 
     opts = PdfPipelineOptions()
     opts.do_ocr = False
@@ -133,8 +135,9 @@ def _parse_with_docling(path: str) -> list[dict]:
 
 
 async def _parse_with_llamaparse(paths: list[str]) -> list[dict]:
-    from llama_parse import LlamaParse
     from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from llama_parse import LlamaParse
+
     from config import settings
 
     parser = LlamaParse(api_key=settings.LLAMA_CLOUD_API_KEY, result_type="markdown")

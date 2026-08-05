@@ -1,4 +1,5 @@
 from celery import Celery
+
 from config import settings
 
 celery_app = Celery(
@@ -61,6 +62,7 @@ def execute_run_task(run_id: str, approved_gate: str | None = None):
     # that gate and to no-op stale/duplicate resumes.
     import asyncio
     from uuid import UUID
+
     from services.run_service import execute_run
     asyncio.run(execute_run(UUID(run_id), approved_gate))
 
@@ -69,6 +71,7 @@ def execute_run_task(run_id: str, approved_gate: str | None = None):
 def ingest_doc_task(doc_id: str):
     import asyncio
     from uuid import UUID
+
     from services.ingest_service import ingest_doc
     asyncio.run(ingest_doc(UUID(doc_id)))
 
@@ -76,6 +79,7 @@ def ingest_doc_task(doc_id: str):
 @celery_app.task(name="dispatch_due_monitors_task")
 def dispatch_due_monitors_task():
     import asyncio
+
     from services.monitor_service import dispatch_due_monitors
     asyncio.run(dispatch_due_monitors())
 
@@ -83,5 +87,6 @@ def dispatch_due_monitors_task():
 @celery_app.task(name="reap_orphaned_runs_task")
 def reap_orphaned_runs_task():
     import asyncio
+
     from services.run_service import reap_orphaned_runs
     asyncio.run(reap_orphaned_runs())

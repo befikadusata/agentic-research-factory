@@ -1,10 +1,11 @@
 from uuid import UUID
+
 from database import AsyncSessionLocal
+from logger import logger
 from models import Document, DocumentStatus
 from services.pdf_service import parse_pdf
 from services.storage_service import ObjectNotFound, materialize
 from tools.rag import ingest_documents
-from logger import logger
 
 
 async def ingest_doc(doc_id: UUID) -> None:

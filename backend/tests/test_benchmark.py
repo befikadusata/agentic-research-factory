@@ -25,7 +25,6 @@ from sqlalchemy import select as sa_select
 import agents.crew as crew_module
 from database import AsyncSessionLocal
 from models import Run, RunCost, RunStatus, Workspace
-from services.run_service import execute_run
 
 # One topic per vertical config — unscoped, plus b2b_sales / marketing / founder
 # — all on the lead_intel format. Four is what a test can afford to actually run.

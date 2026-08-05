@@ -1,8 +1,24 @@
-from sqlalchemy import Column, String, DateTime, Text, Enum as SAEnum, JSON, ForeignKey, Integer, Float, Boolean, func, text
-from sqlalchemy.orm import relationship
+import enum
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+    text,
+)
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
-import uuid, enum
-from datetime import datetime, timezone
+from sqlalchemy.orm import relationship
+
 from database import Base
 
 
@@ -40,7 +56,7 @@ class User(Base):
     name             = Column(String(255), nullable=True)
     # NULL until the user clicks the verification link; login is gated on this.
     email_verified_at = Column(DateTime(timezone=True), nullable=True)
-    created_at       = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+    created_at       = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC),
                               server_default=func.now())
 
 
@@ -51,7 +67,7 @@ class Workspace(Base):
     name       = Column(String(255), nullable=False)
     owner_id   = Column(String(255), nullable=False, index=True)
     settings   = Column(JSON, default=dict)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class WorkspaceMember(Base):
@@ -71,7 +87,7 @@ class RunCost(Base):
     input_tokens = Column(Integer, nullable=False)
     output_tokens = Column(Integer, nullable=False)
     total_cost = Column(Float, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 class Document(Base):
     __tablename__ = "documents"
@@ -86,7 +102,7 @@ class Document(Base):
     chunk_count     = Column(Integer, nullable=True)
     error_message   = Column(Text, nullable=True)
     file_size_bytes = Column(Integer, nullable=False)
-    created_at      = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at      = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class Run(Base):
@@ -113,11 +129,11 @@ class Run(Base):
     error_message   = Column(Text, nullable=True)
     metrics         = Column(JSON, default=dict, server_default=text("'{}'::json"))  # { latency_ms, eval_scores, citation_count }
     costs           = relationship("RunCost", backref="run")
-    created_at      = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+    created_at      = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC),
                              server_default=func.now())
     updated_at      = Column(DateTime(timezone=True),
-                             default=lambda: datetime.now(timezone.utc),
-                             onupdate=lambda: datetime.now(timezone.utc),
+                             default=lambda: datetime.now(UTC),
+                             onupdate=lambda: datetime.now(UTC),
                              server_default=func.now())
 
 
@@ -151,7 +167,7 @@ class Monitor(Base):
     # When the dispatcher should next spawn a run. Advanced by interval_minutes
     # each dispatch; the dispatcher selects monitors where next_run_at <= now().
     next_run_at      = Column(DateTime(timezone=True), nullable=False,
-                              default=lambda: datetime.now(timezone.utc), index=True)
+                              default=lambda: datetime.now(UTC), index=True)
     # use_alter: monitors↔runs is a mutual FK (Run.monitor_id points back here),
     # so this side must be emitted as a separate ALTER — otherwise create_all/
     # drop_all (used by the test suite) can't topologically order the two tables
@@ -164,9 +180,9 @@ class Monitor(Base):
     # Where change alerts go (email address or webhook URL); NULL = no alerts.
     notify_channel   = Column(String(512), nullable=True)
     created_at       = Column(DateTime(timezone=True),
-                              default=lambda: datetime.now(timezone.utc),
+                              default=lambda: datetime.now(UTC),
                               server_default=func.now())
     updated_at       = Column(DateTime(timezone=True),
-                              default=lambda: datetime.now(timezone.utc),
-                              onupdate=lambda: datetime.now(timezone.utc),
+                              default=lambda: datetime.now(UTC),
+                              onupdate=lambda: datetime.now(UTC),
                               server_default=func.now())

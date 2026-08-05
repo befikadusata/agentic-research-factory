@@ -15,8 +15,10 @@ call keeps burning CPU until it finishes; callers must therefore treat a timeout
 as terminal for that piece of work rather than immediately retrying it.
 """
 import asyncio
+import contextlib
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 def run_in_daemon_thread(
@@ -28,7 +30,7 @@ def run_in_daemon_thread(
     nothing joins the thread and its eventual result is simply discarded.
     """
     loop = asyncio.get_running_loop()
-    future: "asyncio.Future[Any]" = loop.create_future()
+    future: asyncio.Future[Any] = loop.create_future()
 
     def _settle(setter: Callable[[Any], None], value: Any) -> None:
         # The awaiter may have given up (cancelled) while `fn` was still running.
@@ -36,11 +38,10 @@ def run_in_daemon_thread(
             setter(value)
 
     def _publish(setter: Callable[[Any], None], value: Any) -> None:
-        try:
+        # RuntimeError means the loop is already closed — nobody is waiting on
+        # this any more.
+        with contextlib.suppress(RuntimeError):
             loop.call_soon_threadsafe(_settle, setter, value)
-        except RuntimeError:
-            # Loop already closed — nobody is waiting on this any more.
-            pass
 
     def _target() -> None:
         try:

@@ -1,5 +1,7 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 import pytest
+
 from agents.lead_intel import build_lead_intel_description
 from configs.verticals import build_execution_brief
 
@@ -10,7 +12,7 @@ def test_execution_brief_includes_runtime_date():
         "b2b_sales_lead_intel",
         {"company_url": "https://acme.example", "target_role": "CISO"},
     )
-    assert datetime.now(timezone.utc).date().isoformat() in brief
+    assert datetime.now(UTC).date().isoformat() in brief
 
 
 def test_ciso_prompt_uses_runtime_year_role_and_product():

@@ -12,9 +12,11 @@ host, so no network access is required) rather than mocking get_langfuse(),
 so a future rename/removal on the langfuse side fails the test instead of
 silently rotting again.
 """
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from langfuse import Langfuse
+
 import agents.crew as crew_module
 
 

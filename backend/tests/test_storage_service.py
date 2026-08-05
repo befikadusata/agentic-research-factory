@@ -8,10 +8,10 @@ that matters is store-here / read-there, not either half alone.
 """
 
 import os
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
+import pytest
 from botocore.exceptions import ClientError
 
 from config import settings

@@ -1,6 +1,5 @@
 import pytest
 
-
 REG = "/auth/register"
 LOGIN = "/auth/login"
 VERIFY = "/auth/verify-email"
@@ -48,6 +47,7 @@ async def test_short_password_rejected(client):
 @pytest.mark.asyncio
 async def test_password_hash_is_not_plaintext(client, db_session):
     from sqlalchemy import select
+
     from models import User
 
     await _register(client, "frank@example.com")
