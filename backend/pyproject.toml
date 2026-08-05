@@ -41,8 +41,6 @@ dependencies = [
   "torch==2.12.0",
   "torchvision==0.27.0",
   "langgraph>=0.2.35",
-  "pytest==8.3.3",
-  "pytest-asyncio==0.24.0",
   "structlog==24.4.0",
   "tenacity==9.0.0",
   "langchain-core>=0.3.29",
@@ -74,6 +72,16 @@ explicit = true
 # models. The two must come from the same index.
 torch = { index = "pytorch-cpu" }
 torchvision = { index = "pytorch-cpu" }
+
+# Test-only, so declared here rather than as runtime deps: the Dockerfile builds
+# with `uv sync --no-dev` and CI with a plain `uv sync`, which includes this
+# group. Only pytest-asyncio actually leaves the image — crewai-tools 0.14.0
+# declares pytest as a runtime dependency, so it ships either way.
+[dependency-groups]
+dev = [
+  "pytest==8.3.3",
+  "pytest-asyncio==0.24.0",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
