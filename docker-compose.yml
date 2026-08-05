@@ -78,6 +78,12 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - SEARXNG_URL=http://searxng:8080
       - FIRECRAWL_API_URL=http://firecrawl-api:3002
+      # CORS allows exactly this one origin, so it must name the port the
+      # frontend is actually published on — set here rather than left to
+      # backend/.env because compose, not that file, decides the mapping. Get it
+      # wrong and the stack boots healthy, the page renders, and every
+      # browser-side call is blocked with the reason visible only in the console.
+      - FRONTEND_URL=http://localhost:${FRONTEND_HOST_PORT:-3000}
       # Uploaded PDFs go to MinIO, not a container-local path — the celery
       # service below gets the identical four values, which is the whole point:
       # both containers must resolve an upload to the same bytes.
@@ -188,7 +194,7 @@ services:
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
-      - SEARXNG_BASE_URL=http://localhost:8081/
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_HOST_PORT:-8081}/
       # SearXNG reads server.secret_key from this env var and it takes
       # precedence over the yml (searx/settings_defaults.py), so no real secret
       # need be committed and nothing has to be rewritten on disk at boot. This
@@ -300,7 +306,7 @@ services:
     command: npm run dev
     environment:
       # Copy values from frontend/.env.local.example
-      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_URL=http://localhost:${FRONTEND_HOST_PORT:-3000}
       - NEXTAUTH_SECRET=test-secret-at-least-32-chars-long-for-e2e
       - GOOGLE_CLIENT_ID=replace-with-google-client-id
       - GOOGLE_CLIENT_SECRET=replace-with-google-client-secret
@@ -321,8 +327,15 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    # Overridable for the same reason searxng's is, with one extra consequence:
+    # 3000 is the single most contested port on a dev machine, and a failed bind
+    # leaves this container off the compose network — where `next dev` looks
+    # healthy in `docker ps` but nothing can reach it. Export FRONTEND_HOST_PORT
+    # to move it; NEXTAUTH_URL above and the backend's FRONTEND_URL both track
+    # the same variable, because all three must name the same origin or sign-in
+    # breaks (NextAuth callback mismatch) or every API call is CORS-blocked.
     ports:
-      - "3000:3000"
+      - "${FRONTEND_HOST_PORT:-3000}:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules

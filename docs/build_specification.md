@@ -180,6 +180,8 @@ VECTOR_DB_URL=
 # throwaway value so a fresh clone works unedited; ENVIRONMENT=production
 # refuses to start on it.
 BACKEND_JWT_SECRET=dummy-secret
+# The single origin CORS allows. Under compose this is set from
+# FRONTEND_HOST_PORT and overrides the value here.
 FRONTEND_URL=http://localhost:3000
 BACKEND_URL=http://localhost:8000
 

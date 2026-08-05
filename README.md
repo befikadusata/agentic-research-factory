@@ -155,6 +155,12 @@ Prerequisites: Docker with Compose and at least one supported LLM provider key. 
    | Health check | http://localhost:8000/health |
    | MinIO console | http://localhost:9001 (`minioadmin` / `minioadmin`) |
 
+   If port 3000 or 8081 is already taken on your machine, export
+   `FRONTEND_HOST_PORT` or `SEARXNG_HOST_PORT` before `docker compose up` —
+   Compose otherwise fails to bind and leaves that container off the network,
+   where it looks healthy in `docker ps` but nothing can reach it. The backend's
+   allowed CORS origin and `NEXTAUTH_URL` both follow `FRONTEND_HOST_PORT`.
+
 ### Enable the full feature set
 
 Add only the providers required for the features you want:
