@@ -161,7 +161,9 @@ TAVILY_API_KEY=tvly-...
 FIRECRAWL_API_KEY=fc-...
 
 # Self-hosted alternatives — set either of these and the matching cloud key
-# above becomes optional. docker-compose.yml sets both.
+# above becomes optional. docker-compose.yml sets both (to the in-network
+# hostnames; these host-port forms are for running the backend outside compose).
+# 8081 is searxng's default published port — match SEARXNG_HOST_PORT if you moved it.
 SEARXNG_URL=http://localhost:8081
 FIRECRAWL_API_URL=http://localhost:3002
 

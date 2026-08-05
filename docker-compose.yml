@@ -167,8 +167,15 @@ services:
   # --- Self-hosted web search (Tavily alternative) ---
   searxng:
     image: searxng/searxng:latest
+    # Published only so a human can open the search UI — the backend and worker
+    # reach it over the compose network as http://searxng:8080 either way. Host
+    # port is overridable because 8081 is a popular default: when it is already
+    # taken, `docker compose up` fails to bind and leaves searxng off the
+    # network entirely, at which point every web_search call in every run
+    # returns the "temporarily unavailable" degradation and runs quietly
+    # research with no sources. Export SEARXNG_HOST_PORT to move it.
     ports:
-      - "8081:8080"
+      - "${SEARXNG_HOST_PORT:-8081}:8080"
     # Mount the single file read-only, NOT `./searxng:/etc/searxng:rw`. The
     # image entrypoint runs `chown -R searxng:searxng` on whatever directory is
     # mounted at /etc/searxng (its FORCE_OWNERSHIP defaults to true), and with a
