@@ -1,40 +1,73 @@
-# Python
+# A leading slash anchors a pattern to this directory; a pattern with no slash
+# matches at any depth. Several rules below were anchored by accident and so
+# never matched the paths they named — where a rule is deliberately anchored or
+# deliberately not, the reason is written next to it.
+
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
+*.egg-info/
 .venv/
 venv/
-*.egg-info/
-dist/
 .pytest_cache/
 .mypy_cache/
+build/
+dist/
 *.db
 
-# Env
-.env
-.env.local
-.env.*.local
-
-# Node
+# ── Node / Next.js ───────────────────────────────────────────────────────────
 node_modules/
 .next/
 out/
 .vercel/
+.eslintcache
 *.tsbuildinfo
-frontend/tmp/
-frontend/test-results/
-frontend/playwright-report/
-# Screenshot and trace runs land here at the repo root rather than under
-# frontend/, so the entries above do not cover them.
+
+# ── Playwright ───────────────────────────────────────────────────────────────
+# Deliberately unanchored. These are written next to whichever config ran, and
+# this repo runs suites from both the root and frontend/. The previous
+# `frontend/`-anchored rules missed the root copies completely, which is how
+# `test-results/.last-run.json` and `artifacts/` ended up in git status — and
+# how the former was committed.
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
 artifacts/
+# Anchored on purpose: `tmp/` alone is too generic to ignore repo-wide.
+frontend/tmp/
 
-# Uploads
-/tmp/research_factory_uploads/
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# Deny every .env variant, then re-admit the committed templates. Listing each
+# secret file individually meant a new one — .env.staging, .env.production —
+# was tracked by default and stayed that way until someone noticed. This fails
+# in the safe direction instead.
+.env
+.env.*
+!.env.example
+!.env.*.example
 
-# OS
+# ── Uploaded documents ───────────────────────────────────────────────────────
+# Reachable only when STORAGE_BACKEND=local and UPLOAD_DIR points inside the
+# repo; the default is object storage. Unanchored, because the previous
+# `/tmp/research_factory_uploads/` form was rooted here and so matched
+# <repo>/tmp/..., never the system /tmp path it appeared to name.
+research_factory_uploads/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+
+# ── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
+._*
 Thumbs.db
+desktop.ini
 
-# IDE
+# ── Editors ──────────────────────────────────────────────────────────────────
+# Note: .vscode/settings.json is tracked on purpose (shared editor config), so
+# .vscode/ is not ignored here.
 .idea/
 *.swp
+*.swo
+*~
