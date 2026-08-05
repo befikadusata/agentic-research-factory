@@ -8,7 +8,17 @@
 │  (Next.js SSR) │     │  (FastAPI + Uvicorn) │     │  (pgvector)   │
 └────────────────┘     └──────────────────────┘     └───────────────┘
      Frontend               Backend                   Database
+                                │                          ▲
+                                ▼                          │
+                        ┌───────────────┐          ┌───────────────┐
+                        │  S3 / R2 /    │◀─────────│  Celery       │
+                        │  MinIO        │          │  worker       │
+                        └───────────────┘          └───────────────┘
+                        Uploaded PDFs
 ```
+
+The API and the Celery worker are separate processes that do not share a
+filesystem, so uploaded PDFs go to object storage that both can reach.
 
 ---
 
@@ -17,6 +27,7 @@
 - [Vercel](https://vercel.com) account
 - [Railway](https://railway.app) or [Render](https://render.com) account
 - Managed PostgreSQL with pgvector extension (Railway Postgres, Supabase, or Neon)
+- An S3-compatible bucket for uploaded PDFs (AWS S3, Cloudflare R2, DigitalOcean Spaces, or self-hosted MinIO)
 
 ---
 
@@ -65,8 +76,23 @@
 | `LLAMA_CLOUD_API_KEY` | Your LlamaParse API key |
 | `BACKEND_JWT_SECRET` | `openssl rand -hex 32` — same value as frontend `BACKEND_JWT_SECRET` |
 | `FRONTEND_URL` | `https://your-app.vercel.app` |
+| `STORAGE_BACKEND` | `s3` — see the note below |
+| `STORAGE_BUCKET` | Bucket for uploaded PDFs |
+| `STORAGE_ENDPOINT_URL` | Blank for AWS S3; set for R2, Spaces, or self-hosted MinIO |
+| `STORAGE_ACCESS_KEY` | Blank to use an instance/task IAM role instead |
+| `STORAGE_SECRET_KEY` | Blank to use an instance/task IAM role instead |
+| `STORAGE_REGION` | e.g. `us-east-1` |
 
 `NEXTAUTH_SECRET` is a frontend-only variable; the backend never reads it.
+
+> **`STORAGE_BACKEND` must be `s3` here.** The API stores an uploaded PDF and a
+> Celery worker parses it afterwards, in a separate service with its own
+> filesystem. The default `local` writes to a path only the API can see, so the
+> worker finds nothing and every upload fails — reported as a PDF with no
+> extractable text, since the fetch failure is invisible to the parser. The same
+> applies to any managed host that restarts containers, where local disk is
+> ephemeral even within one service. Set the same five `STORAGE_*` values on the
+> worker service in Step 2b.
 
 5. Deploy. Verify `GET /health` returns `{"status": "ok"}`.
 
@@ -135,3 +161,5 @@ Ensure `FRONTEND_URL` in the backend matches the exact Vercel domain. The backen
 | 500 on `/runs` | Check `DATABASE_URL` is reachable and pgvector is enabled |
 | SSE stream disconnects | Check Railway/Render doesn't have a request timeout < 30 min |
 | OAuth callback fails | Verify `NEXTAUTH_URL` matches the deployed domain |
+| Every uploaded PDF fails as "no text could be extracted" | The worker cannot fetch what the API stored. Confirm `STORAGE_BACKEND=s3` and that the identical `STORAGE_*` values are set on **both** the API and the worker. A genuinely unparseable PDF fails for some uploads; a storage fault fails for all of them |
+| "The uploaded file is no longer in storage" | The bucket, key prefix, or credentials differ between the API and the worker, or the object was deleted out from under the row |
