@@ -55,7 +55,7 @@ def test_validate_config_firecrawl_api_url_alone_still_requires_tavily():
     assert "FIRECRAWL_API_KEY" not in str(exc.value)
 
 
-# --- BACKEND_JWT_SECRET guard -------------------------------------------------
+# BACKEND_JWT_SECRET guard.
 # The repo ships a working dev secret so a fresh clone boots authenticated.
 # These tests are what make that safe: the same file promoted to production
 # must fail loudly rather than sign tokens with a publicly known key.
@@ -108,7 +108,7 @@ def test_development_allows_the_shipped_secret():
 
 
 def test_backend_does_not_require_nextauth_secret():
-    """NEXTAUTH_SECRET is frontend-only; requiring it blocked a clean boot."""
+    """NEXTAUTH_SECRET is frontend-only; requiring it here blocks a clean boot."""
     s = _prod_ready()
     assert not hasattr(s, "NEXTAUTH_SECRET")
 
@@ -117,15 +117,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # The frontend signs tokens with its copy of this value and the backend verifies
 # them with its own. They live in four separate files with no mechanism forcing
-# agreement, and they HAVE disagreed: the stack booted healthy, login succeeded,
-# and every authenticated request 401'd with nothing in the logs naming the
+# agreement, and they HAVE disagreed: the stack boots healthy, login succeeds,
+# and every authenticated request 401s with nothing in the logs naming the
 # cause. This test is that missing mechanism.
 _SECRET_SOURCES = [
     "backend/.env.example",
     "frontend/.env.local.example",
     "docker-compose.yml",
-    # Documentation, but it is written to be copied — §3 is a pair of ready-made
-    # .env blocks, so a stale value here reproduces the original bug by hand.
+    # Documentation, but it is written to be copied — it carries ready-made .env
+    # blocks, so a stale value here reproduces the mismatch by hand.
     "docs/build_specification.md",
 ]
 
@@ -159,10 +159,10 @@ def test_shipped_jwt_secret_is_rejected_in_production():
         validate_config(_prod_ready(BACKEND_JWT_SECRET=shipped))
 
 
-# --- blank vs. unset ----------------------------------------------------------
-# These arrive from a .env file, where `TAVILY_API_KEY=` is the natural way to
-# disable a key — pydantic reads that as "", not None. An `is None` check let it
-# through, so production booted clean and failed on the first search call.
+# Blank vs. unset. These arrive from a .env file, where `TAVILY_API_KEY=` is the
+# natural way to disable a key — pydantic reads that as "", not None. An
+# `is None` check lets it through, so production boots clean and fails on the
+# first search call.
 
 
 @pytest.mark.parametrize("blank", ["", "   ", "\t"])

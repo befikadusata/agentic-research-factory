@@ -1,11 +1,11 @@
 """
-Regression tests for the LangGraph supervisor's HITL pause points.
+Tests for the LangGraph supervisor's HITL pause points.
 
-Before this fix, `build_graph()` compiled the graph with no checkpointer and no
-interrupt_before, so a single `.invoke()` ran research -> analyse -> review ->
-write -> edit -> END in one call. run_service's 3-stage HITL gate re-invoked the
-graph with hand-rolled state and believed it was stopping after each stage, but
-the graph itself never actually paused.
+The pauses have to be the graph's own: compiled with a checkpointer and
+interrupt_before, so `.invoke()` stops between stages instead of running
+research -> analyse -> review -> write -> edit -> END in one call. run_service's
+3-stage gate can re-invoke with hand-rolled state and believe it is stopping
+after each stage while the graph never actually pauses.
 
 These tests exercise the real compiled graph (routing + interrupt config) with
 fast, deterministic fake node functions swapped in for the CrewAI-backed ones,
@@ -51,7 +51,7 @@ def _build_fake_graph(monkeypatch, review_sequence):
 
     def fake_review(state):
         # Emit the reviewer's real routing contract (a leading VERDICT field), so
-        # route_after_review parses it the way it parses live reviewer output (H2).
+        # route_after_review parses it the way it parses live reviewer output.
         return {"review_output": f"VERDICT: {next(reviews)}", "retry_count": state.get("retry_count", 0) + 1}
 
     def fake_write(state):
@@ -157,9 +157,9 @@ def test_resume_from_marker_reenters_at_analyse_in_fresh_thread(monkeypatch):
     graph.checkpointer.delete_thread("t-resume-marker")
 
 
-# ── budget ceiling (gap #1): the reviewer retry loop must stop once the run's
-# accumulated LLM spend reaches RUN_COST_CEILING_USD, rather than burning the
-# full retry allowance regardless of cost. ──────────────────────────────────────
+# Budget ceiling: the reviewer retry loop must stop once the run's accumulated
+# LLM spend reaches RUN_COST_CEILING_USD, rather than burning the full retry
+# allowance regardless of cost.
 
 def _fail_state(**over):
     state = dict(BASE_STATE)
@@ -252,9 +252,9 @@ def test_failed_lead_review_retries_once_then_warns_at_end(monkeypatch):
     assert crew_module.route_after_lead_review(state) == "end"
 
 
-# ── researcher retry-budget escalation (gap #3): a re-run after a review FAIL
-# gets a deeper budget than the deliberately-shallow first pass, so it acts on the
-# feedback instead of re-failing the same undersized pass and re-billing it. ─────
+# Researcher retry-budget escalation: a re-run after a review FAIL gets a deeper
+# budget than the deliberately-shallow first pass, so it acts on the feedback
+# instead of re-failing the same undersized pass and re-billing it.
 
 def test_researcher_budget_first_pass_uses_base(monkeypatch):
     from config import settings

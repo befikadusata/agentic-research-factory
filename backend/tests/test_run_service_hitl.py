@@ -1,9 +1,9 @@
 """
 Regression tests for the segmented HITL pipeline.
 
-execute_run now runs ONE segment per invocation and durably pauses at each
-human-in-the-loop gate (persisting an `awaiting_*` status and releasing the
-worker) instead of blocking a single task through the whole run. The state
+execute_run runs ONE segment per invocation and durably pauses at each
+human-in-the-loop gate, persisting an `awaiting_*` status and releasing the
+worker rather than blocking a single task through the whole run. The state
 machine advances across separate tasks; `run_driver` pumps that in-process.
 
 These verify:
@@ -12,7 +12,7 @@ These verify:
   * a review-triggered research retry is re-surfaced for a second approval,
   * token/cost rows are logged exactly once per agent across the segments,
   * autonomous (monitor-spawned) runs complete WITHOUT any operator approval
-    and reach finalize_monitored_run (C2).
+    and reach finalize_monitored_run.
 """
 import uuid
 import pytest
@@ -60,7 +60,7 @@ def _install_fake_graph(monkeypatch, review_sequence):
     def fake_review(state):
         # Emit the reviewer's real routing contract (a leading VERDICT field),
         # not a bare "PASS"/"FAIL" token, so route_after_review parses it the
-        # same way it parses a live reviewer's output (H2).
+        # same way it parses a live reviewer's output.
         return {"review_output": f"VERDICT: {next(reviews)}", "retry_count": state.get("retry_count", 0) + 1}
 
     def fake_write(state):
@@ -110,7 +110,7 @@ async def test_execute_run_gates_stages_and_reshows_retried_research(monkeypatch
     module-level AsyncSessionLocal's pooled asyncpg connections don't survive a
     fresh event loop across separate test functions."""
 
-    # ── Scenario 1: PASS on first review — exactly 3 gates, no downstream leak ──
+    # Scenario 1: PASS on first review — exactly 3 gates, no downstream leak.
     _install_fake_graph(monkeypatch, review_sequence=["PASS"])
 
     seen = []
@@ -153,7 +153,7 @@ async def test_execute_run_gates_stages_and_reshows_retried_research(monkeypatch
         # several segments/tasks.
         assert sorted(c.agent_name for c in costs) == ["analyst", "editor", "researcher", "writer"]
 
-    # ── Scenario 2: FAIL then PASS — retried research must be re-approved ────────
+    # Scenario 2: FAIL then PASS — retried research must be re-approved.
     _install_fake_graph(monkeypatch, review_sequence=["FAIL", "PASS"])
 
     research_summaries = []
@@ -207,7 +207,7 @@ async def test_stale_approval_cannot_skip_a_gate(monkeypatch, redis_pool, run_dr
 
 @pytest.mark.asyncio
 async def test_autonomous_monitor_run_completes_without_approval(monkeypatch, redis_pool, run_driver):
-    """C2: a monitor-spawned run has no human at the gates. It must auto-advance
+    """A monitor-spawned run has no human at the gates. It must auto-advance
     through every stage on its own and reach completion + finalize_monitored_run,
     with NO operator approval (approve=False)."""
     _install_fake_graph(monkeypatch, review_sequence=["PASS"])

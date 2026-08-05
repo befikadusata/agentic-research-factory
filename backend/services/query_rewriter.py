@@ -22,12 +22,6 @@ def _record_cost(response) -> None:
         logger.warning("query_rewriter_cost_record_failed", error=str(e))
 
 
-# A single-rewrite `rewrite_query()` lived here and had no caller: sub-query
-# expansion below superseded it, covering ambiguity better than one rewrite
-# could. Reinstating it would put an extra LLM round trip — and an extra failure
-# mode — in front of a fan-out that already handles the same problem.
-
-
 def generate_sub_queries(original_query: str, n: int = 3) -> list[str]:
     """Generate N semantically distinct sub-queries covering different angles of the topic.
     Falls back to [original_query] on any failure.

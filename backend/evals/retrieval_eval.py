@@ -43,12 +43,10 @@ collide with real documents.
 
 Sub-query expansion is **pinned off by default**. `generate_sub_queries` calls
 an LLM at temperature 0.4 and falls back to the original query on any failure,
-so with it on, two runs measure two different query sets — and in an environment
-with no LLM configured it silently degrades to the pinned behaviour anyway while
-still claiming to have measured expansion. Off by default means the number moves
-when retrieval changes, which is what a regression harness is for. Pass
-`--expand` to measure the production path end to end; the report says which was
-used, because the two are not comparable.
+so with it on, two runs measure two different query sets — and with no LLM
+configured it silently degrades to the pinned behaviour while still claiming to
+have measured expansion. Pass `--expand` to measure the production path end to
+end; the report says which was used, because the two are not comparable.
 
 The embedder is whatever config selects, and the report names it. Gemini and
 `all-MiniLM-L6-v2` produce different retrieval, so a number carried across a
@@ -58,10 +56,9 @@ change of embedder is meaningless.
 
 `--compare` runs the ablations in [`retrieval_baselines.py`](retrieval_baselines.py)
 over the same corpus: naive dense top-k, dense + re-ranking, and production. A
-hit@5 of 0.903 means nothing until plain vector search over the same 54 chunks
-has been asked the same questions, and on this corpus it does better — see the
-"Known limits" note in docs/optimizations.md, which is where that result is
-discussed rather than buried.
+hit@5 number means nothing until plain vector search over the same chunks has
+been asked the same questions, and on this corpus it does better — see the
+"Known limits" note in docs/optimizations.md.
 
 ## What it does not measure
 
@@ -101,11 +98,10 @@ EVAL_COLLECTION = "retrieval_eval"
 K_VALUES = (1, 3, 5, 10)
 
 
-# ── metrics ──────────────────────────────────────────────────────────────────
+# metrics
 #
-# Pure functions over a ranked list of chunk ids. No models, no database — they
-# are unit-tested in tests/test_retrieval_metrics.py, because a metric that is
-# quietly wrong produces confident numbers and is worse than no metric at all.
+# Pure functions over a ranked list of chunk ids. No models, no database; unit
+# tested in tests/test_retrieval_metrics.py.
 
 
 def hit_at_k(ranked_ids: list[str], relevant: set[str], k: int) -> float:
@@ -159,7 +155,7 @@ def ndcg_at_k(ranked_ids: list[str], gains: dict[str, int], k: int) -> float:
     return dcg_at_k(ranked_ids, gains, k) / idcg
 
 
-# ── running ──────────────────────────────────────────────────────────────────
+# running
 
 
 @dataclass
@@ -327,7 +323,7 @@ def run_adversarial(
     return results
 
 
-# ── aggregation ──────────────────────────────────────────────────────────────
+# aggregation
 
 
 def summarise(results: list[QueryResult]) -> dict:
@@ -443,7 +439,7 @@ def compare_variants(collection_name: str = EVAL_COLLECTION) -> list[dict]:
     return rows
 
 
-# ── report ───────────────────────────────────────────────────────────────────
+# report
 
 
 def _print_comparison(rows: list[dict], adversarial_total: int) -> None:

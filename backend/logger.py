@@ -20,10 +20,8 @@ def setup_logger():
     ]
 
     if sys.stderr.isatty():
-        # Pretty print for development
         processors.append(structlog.dev.ConsoleRenderer())
     else:
-        # JSON for production
         processors.append(structlog.processors.JSONRenderer())
 
     structlog.configure(

@@ -9,8 +9,7 @@ import { LoadError } from "@/components/ListState";
 import { formatDuration, formatTokens, formatUsd } from "@/lib/format";
 import type { AnalyticsCosts, AnalyticsMetrics } from "@/lib/types";
 
-/** Quality dimensions in the order the eval judge reports them, `overall` first
- *  because it is the one people actually read. */
+/** Quality dimensions the eval judge reports, `overall` first as the headline. */
 const SCORE_FIELDS: { key: keyof AnalyticsMetrics["averages"]; label: string }[] = [
   { key: "overall", label: "Overall" },
   { key: "accuracy", label: "Accuracy" },
@@ -74,8 +73,8 @@ export default function AnalyticsPage() {
   useEffect(load, [load]);
 
   const totalTokens = costs ? costs.total_input_tokens + costs.total_output_tokens : 0;
-  // Same reasoning as the per-run panel: a free-tier pipeline genuinely costs
-  // nothing, and "$0.00" beside millions of tokens looks like a broken meter.
+  // A free-tier pipeline genuinely costs nothing, and "$0.00" beside millions of
+  // tokens reads as a broken meter — so it gets its own label (as in RunCostPanel).
   const freeTier = costs !== null && costs.total_cost_usd === 0 && totalTokens > 0;
   const scores = SCORE_FIELDS.map((f) => ({ ...f, value: metrics?.averages[f.key] })).filter(
     (f): f is typeof f & { value: number } => typeof f.value === "number" && f.value > 0,

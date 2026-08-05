@@ -117,7 +117,6 @@ async def test_run_monitor_now_spawns_linked_run(client, mock_user, db_session):
     # one-off by this field, and offers "save as monitor" only for the latter.
     assert r.json()["monitor_id"] == mid
 
-    # The spawned run is tagged with the monitor, and the monitor points back at it.
     run = await db_session.get(Run, UUID(run_id))
     assert str(run.monitor_id) == mid
     monitor = await db_session.get(Monitor, UUID(mid))

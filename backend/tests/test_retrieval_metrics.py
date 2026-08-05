@@ -22,8 +22,6 @@ from evals.retrieval_eval import (
 )
 
 
-# ── hit@k ────────────────────────────────────────────────────────────────────
-
 def test_hit_at_k_finds_relevant_within_cutoff():
     assert hit_at_k(["a", "b", "c"], {"c"}, 3) == 1.0
 
@@ -50,8 +48,6 @@ def test_hit_at_k_handles_short_ranking():
     assert hit_at_k([], {"a"}, 10) == 0.0
 
 
-# ── coverage@k ───────────────────────────────────────────────────────────────
-
 def test_coverage_counts_how_many_relevant_chunks_arrived():
     """Where hit@k stops at one, this is the difference between half an answer
     and a whole one — the question a multi-chunk query actually asks."""
@@ -72,8 +68,6 @@ def test_coverage_of_nothing_relevant_is_zero_not_a_division_error():
     assert coverage_at_k(["a"], set(), 5) == 0.0
 
 
-# ── MRR ──────────────────────────────────────────────────────────────────────
-
 def test_reciprocal_rank_is_one_for_first_position():
     assert reciprocal_rank(["a", "b"], {"a"}) == 1.0
 
@@ -91,8 +85,6 @@ def test_reciprocal_rank_takes_the_first_relevant_only():
 def test_reciprocal_rank_zero_when_absent():
     assert reciprocal_rank(["x", "y"], {"a"}) == 0.0
 
-
-# ── NDCG ─────────────────────────────────────────────────────────────────────
 
 def test_dcg_discounts_by_log2_of_rank_plus_one():
     # gains 2 at rank 1 and 1 at rank 2 -> 2/log2(2) + 1/log2(3)

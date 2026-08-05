@@ -13,14 +13,13 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    # Each task now runs ONE pipeline segment (research / analyse / write /
-    # finalize) and returns — human-in-the-loop waits happen *between* tasks, not
-    # inside them (a paused run holds no worker; run_service persists an
-    # awaiting_* status and the next segment is queued on approval). So this limit
-    # bounds pure compute for a single segment, not a whole multi-gate run, and no
-    # longer has to exceed any HITL timeout.
-    # Sourced from config so run_service can derive its LLM retry budget from the
-    # same numbers — the two used to drift apart and the budget overran the limit.
+    # Each task runs ONE pipeline segment (research / analyse / write / finalize)
+    # and returns — human-in-the-loop waits happen *between* tasks, not inside them
+    # (a paused run holds no worker; run_service persists an awaiting_* status and
+    # the next segment is queued on approval). So this limit bounds pure compute
+    # for a single segment, not a whole multi-gate run, and need not exceed any
+    # HITL timeout. Sourced from config so run_service derives its LLM retry budget
+    # from the same numbers rather than drifting past the limit.
     task_soft_time_limit=settings.TASK_SOFT_TIME_LIMIT_SEC,
     task_time_limit=settings.TASK_TIME_LIMIT_SEC,
     # Each task runs its own event loop via asyncio.run(). The module-level

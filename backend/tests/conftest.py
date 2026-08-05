@@ -70,7 +70,6 @@ async def db_session(engine):
 
 @pytest.fixture
 async def client(db_session):
-    # Override get_db to use the fixture's session
     async def _get_db_override():
         yield db_session
     

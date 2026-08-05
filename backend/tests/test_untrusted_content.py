@@ -1,4 +1,4 @@
-"""Tests for the prompt-injection fencing of external web content (L2).
+"""Tests for the prompt-injection fencing of external web content.
 
 Search snippets and scraped pages are attacker-controlled; they're wrapped in an
 explicit, self-describing boundary that marks them as data before they enter the

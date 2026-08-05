@@ -60,9 +60,8 @@ function VerificationResult({
           </Link>
         </div>
 
-        {/* Deliberately outside the live region above: this is a control, not an
-            outcome, and an assertive region should announce the failure rather
-            than read out a form. */}
+        {/* Outside the live region above: an assertive region should announce
+            the failure, not read out this form. */}
         {!successful && <ResendVerification />}
       </div>
     </div>

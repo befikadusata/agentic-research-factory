@@ -68,8 +68,7 @@ def _build_converter():
     * do_ocr=False. OCR would need an engine resolved through OcrAutoOptions,
       which reports "No OCR engine found" in this image, and it is dead weight
       for the text-bearing PDFs this app ingests. Consequence: a scanned or
-      image-only PDF yields no text — ingest_service now records that as
-      `failed` with a clear message rather than a successful-looking no-op.
+      image-only PDF yields no text, which ingest_service records as `failed`.
 
     Models are baked into the image and located via DOCLING_ARTIFACTS_PATH, so
     this constructor does no network I/O.
@@ -90,18 +89,15 @@ def _build_converter():
 def _parse_with_docling(path: str) -> list[dict]:
     """Chunk a PDF page by page, so every chunk carries the page it came from.
 
-    A whole-document `export_to_markdown()` flattens away docling's provenance,
-    which is why this used to record `"page": None` for every chunk — the primary
-    parse path, so in practice *every* internal citation rendered "Page: N/A"
-    while the citation plumbing and the Sources panel sat there fully built.
-    Exporting one page at a time keeps the markdown structure the splitter needs
-    and gives each chunk a real page number.
+    A whole-document `export_to_markdown()` flattens away docling's provenance
+    and leaves `"page": None` on every chunk. Exporting one page at a time keeps
+    the markdown structure the splitter needs and gives each chunk a real page
+    number.
 
-    The trade this makes deliberately: chunks no longer straddle a page break, so
-    a page's tail is a short chunk and there is no 200-char overlap across the
-    boundary. That is the right side to err on — a chunk spanning two pages can
-    only be labelled with one of them, and a citation pointing at the wrong page
-    is worse than a slightly smaller chunk.
+    Deliberate consequence: chunks never straddle a page break, so a page's tail
+    is a short chunk with no overlap across the boundary. A chunk spanning two
+    pages could only be labelled with one of them, and a citation pointing at the
+    wrong page is worse than a slightly smaller chunk.
     """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -125,8 +121,7 @@ def _parse_with_docling(path: str) -> list[dict]:
         return chunks
 
     # No page provenance (docling populates `pages` per backend, and some inputs
-    # yield none). Better to ingest without page numbers than not at all — this
-    # is the pre-existing behaviour, now the exception rather than the rule.
+    # yield none). Better to ingest without page numbers than not at all.
     md_text = document.export_to_markdown()
     if not md_text.strip():
         return []
@@ -165,9 +160,8 @@ async def parse_pdf(path: str) -> list[dict]:
     try:
         # call_with_timeout, NOT run_in_executor(None, ...): the default executor's
         # threads are joined by asyncio.run() at task teardown, so a docling parse
-        # that blew this timeout used to keep running and wedge the Celery worker
-        # child for its full duration — the guard fired, the caller recorded zero
-        # chunks, and the task only ended minutes later on SoftTimeLimitExceeded.
+        # that blew this timeout would keep running and wedge the Celery worker
+        # child until it finished anyway.
         chunks = await call_with_timeout(
             _parse_with_docling, path,
             timeout=PDF_PARSE_TIMEOUT_SEC,
@@ -176,7 +170,7 @@ async def parse_pdf(path: str) -> list[dict]:
         if chunks:
             return chunks
     except Exception as e:
-        # TimeoutError stringifies to "", which made the old log say error="".
+        # TimeoutError stringifies to "", hence the type-name fallback.
         logger.warning("docling_parse_failed", path=path, error=str(e) or type(e).__name__)
 
     if settings.LLAMA_CLOUD_API_KEY:

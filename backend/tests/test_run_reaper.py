@@ -1,9 +1,9 @@
 """
-Regression tests for M3: nothing used to rescue a run stuck in a non-terminal
-state. A segment task SIGKILLed at the Celery time limit (or a crashed worker)
-leaves the run in researching/analyzing/writing forever; a monitor-spawned run
-whose auto-advance dispatch was lost hangs at an awaiting_* gate with no human to
-approve it. `reap_orphaned_runs` fails those orphans so they can't linger.
+`reap_orphaned_runs` is what rescues a run stuck in a non-terminal state. A
+segment task SIGKILLed at the Celery time limit (or a crashed worker) leaves the
+run in researching/analyzing/writing forever; a monitor-spawned run whose
+auto-advance dispatch was lost hangs at an awaiting_* gate with no human to
+approve it. The reaper fails those orphans so they can't linger.
 
 Manual runs parked at an approval gate are a legitimate wait, not an orphan, and
 must be left alone.

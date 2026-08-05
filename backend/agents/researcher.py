@@ -18,13 +18,13 @@ def researcher_agent(tools: list = None, max_iter: int = 2, max_tokens: int = 90
         # max_tokens caps the (token-heavy) synthesis call so a full pass stays
         # under Groq's free 12K tokens/min ceiling — see get_llm docstring. The
         # caller escalates it (and max_iter) on a retry so a re-run after a review
-        # FAIL gets more depth than the deliberately-shallow first pass. (gap #3)
+        # FAIL gets more depth than the deliberately-shallow first pass.
         llm=get_llm("researcher", max_tokens=max_tokens),
         verbose=True,
-        # Base 2 (was 10): each ReAct iteration re-sends the whole accumulating
-        # context AND its tokens count against Groq's rolling free 12K tokens/min
-        # window; deeper loops pushed the final synthesis call to 429. 2 iterations
-        # (≈1 search + 1 synthesis) leaves room for a full brief under the ceiling.
+        # Each ReAct iteration re-sends the whole accumulating context, and those
+        # tokens count against Groq's rolling free 12K tokens/min window; deeper
+        # loops push the final synthesis call to 429. The base of 2 (≈1 search +
+        # 1 synthesis) leaves room for a full brief under the ceiling.
         max_iter=max_iter,
     )
 

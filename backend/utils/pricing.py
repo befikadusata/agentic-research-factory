@@ -1,8 +1,5 @@
-"""
-USD pricing per model slug, used to turn the token counts already tracked in
-`token_usages` into an actual dollar figure (§4.1 — `_log_token_usages` used to
-hardcode `total_cost=0.0` for every call, so `RunCost.total_cost` and the
-`/analytics/costs` endpoint always reported $0.00 regardless of real spend).
+"""USD pricing per model slug, used to turn the token counts in `token_usages`
+into the dollar figure behind `RunCost.total_cost` and `/analytics/costs`.
 
 Prices for the routed models come straight from
 `services.llm_router.MODEL_REGISTRY` (its single source of truth), extended here
@@ -31,9 +28,8 @@ _PAID_OVERRIDES: dict[str, tuple[float, float]] = {
     "gemini/gemini-2.0-flash": (0.0001, 0.0004),
 }
 
-# Registry prices are authoritative for routed models (e.g. this is what adds
-# openrouter/tencent/hy3:free, which used to log unknown_model_pricing on every
-# analyst/judge call); paid overrides fill in the rest.
+# Registry prices are authoritative for routed models; paid overrides fill in
+# the rest.
 _PRICING_PER_1K: dict[str, tuple[float, float]] = {
     **{slug: spec["price"] for slug, spec in MODEL_REGISTRY.items()},
     **_PAID_OVERRIDES,

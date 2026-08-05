@@ -56,10 +56,10 @@ class Golden:
     kind: str = "lookup"
 
 
-# ── corpus ───────────────────────────────────────────────────────────────────
+# corpus
 
 CORPUS: list[Chunk] = [
-    # ── acme_q3_business_review.pdf ──────────────────────────────────────────
+    # acme_q3_business_review.pdf
     Chunk(
         "biz-arr", "acme_q3_business_review.pdf", 2,
         "Annual recurring revenue closed the quarter at $16.4M, up from $11.9M a "
@@ -156,7 +156,7 @@ CORPUS: list[Chunk] = [
         "raising the self-serve price point by 20% in January.",
     ),
 
-    # ── acme_platform_docs.pdf ───────────────────────────────────────────────
+    # acme_platform_docs.pdf
     Chunk(
         "doc-api-auth", "acme_platform_docs.pdf", 1,
         "The public API is REST over HTTPS and authenticates with OAuth 2.0 "
@@ -252,7 +252,7 @@ CORPUS: list[Chunk] = [
         "behaviour before launch.",
     ),
 
-    # ── competitive_landscape_2026.pdf ───────────────────────────────────────
+    # competitive_landscape_2026.pdf
     Chunk(
         "comp-set", "competitive_landscape_2026.pdf", 1,
         "The competitive set divides cleanly by segment. Zapier dominates the "
@@ -335,7 +335,7 @@ CORPUS: list[Chunk] = [
         "moment as customers scale.",
     ),
 
-    # ── customer_research_synthesis.pdf ──────────────────────────────────────
+    # customer_research_synthesis.pdf
     Chunk(
         "res-method", "customer_research_synthesis.pdf", 1,
         "Eighteen interviews were conducted over six weeks by two researchers, "
@@ -414,7 +414,7 @@ CORPUS: list[Chunk] = [
         "product intends to create, and both are largely mechanical.",
     ),
 
-    # ── security_and_compliance.pdf ──────────────────────────────────────────
+    # security_and_compliance.pdf
     Chunk(
         "sec-soc2", "security_and_compliance.pdf", 1,
         "The platform holds a SOC 2 Type II report covering security, "
@@ -496,7 +496,7 @@ CORPUS: list[Chunk] = [
 ]
 
 
-# ── golden queries ───────────────────────────────────────────────────────────
+# golden queries
 #
 # `kind` slices the report:
 #   lookup      — the query and the chunk share vocabulary
@@ -506,7 +506,7 @@ CORPUS: list[Chunk] = [
 #   near-miss   — a topically adjacent chunk exists that does NOT answer it
 
 GOLDEN: list[Golden] = [
-    # ── lookup ───────────────────────────────────────────────────────────────
+    # lookup
     Golden("What is the current annual recurring revenue?", ("biz-arr",), ("biz-segment-mix",)),
     Golden("What was gross churn last quarter?", ("biz-churn",), ("biz-arr",), kind="near-miss"),
     Golden("How large is the total addressable market?", ("biz-tam",)),
@@ -530,7 +530,7 @@ GOLDEN: list[Golden] = [
     Golden("What features do customers ask for most?", ("res-feature-requests",)),
     Golden("How many customer interviews were conducted and how?", ("res-method",)),
 
-    # ── paraphrase: the answer never uses the query's words ──────────────────
+    # paraphrase: the answer never uses the query's words
     Golden(
         "How long does it take to close a big deal?",
         ("biz-sales-cycle",), ("biz-pipeline",), kind="paraphrase",
@@ -592,7 +592,7 @@ GOLDEN: list[Golden] = [
         ("res-admin-burden",), kind="paraphrase",
     ),
 
-    # ── exact-term: hinges on a literal token ────────────────────────────────
+    # exact-term: hinges on a literal token
     Golden("What does ACM-429 mean?", ("doc-rate-limits",), ("doc-errors",), kind="exact-term"),
     Golden("What does ACM-422 indicate?", ("doc-errors",), kind="exact-term"),
     Golden("Do you support SCIM?", ("doc-sso",), kind="exact-term"),
@@ -604,7 +604,7 @@ GOLDEN: list[Golden] = [
     Golden("Are you in the Gartner challenger quadrant?", ("comp-analyst",), kind="exact-term"),
     Golden("Does the team use Dovetail for research?", ("res-method",), kind="exact-term"),
 
-    # ── multi-chunk: no single chunk is a complete answer ────────────────────
+    # multi-chunk: no single chunk is a complete answer
     Golden(
         "What do we know about why setup fails for new customers?",
         ("res-onboarding", "res-abandonment"), ("biz-launch-retro", "doc-import"),
@@ -631,7 +631,7 @@ GOLDEN: list[Golden] = [
         kind="multi-chunk",
     ),
 
-    # ── near-miss: an adjacent chunk exists that does not answer it ──────────
+    # near-miss: an adjacent chunk exists that does not answer it
     Golden(
         "How many support tickets did we handle?",
         ("biz-support-load",), ("res-admin-burden",), kind="near-miss",

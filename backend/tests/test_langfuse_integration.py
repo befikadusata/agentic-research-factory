@@ -1,11 +1,11 @@
 """
-Regression tests for §9.1: agents/crew.py's Langfuse integration used to call
-lf.trace(name=...)/trace.span(name=...), an API that doesn't exist on the
-pinned langfuse>=4.12.0 SDK (v4 replaced the old trace/span object model with
-an OTEL-based start_as_current_observation() context manager). Dormant only
+agents/crew.py's Langfuse integration must use the API the pinned
+langfuse>=4.12.0 SDK actually has: v4 replaced the old lf.trace(name=...) /
+trace.span(name=...) object model with an OTEL-based
+start_as_current_observation() context manager. A mismatch here is dormant,
 because get_langfuse() returns None until LANGFUSE_PUBLIC_KEY/SECRET_KEY are
 set — the first person who sets them per .env.example's own instructions
-would crash every run with AttributeError.
+crashes every run with AttributeError.
 
 These tests instantiate a *real* Langfuse client (pointed at an unreachable
 host, so no network access is required) rather than mocking get_langfuse(),
@@ -45,7 +45,7 @@ def test_run_crew_node_succeeds_with_real_langfuse_client(monkeypatch, real_lang
     assert result["token_usages"] == [{
         "agent_name": "research_output",
         # No litellm call fired under the mock, so the served model resolves to
-        # the configured primary (see resolve_actual_model — H4).
+        # the configured primary (see resolve_actual_model).
         "model": crew_module.resolve_actual_model("researcher"),
         "prompt_tokens": 10,
         "completion_tokens": 5,

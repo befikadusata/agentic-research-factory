@@ -39,9 +39,9 @@ class SearxngSearchTool(BaseTool):
         try:
             results = self._execute_search(query)
             output = []
-            # 4 results × 150-char snippets (was 8 × 300): search output persists
-            # in the researcher's ReAct context across iterations, so trimming it
-            # here compounds — keeps the pass under Groq's free 12K tokens/min.
+            # 4 results × 150-char snippets: search output persists in the
+            # researcher's ReAct context across iterations, so trimming it here
+            # compounds and keeps the pass under Groq's free 12K tokens/min.
             for r in results.get("results", [])[:4]:
                 # Ledger only the results the agent is actually shown, so a
                 # citation counts as verified when the run really saw it.

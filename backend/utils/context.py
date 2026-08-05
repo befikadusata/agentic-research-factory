@@ -8,7 +8,7 @@ rolling rate-limit window. So when a piece of re-fed context does exceed budget
 we trim it structurally instead: keep a large head PLUS a tail slice, rather than
 the blunt `text[:N]` head-only clip. The tail is where research output carries
 its citations and analysis carries its conclusions — exactly the parts a
-downstream reviewer/writer is penalized for missing. (gap #4)
+downstream reviewer/writer is penalized for missing.
 """
 
 _ELISION = "\n\n…[content trimmed to fit context budget]…\n\n"

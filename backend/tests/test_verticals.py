@@ -9,7 +9,6 @@ import asyncio
 
 @pytest.mark.asyncio
 async def test_create_run_unknown_vertical_rejected(client, mock_user):
-    """Unknown vertical should return 422 validation error."""
     payload = {
         "topic": "Test vertical validation",
         "format": "report",
@@ -25,7 +24,6 @@ async def test_create_run_unknown_vertical_rejected(client, mock_user):
 
 @pytest.mark.asyncio
 async def test_create_run_valid_vertical_accepted(client, mock_user):
-    """Valid vertical should pass schema validation."""
     payload = {
         "topic": "Acme Corp competitive analysis",
         "format": "report",
@@ -44,7 +42,6 @@ async def test_create_run_valid_vertical_accepted(client, mock_user):
 
 @pytest.mark.asyncio
 async def test_create_run_null_vertical_accepted(client, mock_user):
-    """Runs without a vertical should still work (backwards compatible)."""
     payload = {
         "topic": "General research topic",
         "format": "report",
@@ -58,7 +55,6 @@ async def test_create_run_null_vertical_accepted(client, mock_user):
 
 @pytest.mark.asyncio
 async def test_create_run_b2b_sales_vertical(client, mock_user):
-    """B2B sales vertical should be accepted and persisted."""
     payload = {
         "topic": "https://stripe.com lead intel",
         "format": "report",
@@ -77,7 +73,6 @@ async def test_create_run_b2b_sales_vertical(client, mock_user):
 
 @pytest.mark.asyncio
 async def test_create_run_founder_vertical(client, mock_user):
-    """Founder strategy vertical should be accepted."""
     payload = {
         "topic": "AI legal tech market analysis",
         "format": "summary",
@@ -97,7 +92,6 @@ async def test_create_run_founder_vertical(client, mock_user):
 
 @pytest.mark.asyncio
 async def test_create_run_missing_required_vertical_inputs_rejected(client, mock_user):
-    """Missing required vertical inputs should return 422 validation error."""
     payload = {
         "topic": "Test missing inputs",
         "format": "report",
@@ -149,7 +143,7 @@ async def test_create_run_invalid_select_field_rejected(client, mock_user):
 
 @pytest.mark.asyncio
 async def test_execute_run_task_routing(engine, redis_pool):
-    """The start segment must derive task_type from the run's vertial: a
+    """The start segment must derive task_type from the run's vertical: a
     lead_intel vertical yields "lead_intel", a research vertical yields
     "research_report". We capture the state handed to the graph on the first
     invoke and stop the run right there (the gate is stubbed out)."""

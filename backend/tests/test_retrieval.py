@@ -1,9 +1,7 @@
-"""Tests for Sprint 4 retrieval hardening: sub-query expansion + citation extraction."""
+"""Tests for retrieval hardening: sub-query expansion + citation extraction."""
 import pytest
 from unittest.mock import MagicMock, patch
 
-
-# ── extract_citations ─────────────────────────────────────────────────────────
 
 def test_extract_citations_parses_rag_output():
     from tools.rag import extract_citations
@@ -42,11 +40,10 @@ def test_extract_citations_na_page():
 
 
 def test_extract_citations_parses_markdown_links():
-    """§8.1 regression: every prompt (configs/prompts.yaml, agents/writer.py)
-    instructs agents to cite sources as Markdown links, e.g. '[Title](URL)' —
-    never the internal RAG 'SOURCE: ... (Page: ...)' format, which is only
-    ever produced by RAGTool._run for internal-document search. Before this
-    fix, extract_citations only knew the RAG format and returned [] for
+    """Every prompt (configs/prompts.yaml, agents/writer.py) instructs agents to
+    cite sources as Markdown links, e.g. '[Title](URL)' — never the internal RAG
+    'SOURCE: ... (Page: ...)' format, which only RAGTool._run produces. So
+    extract_citations must parse Markdown links, or it returns [] for
     essentially every real web-search-driven run."""
     from tools.rag import extract_citations
     text = (
@@ -135,8 +132,6 @@ def test_extract_citations_handles_mixed_rag_and_markdown_formats():
         {"source": "Bloomberg", "page": "https://bloomberg.com/story"},
     ]
 
-
-# ── generate_sub_queries ──────────────────────────────────────────────────────
 
 def test_generate_sub_queries_returns_list():
     mock_response = MagicMock()

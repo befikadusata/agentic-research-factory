@@ -28,14 +28,12 @@ _GROQ_FALLBACK = "groq/llama-3.3-70b-versatile"
 _OPENROUTER_FALLBACK = "openrouter/tencent/hy3:free"
 
 
-# ── Capability-based model registry (routed mode) ─────────────────────────────
+# Capability-based model registry (routed mode)
 # Routed mode picks each agent's model from its *capability* need, not a
-# hardcoded per-agent slug. This makes per-role tiering work on a *single*
-# provider (e.g. Groq 8B for light work, Groq 70B for reasoning) instead of
-# collapsing to one model — the fix for the old design, where analyst/reviewer/
-# eval were pinned to an OpenRouter model and so failed-then-fell-back on every
-# call whenever only the Groq key was present. It also lets a model be added or
-# repriced in one place (utils.pricing reads price straight from here).
+# hardcoded per-agent slug, so per-role tiering works on a *single* provider
+# (e.g. Groq 8B for light work, Groq 70B for reasoning) instead of collapsing to
+# one model. A model can also be added or repriced in one place (utils.pricing
+# reads price straight from here).
 #
 #   caps          — what the model is fit to be a PRIMARY for.
 #   tool_quality  — "good" models can drive the researcher's ReAct tool loop;
@@ -69,15 +67,11 @@ MODEL_REGISTRY: dict[str, dict] = {
         "provider": "openrouter",
         # NO primary caps. hy3 is a *reasoning* model: it spends its completion
         # budget on an internal reasoning field and, under real pipeline load,
-        # returns an EMPTY `content` — which crewai's get_llm_response rejects
-        # with ValueError("Invalid response from LLM call - None or empty."),
-        # failing the whole stage (observed on the analyst, 2026-07-15; the same
-        # failure the researcher hit earlier). So it must never be a crewai
-        # PRIMARY. It stays a registry citizen only for (a) pricing (utils.pricing
-        # reads price from here) and (b) being the _OPENROUTER_FALLBACK slug. With
-        # empty caps, _resolve never selects it, so analyst/reviewer/eval route to
-        # Groq 70B (which carries REASONING/JUDGE) — reliable now that Groq's key
-        # is present.
+        # returns an EMPTY `content`, which crewai's get_llm_response rejects with
+        # ValueError("Invalid response from LLM call - None or empty."), failing
+        # the whole stage. So it must never be a crewai PRIMARY. It stays a
+        # registry citizen only for (a) pricing and (b) being the
+        # _OPENROUTER_FALLBACK slug; with empty caps, _resolve never selects it.
         "caps": set(),
         "tool_quality": "poor",
         "price": (0.0, 0.0),
@@ -92,7 +86,7 @@ MODEL_REGISTRY: dict[str, dict] = {
 }
 
 # Each agent/service's required capability. Also the valid-agent allowlist — an
-# unknown name raises KeyError (as _DEFAULT_MODELS did before it).
+# unknown name raises KeyError.
 ROLE_CAPS: dict[str, str] = {
     "strategist": LIGHT,
     "query_rewriter": LIGHT,
@@ -110,7 +104,7 @@ ROLE_CAPS: dict[str, str] = {
 # grade the generators' output, so pinning them to the same model as the
 # generators (as legacy mode otherwise does) means a model grades itself and its
 # blind spots surface to the human as "AI Confidence." JUDGE_MODEL decouples them
-# in every mode (see get_model — M2).
+# in every mode (see get_model).
 _JUDGE_AGENTS = frozenset({"reviewer", "eval"})
 
 
@@ -135,9 +129,9 @@ def _resolve(agent_name: str) -> list[str]:
     the role's capability, then ranks cost-first (cheapest qualifying model wins,
     matching the free-tier-first intent). A tool-use role additionally sinks poor
     tool-callers below good ones for the *primary* slot. For a judge without
-    JUDGE_MODEL, a model distinct from the generators' is preferred — generalizing
-    the M2 judge/generator decoupling. get_model uses [0]; the full list is
-    returned for testability.
+    JUDGE_MODEL, a model distinct from the generators' is preferred, so a model
+    never grades itself. get_model uses [0]; the full list is returned for
+    testability.
     """
     if agent_name not in ROLE_CAPS:
         raise KeyError(f"Unknown agent name: {agent_name}")
@@ -171,7 +165,7 @@ def get_model(agent_name: str) -> str:
 
     Resolution order:
     1. JUDGE_MODEL — the reviewer/eval judges use it in every mode, so they never
-       collapse onto the generator model they're grading (M2).
+       collapse onto the generator model they're grading.
     2. Legacy LLM_MODEL — if set, every (non-judge) agent uses it.
     3. Explicit per-agent override — a set {AGENT}_MODEL env var wins over routing.
     4. Routed default — the cheapest registry model fit for the agent's capability
@@ -220,8 +214,7 @@ def get_fallbacks(agent_name: str) -> list[str]:
     free-tier 429 on one provider is absorbed by the other instead of failing the
     whole run. This holds in *both* legacy (single pinned LLM_MODEL) and routed
     mode — keyed off the primary's provider and gated on the peer provider having
-    a key. (Previously legacy mode hard-returned [], which disabled the entire
-    fallback layer in the one mode that actually ships — H1.)
+    a key.
 
     A custom LLM_BASE_URL (a legacy openai-compatible endpoint) can't be sanely
     spilled to a different provider, so no cross-provider fallback there.
@@ -297,13 +290,12 @@ def get_completion_settings(agent_name: str) -> LLMSelection:
     return LLMSelection(model=model, fallbacks=fallbacks)
 
 
-# ── H4: attribute cost to the model that actually served the call ─────────────
-# On a fallback leg the served model differs from the configured primary, so
-# pricing the call against the primary is wrong exactly during a provider
-# outage. litellm reports the served model on every successful completion; we
-# capture it via a global success hook (a plain function, so CrewAI's own
-# callback wiring — which only de-dupes litellm callbacks by *type* — leaves it
-# in place) and reconcile it back to a known pricing slug.
+# Attribute cost to the model that actually served the call. On a fallback leg
+# the served model differs from the configured primary, so pricing against the
+# primary is wrong exactly during a provider outage. litellm reports the served
+# model on every successful completion; it is captured via a global success hook
+# (a plain function, so CrewAI's callback wiring — which de-dupes litellm
+# callbacks by *type* — leaves it in place) and reconciled to a pricing slug.
 _actual_model_used: dict[str, str | None] = {"model": None}
 
 

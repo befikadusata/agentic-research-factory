@@ -1,13 +1,12 @@
 import { ExternalLink, FileText, ShieldAlert, ShieldCheck } from "lucide-react";
 import type { Citation } from "@/lib/types";
 
-/** The sources a report cites, marked with whether the run actually retrieved them.
+/** The sources a report cites, marked with whether the run actually retrieved
+ *  them.
  *
- *  Agents fabricate citations that look entirely ordinary — one live run cited
- *  six well-known consultancies and universities, none of which it had visited.
- *  The backend checks each URL against the sources it really fetched; this is
- *  where that shows up, because a warning buried in the logs protects nobody
- *  reading the report. */
+ *  Fabricated citations look entirely ordinary, so the backend checks each URL
+ *  against the sources it really fetched and this panel surfaces the result
+ *  beside the report rather than in the logs. */
 export function SourcesPanel({ citations }: { citations?: Citation[] }) {
   if (!citations || citations.length === 0) return null;
 

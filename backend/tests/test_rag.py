@@ -129,8 +129,6 @@ def test_rag_merges_keyword_results_with_vector_results(mock_collection):
     assert result.index("ZX-9000 exact match") < result.index("semantic chunk")
 
 
-# ── rerank threshold / abstention ─────────────────────────────────────────────
-
 def _run_with_scores(mock_collection, hits, scores, threshold=-11.0):
     """Drive RAGTool._run over a fixed candidate pool and reranker scores."""
     import tools.rag as rag
@@ -213,8 +211,6 @@ def test_rag_threshold_is_configurable(mock_collection):
     )
 
 
-# ── page-number rendering ─────────────────────────────────────────────────────
-
 def test_rag_output_renders_real_page_numbers(mock_collection):
     hits = [("a", {"text": "chunk text", "source": "report.pdf", "page": 7})]
     assert "SOURCE: report.pdf (Page: 7)" in _run_with_scores(mock_collection, hits, [3.0])
@@ -222,7 +218,8 @@ def test_rag_output_renders_real_page_numbers(mock_collection):
 
 def test_rag_output_falls_back_to_na_for_null_page(mock_collection):
     """Chunks ingested before page provenance existed carry the key with a null
-    value, so `.get("page", "N/A")` never fired and citations read 'Page: None'."""
+    value, which `.get("page", "N/A")` does not catch — the default only fires on
+    a missing key, so those citations render 'Page: None'."""
     hits = [("a", {"text": "chunk text", "source": "legacy.pdf", "page": None})]
     assert "SOURCE: legacy.pdf (Page: N/A)" in _run_with_scores(mock_collection, hits, [3.0])
 
@@ -328,8 +325,6 @@ def test_embed_returns_empty_without_calling_the_model():
     gemini.assert_not_called()
     local.assert_not_called()
 
-
-# ── ingest ────────────────────────────────────────────────────────────────────
 
 def _ingest(chunks):
     """Run ingest_documents against a mocked collection; return the records."""

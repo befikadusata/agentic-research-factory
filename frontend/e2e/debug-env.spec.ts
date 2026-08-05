@@ -1,7 +1,7 @@
 import { test } from "@playwright/test";
 
 test("debug - check server env", async ({ page }) => {
-  // Create a temporary API route to check env
+  // Log the body of any /api/debug-env response the page happens to make.
   page.on("response", async (res) => {
     if (res.url().includes("/api/debug-env")) {
       const body = await res.json();
@@ -9,7 +9,6 @@ test("debug - check server env", async ({ page }) => {
     }
   });
 
-  // Navigate to a page that doesn't require auth (backend-token is excluded from middleware)
+  // backend-token is excluded from the middleware, so it loads without auth.
   await page.goto("/api/backend-token");
-  // Cancel the navigation since we just want to check
 });

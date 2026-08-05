@@ -9,8 +9,8 @@ def analyst_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        # H3: cap the completion (pipeline-wide token invariant) — this also
-        # bounds the analysis text that review/write re-feed downstream.
+        # Cap the completion (pipeline-wide token invariant) — this also bounds
+        # the analysis text that review/write re-feed downstream.
         llm=get_llm("analyst", max_tokens=1400),
         verbose=True,
         max_iter=5,
@@ -19,7 +19,6 @@ def analyst_agent() -> Agent:
 def analysis_task(agent: Agent, topic: str) -> Task:
     prompt = get_prompt("analyst")
 
-    # Extract vertical playbook from topic if present
     vertical_section = ""
     if "**Vertical Playbook**:" in topic:
         vertical_section = prompt["vertical_section"]

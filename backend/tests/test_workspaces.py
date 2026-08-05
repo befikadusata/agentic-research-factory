@@ -193,7 +193,6 @@ async def test_managing_a_nonexistent_workspace_reveals_nothing(client, auth_as)
 
 @pytest.mark.asyncio
 async def test_list_workspaces_auto_provisions_personal(client, mock_user):
-    # A user with no workspaces gets a "Personal" one created on first list.
     r = await client.get("/workspaces")
     assert r.status_code == 200
     data = r.json()

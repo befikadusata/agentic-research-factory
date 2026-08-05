@@ -6,13 +6,8 @@ import { formatDuration, formatTokens, formatUsd } from "@/lib/format";
  * What a single run actually consumed: tokens and dollars per agent, plus
  * wall-clock time.
  *
- * The backend has recorded this per LLM call since `RunCost` existed, and
- * nothing ever displayed it — so the one question every operator asks about an
- * agent pipeline ("what did that cost me?") could only be answered by querying
- * Postgres directly.
- *
- * Rendered for failed runs too. A run that died in the research stage still
- * burned tokens, and hiding that is how a bill becomes a surprise.
+ * Rendered for failed runs too — a run that died mid-pipeline still burned
+ * tokens, and hiding that is how a bill becomes a surprise.
  */
 export function RunCostPanel({
   costs,
@@ -39,9 +34,8 @@ export function RunCostPanel({
   const totalOutput = costs.reduce((sum, c) => sum + c.output_tokens, 0);
   const totalCost = costs.reduce((sum, c) => sum + c.total_cost, 0);
 
-  // A pipeline routed entirely to free-tier models really does cost $0. Saying
-  // so beats printing "$0.00" next to six figures of token usage, which reads
-  // like the cost tracker is broken.
+  // A pipeline routed entirely to free-tier models really does cost $0, which
+  // needs saying: "$0.00" beside six figures of tokens reads as a broken meter.
   const freeTier = totalCost === 0 && totalInput + totalOutput > 0;
 
   return (

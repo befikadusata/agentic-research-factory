@@ -13,8 +13,8 @@ def lead_intel_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[tavily_search_tool, firecrawl_tool],
-        # H3: cap the completion (pipeline-wide token invariant); generous, since
-        # this single agent produces the whole lead dossier deliverable.
+        # Cap the completion (pipeline-wide token invariant); generous, since this
+        # single agent produces the whole lead dossier deliverable.
         llm=get_llm("lead_intel", max_tokens=1800),
         verbose=True,
         max_iter=10,
@@ -57,7 +57,6 @@ def build_lead_intel_description(
     current_date = current_date or datetime.now(timezone.utc).date().isoformat()
     current_year = int(current_date[:4])
 
-    # Extract vertical playbook from topic if present
     vertical_section = ""
     if "**Vertical Playbook**:" in execution_brief:
         vertical_section = prompt["vertical_section"]

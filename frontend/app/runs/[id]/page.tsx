@@ -120,8 +120,7 @@ export default function RunPage() {
     };
 
     // Demo mode has no server to stream from: the scripted run pushes the same
-    // event shapes straight into `handleEvent`, so everything below this line
-    // stays untouched by the demo.
+    // event shapes straight into `handleEvent`.
     if (IS_DEMO) {
       const unsubscribe = subscribeToDemoRun(id, (event) => handleEvent(JSON.stringify(event)));
       return () => {
@@ -131,9 +130,8 @@ export default function RunPage() {
     }
 
     (async () => {
-      // Native EventSource can't send an Authorization header, so the stream
-      // is read via fetch (same bearer-token auth as every other backend call)
-      // and parsed by hand instead.
+      // Native EventSource can't send an Authorization header, so the stream is
+      // read via fetch with the usual bearer token and parsed by hand.
       try {
         const headers = await authHeaders();
         const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/runs/${id}/stream`, {
@@ -311,9 +309,8 @@ export default function RunPage() {
         </div>
       )}
 
-      {/* Outside the complete/failed branches on purpose: a run that died in the
-          research stage still spent tokens, and that is exactly when someone
-          wants to know how much. */}
+      {/* Outside the complete/failed branches on purpose: a run that died mid-
+          pipeline still spent tokens and should still report them. */}
       <RunCostPanel costs={run.costs} latencySec={run.metrics?.latency_sec} />
 
       {status === "complete" && run.final_output && (

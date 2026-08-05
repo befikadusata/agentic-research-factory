@@ -126,8 +126,8 @@ class Monitor(Base):
     market-surveillance mode). A Monitor is effectively a Run template plus a
     cadence: the Celery-beat dispatcher periodically finds monitors whose
     `next_run_at` is due, spawns a fresh Run (with `Run.monitor_id` set), and
-    advances `next_run_at`. Diffing successive runs and alerting live in
-    monitor_service (not yet wired here — this is the data foundation only).
+    advances `next_run_at`. Diffing successive runs and sending change alerts also
+    live in monitor_service.
 
     Note: no ORM relationships are declared between Monitor and Run on purpose.
     There are two FK paths between the tables (`Run.monitor_id` and
@@ -140,13 +140,12 @@ class Monitor(Base):
     user_id          = Column(String(255), nullable=False, index=True)
     workspace_id     = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
     name             = Column(String(255), nullable=False)  # human label for the watchlist entry
-    # ── Run template (mirrors the fields create_run reads) ──────────────
+    # Run template: mirrors the fields create_run reads.
     topic            = Column(Text, nullable=False)
     format           = Column(String, nullable=False)
     vertical         = Column(String, nullable=True)
     vertical_inputs  = Column(JSON, default=dict, server_default=text("'{}'::json"))
     doc_paths        = Column(JSON, default=list, server_default=text("'[]'::json"))
-    # ── Cadence & scheduling ────────────────────────────────────────────
     interval_minutes = Column(Integer, nullable=False, default=1440)  # default: daily
     enabled          = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     # When the dispatcher should next spawn a run. Advanced by interval_minutes

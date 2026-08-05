@@ -1,6 +1,7 @@
-"""§7.1/§7.2 regression: formatters/ was dead code with zero call sites, so a
-run with format="linkedin" downloaded as raw Markdown instead of LinkedIn-safe
-plain text. Now wired into routers/outputs.py via formatters.format_output."""
+"""formatters/ must stay wired into routers/outputs.py via
+formatters.format_output. Unreferenced, it goes dead without any test failing
+and a format="linkedin" run downloads as raw Markdown instead of LinkedIn-safe
+plain text."""
 from formatters import format_output
 from formatters.linkedin import format_linkedin
 from formatters.report import format_report
@@ -16,9 +17,8 @@ def test_format_linkedin_converts_headers_to_bold():
 
 
 def test_format_linkedin_preserves_citation_urls():
-    """§7.2 regression: the link-stripping regex used to delete the URL
-    entirely, keeping only the link text — silently dropping every source
-    attribution in a LinkedIn-formatted run."""
+    """The link-stripping regex must keep the URL, not just the link text —
+    dropping it silently strips every source attribution from the post."""
     text = "Revenue grew 40% [TechCrunch](https://techcrunch.com/article1)."
     result = format_linkedin(text)
     assert "https://techcrunch.com/article1" in result

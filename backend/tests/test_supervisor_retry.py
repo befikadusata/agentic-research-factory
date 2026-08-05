@@ -1,14 +1,12 @@
 """
-Regression test for M1: the whole-graph tenacity retry used to re-invoke the
-supervisor with the *original* input state on every attempt. LangGraph
-checkpoints after each super-step, so when a mid-graph node fails the earlier
-nodes' output is already checkpointed — but replaying the original input
-restarts from START and overwrites those channels with the stale entry values
-(e.g. plan_output -> ""), discarding completed work and re-billing it.
-
-_invoke_supervisor_with_retry now carries the input only on the first attempt
-and resumes from the checkpoint (input=None) on retries, so only the failed
+The whole-graph tenacity retry must carry the input only on the first attempt
+and resume from the checkpoint (input=None) afterwards, so only the failed
 super-step re-runs.
+
+LangGraph checkpoints after each super-step, so when a mid-graph node fails the
+earlier nodes' output is already checkpointed. Re-invoking with the original
+input restarts from START and overwrites those channels with the stale entry
+values (e.g. plan_output -> ""), discarding completed work and re-billing it.
 """
 import pytest
 from tenacity import RetryError, wait_none
@@ -45,9 +43,8 @@ async def test_retry_resumes_from_checkpoint_instead_of_replaying_input():
     )
 
     assert result == {"ok": True}
-    # First attempt carries the reconstructed state...
     assert sup.inputs[0] == entry
-    # ...but the retry resumes from the checkpoint, NOT the stale input, so the
+    # The retry resumes from the checkpoint, NOT the stale input, so the
     # checkpointed plan_output can't be clobbered back to "".
     assert sup.inputs[1] is None
 
@@ -62,12 +59,12 @@ async def test_first_attempt_success_passes_input_through():
     )
 
     assert result == {"ok": True}
-    assert sup.inputs == [entry]  # no retry, input used exactly once
+    assert sup.inputs == [entry]
 
 
 @pytest.mark.asyncio
 async def test_retry_exhaustion_raises():
-    sup = _FlakySupervisor(fail_times=99)  # always fails
+    sup = _FlakySupervisor(fail_times=99)
 
     # tenacity wraps the final failure in RetryError (execute_run already unwraps
     # the embedded Future — run_service handles the RetryError contract).
@@ -83,12 +80,11 @@ async def test_retry_exhaustion_raises():
     assert sup.inputs[2] is None
 
 
-# ── segment budget ────────────────────────────────────────────────────────────
-# The retry budget used to be set independently of Celery's task_soft_time_limit:
-# LLM_STAGE_TIMEOUT_SEC (300) x stop_after_attempt(3) = 900s, and _resume_graph_at
-# makes two such calls ≈ 1800s, against a 600s soft limit. A slow stage was
-# therefore SIGKILLed mid-flight and the run sat non-terminal until the reaper.
-# The invokes in one task now share a single wall-clock budget.
+# The retry budget must stay under Celery's task_soft_time_limit, or a slow stage
+# is SIGKILLed mid-flight and the run sits non-terminal until the reaper. Budget
+# it per invoke and the arithmetic blows the limit — LLM_STAGE_TIMEOUT_SEC (300)
+# x stop_after_attempt(3) = 900s, doubled again by _resume_graph_at's two calls,
+# against a 600s soft limit — so the invokes in one task share one wall clock.
 
 
 def test_segment_budget_fits_inside_the_celery_soft_limit():

@@ -18,9 +18,8 @@ export function PlaybookIcon({
   size?: number;
   className?: string;
 }) {
-  // Without the fallback an unknown key resolves to `undefined`, which React
-  // rejects as an element type — a new server-side playbook would take down
-  // every list it appeared in rather than merely looking generic.
+  // The fallback is required, not cosmetic: an unknown key would resolve to
+  // `undefined`, which React rejects as an element type.
   const Icon = PLAYBOOK_ICONS[vertical] ?? FileSearch;
   return <Icon size={size} className={className} strokeWidth={2} aria-hidden />;
 }

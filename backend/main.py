@@ -20,7 +20,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Agentic Research Factory", lifespan=lifespan)
 
-# Instrumentator setup
 Instrumentator().instrument(app).expose(app)
 
 @app.middleware("http")

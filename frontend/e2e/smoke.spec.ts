@@ -520,10 +520,9 @@ test.describe("Core Flow Smoke Tests", () => {
   });
 
   test("labels runs with a playbook only the backend knows about", async ({ page }) => {
-    // The bundled VERTICALS list is a fallback, not the authority. /new always
-    // asked the backend, but the run list and run detail read the bundle — so a
-    // playbook added server-side produced runs you could start and then never
-    // see identified anywhere afterwards.
+    // The bundled VERTICALS list is a fallback, not the authority: every surface
+    // that labels a run must take the backend's list, so a playbook added
+    // server-side is identified everywhere and not just on /new.
     await mockAuthenticatedSession(page);
     await mockBackendToken(page);
     await page.route("**/verticals", async (route) => {
@@ -586,14 +585,13 @@ test.describe("Core Flow Smoke Tests", () => {
 
     await createSessionCookie(page);
     await page.goto("/");
-    // The list badge — the surface that used to render nothing at all here.
+    // The list badge.
     await expect(page.getByText("Regulatory Watch")).toBeVisible();
 
     await page.getByText("EU AI Act obligations").click();
     await expect(page.getByText("Regulatory Watch")).toBeVisible();
-    // The badge carries an icon, and an unknown key used to resolve to
-    // `undefined` — which React rejects as an element type, taking the page
-    // down rather than merely looking generic.
+    // The badge carries an icon: an unknown key must fall back rather than
+    // resolve to `undefined`, which React rejects as an element type.
     await expect(page.getByText("Obligations")).toBeVisible();
   });
 
@@ -728,9 +726,9 @@ test.describe("Core Flow Smoke Tests", () => {
   });
 
   test("shows the real backend error message when a run fails during a live session", async ({ page }) => {
-    // §10.1 regression: the "error" stream event used to only flip status to
-    // "failed" without storing parsed.data.message, so the banner fell back to
-    // run.error_message — null for a run that fails after the page already loaded.
+    // The "error" stream event must store parsed.data.message, not just flip the
+    // status: a run that fails after the page loaded has a null run.error_message,
+    // so the stream is the only source for the banner's text.
     await mockAuthenticatedSession(page);
     await mockBackendToken(page);
 

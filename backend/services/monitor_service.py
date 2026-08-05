@@ -1,11 +1,13 @@
-"""Monitor scheduling — the piece that makes saved monitors actually fire.
+"""Saved monitors: scheduling them, and reporting what changed between runs.
 
 `dispatch_due_monitors` is invoked periodically by a Celery-beat task. It finds
 monitors whose `next_run_at` has passed, spawns a fresh Run for each (tagged
 with `monitor_id`), advances the schedule, and queues the pipeline task.
 
-Diffing successive runs and sending change alerts are not implemented here yet —
-this module only handles the scheduling half.
+`finalize_monitored_run` closes the loop from the other end: the run pipeline
+calls it on completion, and it diffs the output against the monitor's previous
+run and delivers an alert on the monitor's `notify_channel` when something
+material changed.
 """
 import asyncio
 import httpx

@@ -29,21 +29,20 @@ _UNAVAILABLE = (
 def _firecrawl_app() -> FirecrawlApp:
     """Build the Firecrawl client on first use, never at import.
 
-    This used to be an eager `Field(default_factory=...)` on both tools, which
-    ran when the module was imported — and `agents/researcher.py` imports this
-    module unconditionally. With no FIRECRAWL_API_KEY set, the client's own
-    `raise ValueError('No API key provided')` therefore killed the import of the
-    researcher agent, and with it every run. Scraping is documented as optional
-    and degrading to search snippets, so it must never break import.
+    `agents/researcher.py` imports this module unconditionally, and FirecrawlApp
+    raises `ValueError('No API key provided')` in its constructor, so building it
+    eagerly kills the import of the researcher agent — and with it every run — on
+    any machine with no FIRECRAWL_API_KEY. Scraping is optional and degrades to
+    search snippets, so it must never break import.
 
-    It hid well locally: crewai calls load_dotenv() at import, so firecrawl-py's
-    os.getenv fallback finds a key in backend/.env even when settings has none.
-    Only a machine whose .env genuinely omits it — the documented self-hosted
-    setup — hits the crash.
+    That failure hides locally: crewai calls load_dotenv() at import, so
+    firecrawl-py's os.getenv fallback finds a key in backend/.env even when
+    settings has none. Only a .env that genuinely omits it — the documented
+    self-hosted setup — reaches the crash.
 
-    With neither a key nor a URL there is nothing to talk to; let the ValueError
-    escape here, where the callers' except-blocks turn it into the normal
-    "scraping unavailable" degradation instead of an import-time crash.
+    With neither a key nor a URL there is nothing to talk to, and the ValueError
+    escapes from here, where the callers' except-blocks turn it into the normal
+    "scraping unavailable" degradation.
     """
     api_key = _set(settings.FIRECRAWL_API_KEY)
     api_url = _set(settings.FIRECRAWL_API_URL)
@@ -165,11 +164,10 @@ class BatchScrapeTool(_FirecrawlClientMixin, BaseTool):
         logger.info("firecrawl_batch_scrape_start", count=len(urls))
         
         try:
-            # Check if there is an existing running loop
             try:
                 loop = asyncio.get_running_loop()
-                # If we're here, we're in an async context, but _run is sync.
-                # CrewAI often runs tools in threads, so this might be okay.
+                # A loop is already running (CrewAI may call this tool from one),
+                # and _run is sync — nest_asyncio makes run_until_complete legal.
                 import nest_asyncio
                 nest_asyncio.apply()
                 return loop.run_until_complete(self._async_run(urls))

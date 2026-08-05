@@ -51,7 +51,7 @@ class StageTimeout(Exception):
 class _Budget:
     """A wall-clock deadline shared by every graph invoke in one Celery task.
 
-    Bounding each invoke on its own was not enough: stop_after_attempt(3) at
+    Per-invoke bounds do not add up to a segment bound: stop_after_attempt(3) at
     LLM_STAGE_TIMEOUT_SEC each is 3x the per-call cap, and _resume_graph_at makes
     two such calls — roughly 1800s against a 600s soft limit. One shared deadline
     makes the whole segment fit regardless of how the retries fall out.
@@ -65,7 +65,7 @@ class _Budget:
 
 # run.metrics sub-key holding the few graph-internal fields that aren't already
 # their own Run column (plan_output, retry_count). They must survive across the
-# separate Celery tasks that now run each stage, since the in-memory LangGraph
+# separate Celery tasks that run each stage, since the in-memory LangGraph
 # checkpoint does not (Celery recycles the worker child after every task).
 _GRAPH_KEY = "_graph_state"
 
@@ -87,8 +87,8 @@ async def emit(run_id: str, event_type: str, data: dict):
                 flag_modified(run, "logs")
                 await db.commit()
     except Exception as e:
-        # DB persistence is best-effort (Redis publish below is authoritative for
-        # live streaming), but swallowing it silently hid real log-write failures.
+        # DB persistence is best-effort; the Redis publish below is authoritative
+        # for live streaming.
         logger.warning("emit_log_persist_failed", run_id=run_id, event=event_type, error=str(e))
     redis_client = await get_redis_client()
     await redis_client.publish(f"{LOG_CHANNEL_PREFIX}{run_id}", json.dumps({"type": event_type, "data": data}))
@@ -109,8 +109,7 @@ async def _log_token_usages(run_id: str, token_usages: list):
                     cost,
                 )
         except Exception as e:
-            # A dropped cost row silently under-reports spend — at least make the
-            # loss observable instead of vanishing.
+            # A dropped cost row under-reports the run's spend.
             logger.warning(
                 "cost_row_persist_failed",
                 run_id=run_id,
@@ -144,7 +143,7 @@ async def _claim_status(run_id: UUID, expected: RunStatus, new: RunStatus) -> bo
         return result.rowcount > 0
 
 
-# ── orphaned-run reaper (M3) ──────────────────────────────────────────────────
+# orphaned-run reaper.
 # States a live segment task is supposed to be actively advancing. A run left in
 # one of these long past the Celery time limit means its task was SIGKILLed (soft
 # limit) or its worker crashed — nothing will ever advance or fail it.
@@ -233,7 +232,7 @@ async def _invoke_supervisor_with_retry(
     durably recorded; replaying the original input would restart from START and
     overwrite those checkpointed channels with the stale entry values (e.g.
     plan_output -> "" from the reconstructed state), throwing away completed work
-    and re-billing it. Resuming re-runs only the failed super-step. (M1)
+    and re-billing it. Resuming re-runs only the failed super-step.
 
     Every attempt draws on the caller's `budget` (a fresh whole-segment one if
     omitted), so the retries can never collectively outrun the Celery task limit.
@@ -360,8 +359,8 @@ async def _enter_gate(run_id: UUID, status: RunStatus, summary: str):
 
     Persists the `awaiting_*` status (the resume point), notifies the UI, and
     then either auto-advances (autonomous/monitor runs) or returns so the worker
-    is freed until an operator approves. Crucially it does NOT block the worker
-    waiting for a human — that was the old design's fatal flaw.
+    is freed until an operator approves. It never blocks the worker waiting for
+    a human.
     """
     rid = str(run_id)
     async with AsyncSessionLocal() as db:
@@ -378,7 +377,7 @@ async def _enter_gate(run_id: UUID, status: RunStatus, summary: str):
         _dispatch_resume(rid, status.value)
 
 
-# ── segment dispatcher ────────────────────────────────────────────────────────
+# segment dispatcher
 
 async def execute_run(run_id: UUID, approved_gate: str | None = None):
     """Run exactly one pipeline segment, then return (releasing the Celery
@@ -419,7 +418,7 @@ async def execute_run(run_id: UUID, approved_gate: str | None = None):
         raise RuntimeError(f"Run {rid} failed: {error_msg[:500]}") from None
 
 
-# ── segment 1: start (research/plan or lead-intel single pass) ────────────────
+# segment 1: start (research/plan or lead-intel single pass)
 
 async def _run_start_segment(run_id: UUID):
     rid = str(run_id)
@@ -453,7 +452,7 @@ async def _run_start_segment(run_id: UUID):
         else f"run_{rid.replace('-', '_')}"
     )
 
-    # ── Wait for referenced documents to be ingested ──────────────────────────
+    # Wait for referenced documents to be ingested
     context_docs = ""
     if doc_paths:
         from models import Document, DocumentStatus
@@ -465,8 +464,8 @@ async def _run_start_segment(run_id: UUID):
         elapsed = 0
 
         while elapsed < POLL_TIMEOUT:
-            # Fresh session each iteration — kills the SQLAlchemy identity-map
-            # caching that previously prevented status updates from being seen.
+            # Fresh session each iteration: SQLAlchemy's identity map would serve
+            # the first read's Document objects and hide the status updates.
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
                     sa_select(Document).where(Document.id.in_(doc_ids))
@@ -592,12 +591,11 @@ async def _run_start_segment(run_id: UUID):
     research_output = state.get("research_output", "")
     seen_sources = _collect_sources()
     citations = extract_citations(research_output or "", seen_sources)
-    # M4: score the research before its approval gate so the operator isn't
-    # approving blind. Research has no separate grounding artifact, so (like
-    # lead-intel) it's scored against itself — an on-topic/completeness signal,
-    # not a groundedness check. Overwriting eval_scores per gate lets the existing
-    # ConfidenceBadge show the current stage's confidence; the write segment
-    # replaces it with the final eval before the run reaches `complete`.
+    # Score the research before its approval gate so the operator isn't approving
+    # blind. Research has no separate grounding artifact, so (like lead-intel) it
+    # is scored against itself — an on-topic/completeness signal, not a
+    # groundedness check. eval_scores is overwritten per gate so ConfidenceBadge
+    # shows the current stage; the write segment replaces it with the final eval.
     stage_scores = await _safe_eval(research_output, research_output, topic, log, run_id=rid, agent_name="eval_research")
     async with AsyncSessionLocal() as db:
         run_obj = await db.get(Run, run_id)
@@ -618,7 +616,7 @@ async def _run_start_segment(run_id: UUID):
     await _enter_gate(run_id, RunStatus.awaiting_research_approval, research_output)
 
 
-# ── segment 2: analyse (analyse → review → pause) ─────────────────────────────
+# segment 2: analyse (analyse → review → pause)
 
 async def _run_analyse_segment(run_id: UUID):
     rid = str(run_id)
@@ -695,7 +693,7 @@ async def _run_analyse_segment(run_id: UUID):
         research_output = state.get("research_output", research_output)
         seen_sources = _collect_sources()
         citations = _extract(research_output, seen_sources)
-        stage_scores = await _safe_eval(research_output, research_output, topic, log, run_id=rid, agent_name="eval_research")  # M4
+        stage_scores = await _safe_eval(research_output, research_output, topic, log, run_id=rid, agent_name="eval_research")
         async with AsyncSessionLocal() as db:
             run_obj = await db.get(Run, run_id)
             run_obj.research_output = research_output
@@ -718,9 +716,9 @@ async def _run_analyse_segment(run_id: UUID):
         log.warning("unexpected_graph_pause", next_node=next_node)
 
     analysis_output = state.get("analysis_output", "")
-    # M4: score the analysis before its approval gate. Unlike research, the
-    # analysis has a real grounding artifact (the research it's derived from), so
-    # this is a genuine groundedness check — are the analysis's claims supported.
+    # Score the analysis before its approval gate. Unlike research, the analysis
+    # has a real grounding artifact (the research it is derived from), so this is
+    # a genuine groundedness check.
     stage_scores = await _safe_eval(analysis_output, research_output, topic, log, run_id=rid, agent_name="eval_analysis")
     async with AsyncSessionLocal() as db:
         run_obj = await db.get(Run, run_id)
@@ -737,7 +735,7 @@ async def _run_analyse_segment(run_id: UUID):
     await _enter_gate(run_id, RunStatus.awaiting_analysis_approval, analysis_output)
 
 
-# ── segment 3: write (write → edit → END) ─────────────────────────────────────
+# segment 3: write (write → edit → END)
 
 async def _run_write_segment(run_id: UUID):
     rid = str(run_id)
@@ -825,7 +823,7 @@ async def _run_write_segment(run_id: UUID):
     await _enter_gate(run_id, RunStatus.awaiting_final_approval, final_output)
 
 
-# ── segment 4: finalize (final approval granted → complete) ───────────────────
+# segment 4: finalize (final approval granted → complete)
 
 async def _finalize(run_id: UUID):
     rid = str(run_id)
@@ -851,7 +849,7 @@ async def _finalize(run_id: UUID):
     await finalize_monitored_run(run_id)
 
 
-# ── small helpers ─────────────────────────────────────────────────────────────
+# small helpers
 
 def _extract(text: str, seen_sources: list[str] | None = None) -> list:
     from tools.rag import extract_citations
@@ -885,7 +883,7 @@ async def _safe_eval(
         return {}
 
 
-# ── HITL approval ─────────────────────────────────────────────────────────────
+# HITL approval
 
 async def approve_hitl(run_id: str, instruction: str | None, gate: str):
     """Operator approved the stage `gate` (an awaiting_* status the API layer has

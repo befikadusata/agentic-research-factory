@@ -28,8 +28,7 @@ export default function NewRunPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Only a fully indexed doc is worth sending: a pending one has no chunks yet
-  // and a failed one never will, so either would make the run cite nothing
-  // while looking like it had a source.
+  // and a failed one never will, so either would look attached but cite nothing.
   const docIds = doc?.status === "ready" ? [doc.docId] : [];
   const waitingOnIngest = doc?.status === "pending";
 

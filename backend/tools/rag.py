@@ -14,19 +14,17 @@ import vecs
 from vecs import IndexMeasure, IndexMethod
 from sqlalchemy import text as sql_text
 
-# ---------------------------------------------------------------------------
-# pgvector persistent vector store, via `vecs` (pgvector + psycopg2, no
-# Supabase SDK — any Postgres with the vector extension works, including the
-# one Compose runs). One collection per workspace so documents persist across
-# sessions. Hybrid retrieval = HNSW vector search UNION Postgres full-text
-# search, merged and re-ranked by a cross-encoder.
-# ---------------------------------------------------------------------------
+# pgvector persistent vector store, via `vecs` (pgvector + psycopg2, no Supabase
+# SDK — any Postgres with the vector extension works, including the one Compose
+# runs). One collection per workspace so documents persist across sessions.
+# Hybrid retrieval = HNSW vector search UNION Postgres full-text search, merged
+# and re-ranked by a cross-encoder.
 
 # Collection names are interpolated into DDL/SQL below (identifiers cannot be
-# bound as parameters). They are built internally as f"workspace_{uuid}", but
-# validate anyway so that stays true if a caller ever passes something else.
-# Hyphens are allowed because UUIDs contain them, and they are safe inside the
-# double-quoted identifiers used below; quotes and semicolons are not.
+# bound as parameters), so validate them even though every caller builds them
+# internally as f"workspace_{uuid}". Hyphens are allowed because UUIDs contain
+# them and they are safe inside the double-quoted identifiers used below;
+# quotes and semicolons are not.
 _COLLECTION_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -67,16 +65,10 @@ _GEMINI_BATCH_LIMIT = 100
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _gemini_embed(texts: list[str]) -> list[list[float]]:
-    """Embed up to `_GEMINI_BATCH_LIMIT` texts in one call.
+    """Embed up to `_GEMINI_BATCH_LIMIT` texts in one `batchEmbedContents` call.
 
-    This was one HTTP round trip per text, which made ingest cost a request per
-    chunk: a 200-chunk PDF meant 200 sequential calls, each with its own
-    connection setup and retry envelope. `batchEmbedContents` takes the whole
-    list, so the same document is 2 calls.
-
-    The retry wraps the batch rather than individual texts, so a 429 re-sends up
-    to 100 embeddings. That is the right trade even so — the alternative is a
-    per-text request rate far more likely to hit the quota in the first place.
+    The retry wraps the whole batch rather than individual texts, so a 429
+    re-sends up to `_GEMINI_BATCH_LIMIT` embeddings.
     """
     if not settings.GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not configured")
@@ -111,9 +103,8 @@ def _gemini_embed(texts: list[str]) -> list[list[float]]:
     response.raise_for_status()
     embeddings = response.json().get("embeddings") or []
 
-    # Results are positional, so a short response would silently pair vectors
-    # with the wrong chunks — worse than an error, because retrieval would keep
-    # working and simply return the wrong documents.
+    # Results are positional: a short response would pair vectors with the wrong
+    # chunks and retrieval would keep working, returning the wrong documents.
     if len(embeddings) != len(texts):
         raise RuntimeError(
             f"Gemini returned {len(embeddings)} embeddings for {len(texts)} inputs"
@@ -131,9 +122,9 @@ def _gemini_embed(texts: list[str]) -> list[list[float]]:
 def _embedding_model_id() -> str:
     """Identity of the vector space, for cache keys.
 
-    Must change whenever the vectors would. Provider, model, and dimension all
-    appear because a cache that ignored any of them would hand back vectors from
-    a different space — the exact mixing `_embed` refuses to do at runtime.
+    Provider, model, and dimension all appear because a key that ignored any of
+    them would serve vectors from a different space — the mixing `_embed_uncached`
+    refuses to do at runtime.
     """
     if settings.GEMINI_API_KEY:
         return f"gemini:{settings.EMBEDDING_MODEL}:{settings.EMBEDDING_DIMENSION}"
@@ -141,13 +132,11 @@ def _embedding_model_id() -> str:
 
 
 def _embed_uncached(texts: list[str]) -> list[list[float]]:
-    # The embedder is chosen by config ALONE, never by runtime success. A per-call
-    # fallback from Gemini to the local model would store vectors from two
-    # different models in the same 384-dim collection — query and document vectors
-    # would no longer be comparable, silently degrading retrieval. So: if Gemini
-    # is configured, it is the ONLY embedder (with retries above); a hard failure
-    # raises loudly rather than quietly switching models. The local model is used
-    # only when Gemini is not configured at all.
+    # The embedder is chosen by config ALONE, never by runtime success: a per-call
+    # fallback from Gemini to the local model would put vectors from two different
+    # models in one collection, so query and document vectors would no longer be
+    # comparable. If Gemini is configured it is the only embedder, and a hard
+    # failure raises rather than switching models.
     if settings.GEMINI_API_KEY:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), _GEMINI_BATCH_LIMIT):
@@ -161,10 +150,9 @@ def _embed_uncached(texts: list[str]) -> list[list[float]]:
 def _embed(texts: list[str]) -> list[list[float]]:
     """Embed texts, serving what the cache already holds and computing the rest.
 
-    Also collapses duplicates within a single call before computing. Sub-query
-    expansion regularly emits the same string twice, and the original query as
-    well when it falls back — without this, one call pays for the same vector
-    two or three times.
+    Duplicates within a single call are collapsed before computing: sub-query
+    expansion regularly emits the same string twice, and the original query
+    again when it falls back.
     """
     if not texts:
         return []
@@ -200,10 +188,10 @@ def _embed(texts: list[str]) -> list[list[float]]:
 def _ensure_fts_index(vx, name: str) -> None:
     """GIN index backing the keyword half of hybrid retrieval.
 
-    `vecs` only ever exposed vector indexes (IndexMethod.hnsw / .ivfflat), so
-    the lexical side is plain Postgres full-text search over the chunk text in
-    the metadata JSONB. The expression here must match `_keyword_search`
-    exactly or the planner falls back to a sequential scan.
+    `vecs` exposes only vector indexes (IndexMethod.hnsw / .ivfflat), so the
+    lexical side is plain Postgres full-text search over the chunk text in the
+    metadata JSONB. The expression here must match `_keyword_search` exactly or
+    the planner falls back to a sequential scan.
     """
     with vx.Session() as sess, sess.begin():
         sess.execute(
@@ -218,22 +206,16 @@ def _as_any_terms(query: str) -> str:
     """Rewrite a query so the lexical half matches ANY term rather than all.
 
     `plainto_tsquery` ANDs every lexeme, which requires a chunk to contain every
-    content word of the query. That is fine for a bag of keywords and useless for
-    the question-shaped strings agents actually send: "What does ACM-429 mean?"
-    parses to 'acm' & '-429' & 'mean', so the one chunk documenting ACM-429 does
-    not match unless it also happens to say "mean". The retrieval eval caught
-    this as a candidate pool that was exactly the vector half's 10 results for
-    every single query — the lexical half was contributing nothing at all, and
-    the exact-identifier recall that justifies hybrid search was not being
-    delivered.
+    content word of the query — useless for the question-shaped strings agents
+    send: "What does ACM-429 mean?" parses to 'acm' & '-429' & 'mean', so the one
+    chunk documenting ACM-429 does not match unless it also says "mean".
 
     `websearch_to_tsquery` reads a bare `or` as the disjunction operator, so
-    joining the words with it gives 'acm' <-> '-429' | 'mean' — any term matches,
+    joining the words with it gives 'acm' <-> '-429' | 'mean': any term matches,
     hyphenated identifiers stay a phrase, and `ts_rank_cd` below still ranks
-    chunks matching more of the query above chunks matching one common word.
-    It is also the one tsquery parser documented never to raise on arbitrary
-    input; a query of nothing but stopwords yields an empty tsquery that matches
-    nothing, which is the wanted answer rather than an error.
+    chunks matching more of the query higher. It is also the one tsquery parser
+    documented never to raise on arbitrary input — an all-stopword query yields
+    an empty tsquery that matches nothing rather than an error.
     """
     return " or ".join(query.split())
 
@@ -242,8 +224,8 @@ def _ensure_neighbour_index(vx, name: str) -> None:
     """B-tree backing neighbour lookup in `expand_context`.
 
     Without it, pulling the chunks either side of a result is a sequential scan
-    of the whole collection on every search — cheap on a demo workspace and not
-    on a real one. The expression must match `_fetch_neighbours` exactly.
+    of the whole collection on every search. The expression must match
+    `_fetch_neighbours` exactly.
     """
     with vx.Session() as sess, sess.begin():
         sess.execute(
@@ -288,13 +270,11 @@ def _keyword_search(vx, name: str, query: str, limit: int, vertical: Optional[st
 
 
 # What the agent is told when internal retrieval has nothing to offer. The
-# wording is the fallback mechanism: a ReAct agent's next action is chosen from
+# wording is the fallback mechanism: a ReAct agent chooses its next action from
 # tool output, so a bare "No relevant documents found." is a dead end it may
-# answer around — from memory, uncited. Naming web_search makes the handoff the
-# obvious next step, which is the whole point of abstaining rather than
-# returning weak chunks. Both abstention paths (empty pool, and a pool whose
-# best chunk misses the bar) return this, because they mean the same thing to
-# the agent.
+# answer around from memory, uncited. Naming web_search makes the handoff the
+# obvious next step. Both abstention paths — empty pool, and a pool whose best
+# chunk misses the bar — return this.
 _NO_DOCUMENTS_MESSAGE = (
     "No relevant information found in the uploaded documents for this query. "
     "The uploaded documents do not appear to cover this topic — do not infer an "
@@ -330,13 +310,12 @@ def retrieve(
     """The retrieval pipeline proper: expand → hybrid fan-out → dedupe → re-rank.
 
     Returns the *whole* pool in ranked order with scores attached. The abstention
-    gate and the top-5 cut are policy, applied by the caller — they live in
-    `RAGTool._run` because an evaluation harness needs the full ranking to
-    compute MRR and NDCG, and a rank metric computed over an already-truncated
-    list measures the truncation rather than the ranking.
+    gate and the top-5 cut are policy applied by the caller in `RAGTool._run`,
+    because a rank metric (MRR, NDCG) computed over an already-truncated list
+    measures the truncation rather than the ranking.
 
-    Pass `sub_queries` to skip the LLM expansion — the harness pins them so a
-    re-run measures retrieval rather than that day's rewrite.
+    Pass `sub_queries` to skip the LLM expansion — the eval harness pins them so
+    a re-run measures retrieval rather than that day's rewrite.
     """
     if sub_queries is None:
         sub_queries = generate_sub_queries(query)
@@ -400,9 +379,7 @@ def retrieve(
     return ranked
 
 
-# ---------------------------------------------------------------------------
 # Neighbour expansion — retrieve small, read large.
-# ---------------------------------------------------------------------------
 
 @dataclass
 class ContextBlock:
@@ -420,9 +397,8 @@ class ContextBlock:
 
 # Ceiling on chunks in one tool result, seeds included. `_RESULTS_RETURNED`
 # results with a radius of 1 could otherwise triple the output of a call an agent
-# makes several times per node. Seeds are never dropped — only the expansion is
-# budgeted — so hitting the cap degrades to today's behaviour rather than losing
-# a result.
+# makes several times per node. Only the expansion is budgeted; seeds are never
+# dropped, so hitting the cap costs context rather than a result.
 _MAX_CONTEXT_CHUNKS = 12
 
 # Bounds on the overlap `_stitch` will believe. The splitter is configured for
@@ -436,9 +412,9 @@ _MAX_STITCH_OVERLAP = 400
 def _ordinal_of(metadata: dict) -> Optional[int]:
     """Position of a chunk within its document, or None if it predates ordinals.
 
-    Chunks ingested before this existed carry no ordinal, and nothing backfills
-    them. They are returned unexpanded rather than treated as position 0, which
-    would make every one of them a neighbour of every other.
+    Nothing backfills older chunks, so they are returned unexpanded rather than
+    treated as position 0 — which would make every one of them a neighbour of
+    every other.
     """
     value = metadata.get("ordinal")
     return value if isinstance(value, int) and not isinstance(value, bool) else None
@@ -447,11 +423,10 @@ def _ordinal_of(metadata: dict) -> Optional[int]:
 def _stitch(left: str, right: str) -> str:
     """Join two adjacent chunks, dropping the overlap they share.
 
-    Adjacent chunks repeat `chunk_overlap` characters by construction, so
-    concatenating them duplicates a paragraph or two — text an agent will read as
-    the document saying the same thing twice. The overlap is a literal shared
-    substring, so measuring it beats assuming the configured 200: the splitter
-    cuts at separators, which makes the real figure vary chunk to chunk.
+    Adjacent chunks repeat `chunk_overlap` characters by construction, so a
+    plain concatenation makes the document appear to say the same thing twice.
+    The overlap is measured rather than assumed to be the configured 200: the
+    splitter cuts at separators, so the real figure varies chunk to chunk.
     """
     limit = min(len(left), len(right), _MAX_STITCH_OVERLAP)
     for n in range(limit, _MIN_STITCH_OVERLAP - 1, -1):
@@ -566,12 +541,11 @@ def expand_context(
 
     Expansion stops at a page boundary. The page number *is* the citation here —
     it is why ingest splits page by page at all — and a passage spanning two pages
-    can only be labelled with one of them. That is also the cheapest correct rule:
-    chunks never straddle a page break, so a run is always wholly on one page.
+    can only be labelled with one of them. Chunks never straddle a page break, so
+    a run is always wholly on one page.
 
-    Degrades rather than fails. Chunks ingested before ordinals existed, a radius
-    of 0, and a neighbour lookup that raises all produce the results unexpanded,
-    which is exactly the previous behaviour.
+    Degrades rather than fails: chunks with no ordinal, a radius of 0, and a
+    neighbour lookup that raises all yield the results unexpanded.
     """
     if not candidates:
         return []
@@ -654,22 +628,19 @@ class RAGTool(BaseTool):
 
             # Abstain rather than return the least-bad chunks. The pool is built
             # recall-first (sub-query fan-out UNION keyword search), so it is
-            # nearly always non-empty — a workspace's documents will match
-            # *something* lexically for almost any query. Without a gate the only
-            # way this returned "nothing found" was an empty pool, so a question
-            # the documents say nothing about still produced
-            # confidently-formatted excerpts, which the writer then cited.
+            # nearly always non-empty — a workspace's documents match *something*
+            # lexically for almost any query — and an empty pool alone is not
+            # evidence that the documents cover the question.
             #
             # The gate is on the pool's BEST score, not applied per chunk.
             # Calibration (evals/rerank_calibration.py) shows this model's
             # absolute scores separate "the corpus isn't about this" from
             # everything else, but do NOT separate "answers the question" from
-            # "same topic, doesn't" — those ranges overlap almost entirely. So a
-            # per-chunk filter would drop relevant chunks that happen to score
-            # low while keeping their higher-scoring neighbours: silent, uneven,
-            # and worse than not filtering. One decision for the whole pool —
-            # answer or hand off — is what the scores can actually support.
-            # Ranking, not thresholding, is what orders the chunks that survive.
+            # "same topic, doesn't" — those ranges overlap almost entirely. A
+            # per-chunk filter would therefore drop relevant chunks that happen
+            # to score low while keeping their higher-scoring neighbours. One
+            # decision for the whole pool — answer or hand off — is what the
+            # scores support; ranking orders the chunks that survive.
             if top_score < settings.RAG_MIN_RERANK_SCORE:
                 logger.info(
                     "rag_search_abstained",
@@ -721,9 +692,8 @@ def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", 
     
     # Position of each chunk within its own document. Assigned here rather than by
     # each parser so every ingest path gets it — docling, LlamaParse, and the eval
-    # corpus alike — and so a new producer cannot forget. It relies on the caller
-    # passing a document's chunks in reading order, which every caller does: this
-    # is a loop over one parsed file.
+    # corpus alike. It relies on the caller passing a document's chunks in reading
+    # order.
     next_ordinal: dict = {}
 
     records = []
@@ -734,7 +704,7 @@ def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", 
         source = metadata.get("source")
         metadata["ordinal"] = next_ordinal.get(source, 0)
         next_ordinal[source] = metadata["ordinal"] + 1
-        if vertical: # Add vertical tag if provided
+        if vertical:
             metadata["vertical"] = vertical
         records.append((record_id, emb, metadata))
 
@@ -751,26 +721,19 @@ def ingest_documents(chunks: list[dict], collection_name: str = "session_docs", 
     logger.info("rag_ingest_complete", collection=collection_name)
 
 
-# rag_tool = RAGTool() # Removed to force instantiation with specific collection_name
-
-
 _RAG_CITATION_RE = re.compile(r"SOURCE:\s*(.+?)\s*\(Page:\s*(.+?)\)")
-# Every prompt that governs actual output (configs/prompts.yaml, agents/writer.py)
-# instructs agents to cite sources as Markdown links, never the internal
-# "SOURCE: ... (Page: ...)" format above — that format is only ever produced by
-# RAGTool._run for internal-document search results. Restricting to http(s)
-# targets excludes non-citation Markdown links (in-page anchors, relative TOC
-# links) that aren't source attributions.
+# Prompts (configs/prompts.yaml, agents/writer.py) instruct agents to cite as
+# Markdown links; the "SOURCE: ... (Page: ...)" format above is only ever
+# produced by RAGTool._run for internal-document results. Restricting to http(s)
+# targets excludes Markdown links that aren't source attributions (in-page
+# anchors, relative TOC links).
 _MARKDOWN_CITATION_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)")
 
 # Names the standards reserve for documentation and testing, so nothing behind
 # them can ever be a real source: RFC 2606 (example.com/net/org, and the
 # .example/.invalid/.test TLDs) plus RFC 6761 (localhost). Agents reach for
-# these when they have nothing to cite — a live run shipped
-# "[research studies](https://www.example.com/research-study)", and another
-# filled its entire citation list with https://www.example.com. A fabricated
-# citation is worse than a missing one: it tells the reader the claim was
-# sourced when it wasn't.
+# these when they have nothing to cite, and a fabricated citation is worse than
+# a missing one — it tells the reader the claim was sourced when it wasn't.
 _RESERVED_TLDS = {"example", "invalid", "test", "localhost"}
 
 
@@ -792,21 +755,19 @@ def _is_placeholder_url(url: str) -> bool:
 def extract_citations(text: str, seen_sources: list[str] | None = None) -> list[dict]:
     """Parse citations out of agent output. Handles both the internal RAG
     'SOURCE: <file> (Page: <N>)' format and the Markdown-link '[Title](URL)'
-    format every prompt actually instructs agents to produce for web-sourced
-    citations, deduped across both.
+    format prompts instruct agents to produce for web-sourced citations, deduped
+    across both.
 
     Links to reserved placeholder domains are dropped outright: nothing can live
     behind them, so they are fabrications rather than sources.
 
     Pass `seen_sources` (from utils.source_ledger) to check the rest against the
     URLs the run actually retrieved. Each web citation then carries
-    `verified: bool` — true when the run really fetched that URL, false when the
-    model produced it from nowhere. Unverified citations are *kept*: the ledger
-    can't be complete (a link quoted inside a scraped page is a real source it
-    never saw), so dropping on a miss would delete genuine citations, and
-    labelling is what the deep-research literature recommends over filtering.
-    Without `seen_sources` no claim is made and the field is absent — that is
-    also why RAG document citations never carry it, having no URL to check."""
+    `verified: bool`. Unverified citations are *kept*: the ledger can't be
+    complete — a link quoted inside a scraped page is a real source it never saw
+    — so dropping on a miss would delete genuine citations. Without
+    `seen_sources` no claim is made and the field is absent, which is also why
+    RAG document citations never carry it: there is no URL to check."""
     seen: set = set()
     citations = []
     dropped: list[str] = []

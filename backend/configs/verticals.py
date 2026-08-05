@@ -9,8 +9,6 @@ from datetime import datetime, timezone
 from typing import TypedDict
 
 
-# ── Schema types ─────────────────────────────────────────────────────────────
-
 class FieldSchema(TypedDict, total=False):
     label: str
     required: bool
@@ -26,13 +24,11 @@ class VerticalConfig(TypedDict):
     input_schema: dict               # {field_key: FieldSchema}
     prompt_focus: str                # injected into researcher / analyst
     output_sections: list            # enforced by writer / editor
-    quality_rubric: str              # used by LLM-as-Judge eval
-    metric_keys: list                # tracked KPIs per run
+    quality_rubric: str              # rubric handed to the reviewer node
+    metric_keys: list                # declared per vertical; nothing reads them yet
     default_format: str              # "report" | "linkedin" | "summary"
     task_type: str                   # "lead_intel" | "research_report"
 
-
-# ── Registry ─────────────────────────────────────────────────────────────────
 
 VERTICALS: dict[str, VerticalConfig] = {
 
@@ -194,13 +190,10 @@ VERTICALS: dict[str, VerticalConfig] = {
 }
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
 VALID_VERTICALS = list(VERTICALS.keys())
 
 
 def get_vertical(vertical: str | None) -> VerticalConfig | None:
-    """Return vertical config by key, or None if unknown / not provided."""
     if not vertical:
         return None
     return VERTICALS.get(vertical)

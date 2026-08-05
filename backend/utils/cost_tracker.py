@@ -29,8 +29,8 @@ async def run_cost_total(run_id) -> float:
 
 async def log_direct_call(run_id, agent_name: str, response, routing_agent: str | None = None) -> None:
     """Persist the cost of a *direct* litellm call (the eval-confidence judge, the
-    monitor diff) that bypasses the crew-node token accounting and so used to be
-    invisible in run_costs / the /analytics/costs endpoint.
+    monitor diff), which bypasses the crew-node token accounting and would
+    otherwise never reach run_costs / the /analytics/costs endpoint.
 
     `routing_agent` is the role the call was routed as (for served-model
     reconciliation); `agent_name` is the label the cost row is filed under.
@@ -50,7 +50,7 @@ async def log_direct_call(run_id, agent_name: str, response, routing_agent: str 
         logger.warning("direct_cost_log_failed", agent_name=agent_name, error=str(e))
 
 
-# ── side-cost buffer for synchronous in-crew direct calls ─────────────────────
+# side-cost buffer for synchronous in-crew direct calls
 # The RAG query_rewriter fires its own litellm call from *inside* the researcher
 # crew node's tool loop (sync, no run_id/event-loop in scope), so it can't log
 # cost the async way. Instead it appends here; _run_crew_node drains the buffer

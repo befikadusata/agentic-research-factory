@@ -3,12 +3,10 @@ import { test, expect, type Page } from "@playwright/test";
 /**
  * Demo mode end-to-end — run with `npm run test:e2e:demo`.
  *
- * Deliberately different from smoke.spec.ts in one way: **no route mocks.** The
- * smoke suite fulfils every backend request itself, so it would pass whether or
- * not demo mode existed. Here the backend URL points at a dead port
- * (playwright.demo.config.ts), so any call that escapes to the network fails —
- * which makes "the app is complete from seed data alone" an assertion rather
- * than a claim. `trackBackendCalls` also checks it explicitly.
+ * **No route mocks**, unlike smoke.spec.ts, which fulfils every backend request
+ * itself and so would pass with or without demo mode. Here the backend URL
+ * points at a dead port (playwright.demo.config.ts), so any call that escapes to
+ * the network fails; `trackBackendCalls` asserts none is even attempted.
  */
 
 /** The unreachable address playwright.demo.config.ts hands the app. */
@@ -76,11 +74,10 @@ test.describe("Demo mode", () => {
 
     await page.getByRole("link", { name: "New Run", exact: true }).click();
 
-    // Retry the click until it takes. The playbook cards are React onClick
-    // handlers, and Playwright's actionability checks don't know about
-    // hydration — against `next dev` compiling this route for the first time,
-    // a single click can land on markup that isn't listening yet and is simply
-    // lost. aria-pressed is the signal that the state actually changed.
+    // Retry the click until it takes: Playwright's actionability checks don't
+    // know about hydration, so against `next dev` compiling this route for the
+    // first time a click can land on markup that isn't listening yet and is
+    // silently lost. aria-pressed is the signal that the state really changed.
     const playbook = page.getByRole("group", { name: "Playbook" });
     const card = playbook.getByRole("button", { name: /Marketing Competitor Brief/i });
     await expect(async () => {
@@ -107,7 +104,7 @@ test.describe("Demo mode", () => {
     const review = page.getByText("Research Complete — Review Before Analysis");
     await expect(review).toBeVisible({ timeout: 20_000 });
     // The gate shows the research artifact, including what the stage refused to
-    // carry forward — that self-reporting is the part worth demonstrating.
+    // carry forward.
     await expect(page.getByText("Eight findings survived the confidence filter")).toBeVisible();
 
     await page.getByPlaceholder(/Focus more on pricing strategy/i).fill("Focus on pricing.");
@@ -167,9 +164,8 @@ test.describe("Demo mode", () => {
       await expect(attached).toBeVisible({ timeout: 3_000 });
     }).toPass({ timeout: 30_000 });
 
-    // Storing the file is not indexing it. Until the chunks exist the run must
-    // not be startable — otherwise it retrieves nothing and cites a source it
-    // never read.
+    // Storing the file is not indexing it: until the chunks exist the run must
+    // not be startable, or it would cite a source it never read.
     await expect(page.getByText("Indexing market-notes.pdf…")).toBeVisible();
     await expect(page.getByRole("button", { name: /Waiting for your PDF/i })).toBeDisabled();
 
@@ -203,8 +199,7 @@ test.describe("Demo mode", () => {
     await expect(researcher).toContainText("×2");
     await expect(researcher).toContainText("25,330");
 
-    // A run that died mid-pipeline still spent tokens, and hiding that is how a
-    // bill becomes a surprise.
+    // A run that died mid-pipeline still spent tokens, so it still reports them.
     await page.getByRole("link", { name: "History" }).click();
     await page.getByText("Pricing changes across enterprise observability vendors").click();
     await expect(page.getByText("This run failed. Check the agent logs above for details.")).toBeVisible();
@@ -221,9 +216,8 @@ test.describe("Demo mode", () => {
     await expect(page.locator("dl > div").filter({ hasText: "Completed runs" })).toContainText("2");
     await expect(page.getByRole("meter", { name: "Average overall score" })).toBeVisible();
 
-    // …but the failed run's spend still counts toward the workspace total,
-    // because it was really spent. The two sections deliberately count
-    // different populations, and the demo mirrors that rather than smoothing it.
+    // …but the failed run's spend still counts toward the workspace total. The
+    // two sections cover different populations, and the demo mirrors that.
     await expect(page.locator("dl > div").filter({ hasText: "Total spend" })).toBeVisible();
     await expect(
       page.getByRole("table", { name: "Token usage and cost per agent across all runs" }),

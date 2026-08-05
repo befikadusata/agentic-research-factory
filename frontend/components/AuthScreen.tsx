@@ -44,10 +44,8 @@ export function AuthScreen() {
           </div>
 
           {IS_DEMO ? (
-            // The email and Google paths both need infrastructure demo mode
-            // exists to avoid — a backend to check the password against, an
-            // OAuth client to redirect to. Showing buttons that can only fail
-            // would be worse than showing the one that works.
+            // The email and Google paths need a backend and an OAuth client,
+            // neither of which a demo build has, so they are hidden entirely.
             <>
               <h2 className="text-2xl font-bold text-content mb-1">Take a look around</h2>
               <p className="text-content-secondary text-sm mb-6">

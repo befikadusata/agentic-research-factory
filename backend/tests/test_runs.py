@@ -69,12 +69,11 @@ async def test_list_runs_pagination(client, auth_as, db_session):
     await _make_run(db_session, uid, RunStatus.complete)
     await _make_run(db_session, uid, RunStatus.complete)
 
-    # limit=1 returns one result
     resp = await client.get("/runs?limit=1&offset=0")
     assert resp.status_code == 200
     assert len(resp.json()) == 1
 
-    # offset skips records — exactly 3 rows exist for this uid
+    # Exactly 3 rows exist for this uid, so offset=1 must return 2.
     resp_all = await client.get("/runs?limit=10&offset=0")
     resp_offset = await client.get("/runs?limit=10&offset=1")
     assert len(resp_all.json()) == 3

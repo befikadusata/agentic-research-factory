@@ -6,8 +6,6 @@ from uuid import uuid4
 from models import Document, DocumentStatus, Workspace, WorkspaceMember
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
-
 async def _make_workspace(db, owner_id: str) -> Workspace:
     ws = Workspace(name="test-ws", owner_id=owner_id)
     db.add(ws)
@@ -36,8 +34,6 @@ def stored_pdf(tmp_path):
     return str(path)
 
 
-# ── POST /upload ──────────────────────────────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_upload_rejects_non_pdf(client, mock_user, db_session):
     ws = await _make_workspace(db_session, mock_user)
@@ -61,7 +57,6 @@ async def test_upload_rejects_oversized(client, mock_user, db_session):
 
 @pytest.mark.asyncio
 async def test_upload_requires_workspace_membership(client, mock_user, db_session):
-    # Workspace owned by someone else
     other_ws = Workspace(name="other", owner_id="other-user")
     db_session.add(other_ws)
     await db_session.commit()
@@ -116,8 +111,6 @@ async def test_upload_vertical_optional(client, mock_user, db_session):
     doc = await db_session.get(Document, UUID(data["doc_id"]))
     assert doc.vertical is None
 
-
-# ── GET /upload/{doc_id} ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_get_doc_status_returns_correct_fields(client, mock_user, db_session):
@@ -174,8 +167,6 @@ async def test_get_doc_status_404_for_unknown(client, mock_user):
     assert response.status_code == 404
 
 
-# ── pdf_service ───────────────────────────────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_parse_pdf_docling_returns_chunks():
     mock_result = MagicMock()
@@ -222,8 +213,6 @@ async def test_parse_pdf_returns_empty_when_both_fail():
     assert chunks == []
 
 
-# ── docling page provenance ───────────────────────────────────────────────────
-
 def _fake_docling_document(pages_markdown: dict[int, str]):
     """A DoclingDocument stand-in whose per-page export mirrors `pages_markdown`."""
     document = MagicMock()
@@ -241,9 +230,9 @@ def _fake_docling_document(pages_markdown: dict[int, str]):
 
 
 def test_parse_with_docling_tags_each_chunk_with_its_page():
-    """The primary parse path used to record page=None for every chunk, so every
-    internal citation rendered 'Page: N/A' even though the citation pipeline and
-    the Sources panel were fully built."""
+    """The primary parse path must carry each chunk's page number. Without it
+    every internal citation renders 'Page: N/A' even though the citation
+    pipeline and the Sources panel are fully built."""
     converted = _fake_docling_document({
         1: "# Intro\n\nFirst page body about the research question.",
         2: "## Method\n\nSecond page body describing the approach.",
@@ -279,7 +268,7 @@ def test_parse_with_docling_skips_empty_pages():
 
 def test_parse_with_docling_falls_back_to_whole_document_without_pages():
     """Some inputs yield no page provenance. Ingesting without page numbers
-    beats not ingesting at all — the old behaviour, now the exception."""
+    beats not ingesting at all, so this path stays open as the exception."""
     converted = _fake_docling_document({})
     converted.document.pages = {}
     converted.document.export_to_markdown.side_effect = None
@@ -305,8 +294,6 @@ def test_parse_with_docling_returns_empty_for_blank_document():
         from services.pdf_service import _parse_with_docling
         assert _parse_with_docling("/tmp/blank.pdf") == []
 
-
-# ── ingest_service ────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_ingest_doc_sets_ready(db_session, stored_pdf):
@@ -429,10 +416,10 @@ async def test_ingest_doc_sets_failed_on_error(db_session, stored_pdf):
 
 @pytest.mark.asyncio
 async def test_ingest_doc_marks_failed_when_no_chunks_extracted(db_session, stored_pdf):
-    """parse_pdf swallows every parser failure and returns []. That used to be
-    recorded as `ready` with chunk_count=0: the UI reported a successful upload
-    while nothing was embedded, so every later run silently ran with no document
-    context."""
+    """parse_pdf swallows every parser failure and returns [], so an empty chunk
+    list must not be recorded as `ready`. Marked ready with chunk_count=0, the UI
+    reports a successful upload while nothing was embedded and every later run
+    silently proceeds with no document context."""
     ws = Workspace(name="empty-ws", owner_id="user4")
     db_session.add(ws)
     await db_session.commit()
