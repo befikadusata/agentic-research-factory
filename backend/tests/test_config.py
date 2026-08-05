@@ -124,9 +124,6 @@ _SECRET_SOURCES = [
     "backend/.env.example",
     "frontend/.env.local.example",
     "docker-compose.yml",
-    # Documentation, but it is written to be copied — it carries ready-made .env
-    # blocks, so a stale value here reproduces the mismatch by hand.
-    "docs/build_specification.md",
 ]
 
 
