@@ -109,6 +109,13 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      # Shared with celery. The retrieval models are baked into the image, so on
+      # first use Docker seeds this volume from that baked copy — but anything
+      # fetched later (a new model, a revision bump) then survives the next
+      # rebuild instead of being re-downloaded inside a request. On a host that
+      # cannot reach HuggingFace, this volume is also the only way a manually
+      # seeded cache outlives `--force-recreate`.
+      - hf_cache:/root/.cache/huggingface
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -152,6 +159,8 @@ services:
       # No firecrawl-api dependency — see the backend service note above.
     volumes:
       - ./backend:/app
+      # Same cache the API mounts — the worker is where retrieval actually runs.
+      - hf_cache:/root/.cache/huggingface
 
   # Celery-beat scheduler: fires dispatch_due_monitors_task every 60s so due
   # monitors spawn runs. Runs as its own process (beat must be a singleton —
@@ -347,5 +356,6 @@ services:
 volumes:
   pgdata:
   miniodata:
+  hf_cache:
   firecrawl_pgdata:
   frontend_next:
