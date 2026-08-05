@@ -22,6 +22,20 @@ def _pdf_file(size_bytes: int = 1024):
     return {"file": ("test.pdf", io.BytesIO(b"%PDF" + b"x" * size_bytes), "application/pdf")}
 
 
+@pytest.fixture
+def stored_pdf(tmp_path):
+    """A file that actually exists, for the ingest tests below.
+
+    ingest_doc resolves file_path through storage_service before parsing, so a
+    path pointing at nothing now fails as a missing object and never reaches the
+    patched parse_pdf. These tests are about what happens *after* a successful
+    fetch, so the bytes have to be there.
+    """
+    path = tmp_path / "stored.pdf"
+    path.write_bytes(b"%PDF-1.7")
+    return str(path)
+
+
 # ── POST /upload ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -295,7 +309,7 @@ def test_parse_with_docling_returns_empty_for_blank_document():
 # ── ingest_service ────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_ingest_doc_sets_ready(db_session):
+async def test_ingest_doc_sets_ready(db_session, stored_pdf):
     ws = Workspace(name="ingest-ws", owner_id="user1")
     db_session.add(ws)
     await db_session.commit()
@@ -305,7 +319,7 @@ async def test_ingest_doc_sets_ready(db_session):
         workspace_id=ws.id,
         uploaded_by="user1",
         filename="test.pdf",
-        file_path="/tmp/test.pdf",
+        file_path=stored_pdf,
         file_size_bytes=100,
     )
     db_session.add(doc)
@@ -340,7 +354,7 @@ async def test_ingest_doc_sets_ready(db_session):
 
 
 @pytest.mark.asyncio
-async def test_ingest_doc_passes_vertical(db_session):
+async def test_ingest_doc_passes_vertical(db_session, stored_pdf):
     ws = Workspace(name="ingest-ws-v", owner_id="user3")
     db_session.add(ws)
     await db_session.commit()
@@ -350,7 +364,7 @@ async def test_ingest_doc_passes_vertical(db_session):
         workspace_id=ws.id,
         uploaded_by="user3",
         filename="lead.pdf",
-        file_path="/tmp/lead.pdf",
+        file_path=stored_pdf,
         file_size_bytes=200,
         vertical="lead_intel",
     )
@@ -380,7 +394,7 @@ async def test_ingest_doc_passes_vertical(db_session):
 
 
 @pytest.mark.asyncio
-async def test_ingest_doc_sets_failed_on_error(db_session):
+async def test_ingest_doc_sets_failed_on_error(db_session, stored_pdf):
     ws = Workspace(name="fail-ws", owner_id="user2")
     db_session.add(ws)
     await db_session.commit()
@@ -390,7 +404,7 @@ async def test_ingest_doc_sets_failed_on_error(db_session):
         workspace_id=ws.id,
         uploaded_by="user2",
         filename="bad.pdf",
-        file_path="/tmp/bad.pdf",
+        file_path=stored_pdf,
         file_size_bytes=50,
     )
     db_session.add(doc)
@@ -414,7 +428,7 @@ async def test_ingest_doc_sets_failed_on_error(db_session):
 
 
 @pytest.mark.asyncio
-async def test_ingest_doc_marks_failed_when_no_chunks_extracted(db_session):
+async def test_ingest_doc_marks_failed_when_no_chunks_extracted(db_session, stored_pdf):
     """parse_pdf swallows every parser failure and returns []. That used to be
     recorded as `ready` with chunk_count=0: the UI reported a successful upload
     while nothing was embedded, so every later run silently ran with no document
@@ -428,7 +442,7 @@ async def test_ingest_doc_marks_failed_when_no_chunks_extracted(db_session):
         workspace_id=ws.id,
         uploaded_by="user4",
         filename="scanned.pdf",
-        file_path="/tmp/scanned.pdf",
+        file_path=stored_pdf,
         file_size_bytes=100,
     )
     db_session.add(doc)
@@ -452,6 +466,52 @@ async def test_ingest_doc_marks_failed_when_no_chunks_extracted(db_session):
     assert doc.chunk_count == 0
     assert doc.error_message
     # Nothing was embedded, so the vector store must not have been touched.
+    mock_ingest.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ingest_doc_reports_missing_storage_distinctly(db_session, tmp_path):
+    """A file the worker cannot fetch must not be reported as an unparseable PDF.
+
+    This is the failure a container-local UPLOAD_DIR produced on every upload:
+    the API wrote to its own filesystem, the worker's open() raised ENOENT,
+    parse_pdf swallowed it and returned no chunks, and the operator was told
+    their perfectly good PDF was empty or image-only. The message has to point
+    at storage instead, and the parser must never be reached.
+    """
+    ws = Workspace(name="gone-ws", owner_id="user5")
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    doc = Document(
+        workspace_id=ws.id,
+        uploaded_by="user5",
+        filename="vanished.pdf",
+        file_path=str(tmp_path / "never-written.pdf"),
+        file_size_bytes=100,
+    )
+    db_session.add(doc)
+    await db_session.commit()
+    await db_session.refresh(doc)
+
+    with patch("services.ingest_service.AsyncSessionLocal") as mock_session_cls, \
+         patch("services.ingest_service.parse_pdf", new_callable=AsyncMock) as mock_parse, \
+         patch("services.ingest_service.ingest_documents") as mock_ingest:
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=db_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_session_cls.return_value = mock_ctx
+
+        from services.ingest_service import ingest_doc
+        await ingest_doc(doc.id)
+
+    await db_session.refresh(doc)
+    assert doc.status == DocumentStatus.failed
+    assert "storage" in (doc.error_message or "")
+    assert "no text" not in (doc.error_message or "").lower()
+    mock_parse.assert_not_called()
     mock_ingest.assert_not_called()
 
 

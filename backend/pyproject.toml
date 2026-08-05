@@ -29,6 +29,9 @@ dependencies = [
   "pydyf==0.11.0",
   "markdown==3.7",
   "httpx==0.27.0",
+  # S3-compatible client for uploaded-PDF storage (MinIO locally, S3/R2/Spaces
+  # when hosted) — see services/storage_service.py.
+  "boto3==1.35.36",
   "vecs==0.4.3",
   "sentence-transformers==3.0.1",
   # Declared directly ONLY so the CPU-index pin below applies — uv resolves

@@ -2,14 +2,12 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID, uuid4
 from typing import Optional
-import os
 from database import get_db
 from models import Document, DocumentStatus, WorkspaceMember
 from auth import get_current_user
+from services.storage_service import store_upload
 
 router = APIRouter()
-UPLOAD_DIR = "/tmp/research_factory_uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 ALLOWED_TYPES = {"application/pdf"}
 MAX_SIZE_MB = 20
@@ -33,16 +31,17 @@ async def upload_file(
         raise HTTPException(400, f"File exceeds {MAX_SIZE_MB}MB limit")
 
     doc_id = uuid4()
-    path = os.path.join(UPLOAD_DIR, f"{doc_id}.pdf")
-    with open(path, "wb") as f:
-        f.write(content)
+    # Store the bytes BEFORE the row is committed. The reverse order can dispatch
+    # an ingest task for an object that isn't written yet, and leaves a row
+    # pointing at nothing if the write then fails.
+    locator = await store_upload(doc_id, content)
 
     doc = Document(
         id=doc_id,
         workspace_id=workspace_id,
         uploaded_by=user_id,
         filename=file.filename,
-        file_path=path,
+        file_path=locator,
         file_size_bytes=len(content),
         vertical=vertical,
     )

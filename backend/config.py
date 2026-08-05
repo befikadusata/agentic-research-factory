@@ -231,6 +231,25 @@ class Settings(BaseSettings):
     # Deprecated former name, still read so an existing .env keeps working.
     SUPABASE_DB_URL: str | None = None
 
+    # Where an uploaded PDF lives between the API that receives it and the
+    # Celery worker that parses it. Those are separate processes — separate
+    # containers under Compose — so "local" is only correct when both share a
+    # filesystem. They don't by default, which silently broke uploaded-document
+    # RAG entirely: the worker's open() raised ENOENT, parse_pdf swallowed it,
+    # and the document was recorded as having no extractable text.
+    #
+    # "s3" is any S3-compatible object store — the MinIO service Compose runs,
+    # or real S3/R2/Spaces in a hosted deployment — which both processes reach
+    # over the network regardless of where they run.
+    STORAGE_BACKEND: str = "local"
+    UPLOAD_DIR: str = "/tmp/research_factory_uploads"
+    STORAGE_BUCKET: str = "research-factory-uploads"
+    # Unset → the AWS SDK's own endpoint resolution, i.e. real S3.
+    STORAGE_ENDPOINT_URL: str | None = None
+    STORAGE_ACCESS_KEY: str | None = None
+    STORAGE_SECRET_KEY: str | None = None
+    STORAGE_REGION: str = "us-east-1"
+
     # Langfuse for observability
     LANGFUSE_PUBLIC_KEY: str | None = None
     LANGFUSE_SECRET_KEY: str | None = None
@@ -260,6 +279,10 @@ if os.environ.get("TESTING") == "1":
         raise RuntimeError("TEST_DATABASE_URL must differ from DATABASE_URL")
     settings.DATABASE_URL = _target
     settings.EMBEDDING_CACHE_ENABLED = False
+    # The suite must never reach a real object store, and a developer whose .env
+    # points at one would otherwise have their bucket written to by every upload
+    # test. Tests that exercise the s3 path set this themselves.
+    settings.STORAGE_BACKEND = "local"
 
 # Older configs named this SUPABASE_DB_URL. Without this the value would be
 # ignored and the derivation below would silently repoint the vector store at
@@ -345,8 +368,37 @@ def _is_blank(value: str | None) -> bool:
     return value is None or not value.strip()
 
 
+_STORAGE_BACKENDS = frozenset({"local", "s3"})
+
+
+def _validate_storage(s: Settings) -> None:
+    """Reject a storage setting that would fail only at upload time.
+
+    A typo here is the same class of bug this setting exists to fix: an
+    unrecognised value silently selecting local storage, uploads landing in a
+    filesystem the worker cannot see, and the failure surfacing much later as
+    "no text could be extracted" from a PDF that parses fine.
+    """
+    if s.STORAGE_BACKEND not in _STORAGE_BACKENDS:
+        raise RuntimeError(
+            f"STORAGE_BACKEND must be one of {sorted(_STORAGE_BACKENDS)} "
+            f"(got {s.STORAGE_BACKEND!r})."
+        )
+    if s.STORAGE_BACKEND == "local":
+        # Not fatal: a single-process deployment, and the test suite, are both
+        # legitimately served by the local filesystem. It is only wrong when the
+        # API and the worker are separate — which is the normal deployment.
+        logger.warning(
+            "STORAGE_BACKEND=local — uploaded PDFs are written to UPLOAD_DIR on "
+            "the local filesystem. Uploaded-document RAG will fail unless the "
+            "API and the Celery worker share it. Set STORAGE_BACKEND=s3 to use "
+            "object storage instead."
+        )
+
+
 def validate_config(s: Settings) -> None:
     _validate_secret(s)
+    _validate_storage(s)
     missing = [k for k in _PROD_REQUIRED if _is_blank(getattr(s, k))]
     # A blank URL must not exempt anything either: it would waive the key check
     # for a self-hosted backend that isn't actually configured.

@@ -50,6 +50,7 @@ flowchart LR
     Redis[("Redis<br/>task state + Pub/Sub")]
     AppDB[("PostgreSQL<br/>application data")]
     VectorDB[("PostgreSQL + pgvector<br/>vecs retrieval store")]
+    Files[("MinIO / S3<br/>uploaded PDFs")]
     Search["SearXNG or Tavily"]
     Scrape["Firecrawl"]
     Models["Groq / OpenRouter<br/>model routing"]
@@ -59,6 +60,8 @@ flowchart LR
     API --> AppDB
     API <--> Redis
     API --> Worker
+    API -->|"store upload"| Files
+    Worker -->|"read to parse"| Files
     Worker --> Graph
     Graph <--> Redis
     Graph --> Models
@@ -87,7 +90,7 @@ The application database uses SQLAlchemy and Alembic. Document RAG stores its em
 | Frontend | Next.js 15, React 19, NextAuth.js, Tailwind CSS, Playwright |
 | API | FastAPI, Python 3.11+, Pydantic, SQLAlchemy, Alembic |
 | Orchestration | LangGraph, CrewAI, Celery |
-| Data | PostgreSQL, pgvector/vecs, Redis |
+| Data | PostgreSQL, pgvector/vecs, Redis, MinIO/S3 object storage |
 | Retrieval | Docling, optional LlamaParse fallback, SentenceTransformers, HNSW + Postgres full-text |
 | Operations | Docker Compose, structured logging, Prometheus metrics, optional Langfuse tracing |
 
@@ -118,7 +121,7 @@ For the real thing, keep reading.
 
 ### Core live research
 
-This path starts the web application, API, PostgreSQL, Redis, Celery workers, and self-hosted SearXNG. It does not start the heavier self-hosted Firecrawl stack or configure uploaded-document RAG.
+This path starts the web application, API, PostgreSQL, Redis, Celery workers, MinIO for uploaded files, and self-hosted SearXNG. It does not start the heavier self-hosted Firecrawl stack.
 
 Prerequisites: Docker with Compose and at least one supported LLM provider key. A Groq key is the simplest default.
 
@@ -149,6 +152,7 @@ Prerequisites: Docker with Compose and at least one supported LLM provider key. 
    | Frontend | http://localhost:3000 |
    | OpenAPI docs | http://localhost:8000/docs |
    | Health check | http://localhost:8000/health |
+   | MinIO console | http://localhost:9001 (`minioadmin` / `minioadmin`) |
 
 ### Enable the full feature set
 
@@ -159,6 +163,7 @@ Add only the providers required for the features you want:
 | Cross-provider model fallback | `OPENROUTER_API_KEY` |
 | Gemini document embeddings | `GEMINI_API_KEY` |
 | Uploaded-document RAG on a separate database | `VECTOR_DB_URL`; defaults to the application PostgreSQL, which already has pgvector |
+| Uploaded files on hosted object storage (S3, R2, Spaces) | `STORAGE_ENDPOINT_URL`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`; defaults to the MinIO service Compose runs |
 | Cloud search instead of SearXNG | `TAVILY_API_KEY` |
 | Cloud scraping | `FIRECRAWL_API_KEY`; when using Compose, remove or override its self-hosted `FIRECRAWL_API_URL` value |
 | LlamaParse PDF fallback | `LLAMA_CLOUD_API_KEY` |
@@ -215,7 +220,8 @@ npm run test:e2e:demo
 - Model and search output varies by provider, model version, and source availability.
 - The displayed quality score is an LLM-as-judge assessment, not a guarantee of factual correctness; the human checkpoint and citations remain the primary review controls.
 - Uploaded-document RAG uses a separate synchronous `vecs` connection, derived from `DATABASE_URL` unless `VECTOR_DB_URL` overrides it.
-- Uploaded PDFs are written under `/tmp` and are not deleted after ingestion, so they persist for the life of the container and a restart can leave a document row pointing at a file that is gone. Embeddings are unaffected — they are already in PostgreSQL — but re-ingesting that document requires re-uploading it.
+- Uploaded PDFs are kept in object storage after ingestion so a document can be re-parsed without re-uploading; nothing prunes them, so storage grows with every upload.
+- `STORAGE_BACKEND=local` writes uploads to the local filesystem, which is only correct when the API and the Celery worker share one. They do not under Compose, or in any deployment that runs the worker as its own service — use `s3` there.
 - Firecrawl is resource-intensive and therefore excluded from the default Compose profile.
 - Search, scraping, parsing, and evaluation degrade independently where possible; model exhaustion and core database failure terminate a run.
 
