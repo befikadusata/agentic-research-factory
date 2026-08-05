@@ -24,6 +24,9 @@ out/
 frontend/tmp/
 frontend/test-results/
 frontend/playwright-report/
+# Screenshot and trace runs land here at the repo root rather than under
+# frontend/, so the entries above do not cover them.
+artifacts/
 
 # Uploads
 /tmp/research_factory_uploads/
