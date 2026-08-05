@@ -1583,6 +1583,13 @@ async def stream_run(run_id: UUID):
 ```
 
 ### `backend/routers/runs.py`
+
+> **Superseded in one respect:** the `from routers.upload import UPLOAD_DIR`
+> import and the `doc_paths` line below reconstruct a filesystem path from a
+> document ID. Uploads are no longer addressed that way — see the note on
+> `backend/routers/upload.py` further down. A document's location is read from
+> its row, never rebuilt from a directory constant.
+
 ```python
 from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1685,6 +1692,22 @@ async def download_md(run_id: UUID, db: AsyncSession = Depends(get_db)):
 ```
 
 ### `backend/routers/upload.py`
+
+> **Superseded — do not implement the local-path storage below.** Writing the
+> upload to `UPLOAD_DIR` on the local filesystem is correct only if the process
+> that parses it later shares that filesystem. It does not: parsing is
+> asynchronous and runs in a Celery worker, a separate container under Compose
+> and a separate service when hosted. Shipping this cost the project a silent
+> outage in which *every* uploaded PDF failed — the worker's `open()` raised
+> `ENOENT`, `parse_pdf` swallowed it and returned no chunks, and the document
+> was reported to the operator as having no extractable text.
+>
+> The shipped implementation stores uploads in S3-compatible object storage via
+> [`backend/services/storage_service.py`](../backend/services/storage_service.py)
+> and records the returned locator on the document row. See
+> [architecture.md §3](architecture.md) and the `STORAGE_*` entries in
+> `backend/.env.example`.
+
 ```python
 from fastapi import APIRouter, UploadFile, File, HTTPException
 import os, uuid, shutil
