@@ -148,7 +148,9 @@ class RunDetailResponse(RunResponse):
     analysis_output: str | None
     final_output: str | None
     error_message: str | None
-    citations: list[dict] = Field(default_factory=list)
+    # Citations live under `metrics.citations` — that is where the pipeline
+    # writes them and where the UI reads them. They were also mirrored to a
+    # top-level field here, which nothing ever read.
     metrics: dict = Field(default_factory=dict)
     costs: list[RunCostResponse] = Field(default_factory=list)
 

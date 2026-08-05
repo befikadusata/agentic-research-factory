@@ -189,8 +189,12 @@ async def test_run_detail_citations_populated(client, auth_as, db_session):
     resp = await client.get(f"/runs/{run.id}")
     assert resp.status_code == 200
     data = resp.json()
-    assert "citations" in data
-    assert data["citations"] == [{"source": "a.pdf", "page": "1"}, {"source": "b.pdf", "page": "5"}]
+    # Under metrics, which is the only place they are published — SourcesPanel
+    # reads `run.metrics.citations`.
+    assert data["metrics"]["citations"] == [
+        {"source": "a.pdf", "page": "1"},
+        {"source": "b.pdf", "page": "5"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -201,7 +205,7 @@ async def test_run_detail_citations_empty_when_no_metrics(client, auth_as, db_se
 
     resp = await client.get(f"/runs/{run.id}")
     assert resp.status_code == 200
-    assert resp.json()["citations"] == []
+    assert resp.json()["metrics"].get("citations", []) == []
 
 
 @pytest.mark.asyncio

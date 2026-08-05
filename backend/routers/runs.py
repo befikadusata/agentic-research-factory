@@ -137,5 +137,4 @@ async def get_run(
     return RunDetailResponse(
         **{k: v for k, v in run.__dict__.items() if not k.startswith("_") and k != "logs"},
         logs=normalize_run_logs(run.logs),
-        citations=(run.metrics or {}).get("citations", []),
     )
