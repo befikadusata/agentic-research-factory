@@ -13,11 +13,11 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Basic config validation and secrets handling.
   - Local dev and deployment docs alignment.
 - Key files:
-  - [docker-compose.yml](/home/befikadusata/Devs/2026/agentic-research-factory/docker-compose.yml)
-  - [backend/Dockerfile](/home/befikadusata/Devs/2026/agentic-research-factory/backend/Dockerfile)
-  - [frontend/Dockerfile](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/Dockerfile)
-  - [backend/alembic/](/home/befikadusata/Devs/2026/agentic-research-factory/backend/alembic)
-  - [README.md](/home/befikadusata/Devs/2026/agentic-research-factory/README.md)
+  - [docker-compose.yml](../docker-compose.yml)
+  - [backend/Dockerfile](../backend/Dockerfile)
+  - [frontend/Dockerfile](../frontend/Dockerfile)
+  - [backend/alembic/](../backend/alembic)
+  - [README.md](../README.md)
 - Done when:
   - `docker compose up --build` boots the app end-to-end.
   - CI runs backend tests and frontend checks on every PR.
@@ -32,10 +32,10 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Route protection on runs, uploads, outputs, and workspaces.
   - Workspace membership enforcement.
 - Key files:
-  - [backend/auth.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/auth.py)
-  - [frontend/app/api/auth/[...nextauth]/route.ts](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/app/api/auth/[...nextauth]/route.ts)
-  - [frontend/lib/auth.ts](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/lib/auth.ts)
-  - [backend/routers/workspaces.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/routers/workspaces.py)
+  - [backend/auth.py](../backend/auth.py)
+  - [frontend/app/api/auth/[...nextauth]/route.ts](../frontend/app/api/auth/[...nextauth]/route.ts)
+  - [frontend/lib/auth.ts](../frontend/lib/auth.ts)
+  - [backend/routers/workspaces.py](../backend/routers/workspaces.py)
 - Done when:
   - Unauthenticated users cannot create or view runs.
   - Users only see their own runs or workspace-authorized runs.
@@ -50,10 +50,10 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Persistence of topic, format, vertical, outputs, logs, and costs.
   - Run list and run detail APIs.
 - Key files:
-  - [backend/models.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/models.py)
-  - [backend/routers/runs.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/routers/runs.py)
-  - [backend/services/run_service.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/services/run_service.py)
-  - [backend/schemas.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/schemas.py)
+  - [backend/models.py](../backend/models.py)
+  - [backend/routers/runs.py](../backend/routers/runs.py)
+  - [backend/services/run_service.py](../backend/services/run_service.py)
+  - [backend/schemas.py](../backend/schemas.py)
 - Done when:
   - A run can be created, fetched, and listed consistently.
   - Status changes are persisted and reflected in the UI.
@@ -68,9 +68,9 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Indexing docs into the retrieval layer.
   - Workspace-scoped document collections.
 - Key files:
-  - [backend/routers/upload.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/routers/upload.py)
-  - [backend/services/pdf_service.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/services/pdf_service.py)
-  - [backend/tools/rag.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/tools/rag.py)
+  - [backend/routers/upload.py](../backend/routers/upload.py)
+  - [backend/services/pdf_service.py](../backend/services/pdf_service.py)
+  - [backend/tools/rag.py](../backend/tools/rag.py)
 - Done when:
   - PDF upload rejects invalid files.
   - Good PDFs are ingested and available to runs.
@@ -86,9 +86,9 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Citation handling.
   - Workspace filtering in retrieval.
 - Key files:
-  - [backend/services/query_rewriter.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/services/query_rewriter.py)
-  - [backend/tools/search.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/tools/search.py)
-  - [backend/tools/rag.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/tools/rag.py)
+  - [backend/services/query_rewriter.py](../backend/services/query_rewriter.py)
+  - [backend/tools/search.py](../backend/tools/search.py)
+  - [backend/tools/rag.py](../backend/tools/rag.py)
 - Done when:
   - Retrieval returns relevant evidence, not noisy chunks.
   - Users can trace claims back to source material.
@@ -102,8 +102,8 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - `RAGTool._run` fetches candidates for each sub-query, merges the pools, deduplicates by chunk ID, then re-ranks the combined set with the cross-encoder.
   - Keep total latency increase under 2× single-query baseline.
 - Key files:
-  - [backend/services/query_rewriter.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/services/query_rewriter.py)
-  - [backend/tools/rag.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/tools/rag.py)
+  - [backend/services/query_rewriter.py](../backend/services/query_rewriter.py)
+  - [backend/tools/rag.py](../backend/tools/rag.py)
 - Done when:
   - A multi-faceted query returns chunks from distinct angles.
   - Merge and dedup logic is covered by unit tests.
@@ -118,8 +118,8 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Retry and fallback logic.
   - Task-type routing for verticals.
 - Key files:
-  - [backend/agents/crew.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/agents/crew.py)
-  - [backend/agents/](/home/befikadusata/Devs/2026/agentic-research-factory/backend/agents)
+  - [backend/agents/crew.py](../backend/agents/crew.py)
+  - [backend/agents/](../backend/agents)
 - Done when:
   - Each task type follows the intended path.
   - Retry behavior is predictable.
@@ -134,9 +134,9 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Instruction injection into the next stage.
   - Resume handling after approval.
 - Key files:
-  - [backend/routers/hitl.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/routers/hitl.py)
-  - [backend/services/run_service.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/services/run_service.py)
-  - [frontend/components/HitlModal.tsx](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/components/HitlModal.tsx)
+  - [backend/routers/hitl.py](../backend/routers/hitl.py)
+  - [backend/services/run_service.py](../backend/services/run_service.py)
+  - [frontend/components/HitlModal.tsx](../frontend/components/HitlModal.tsx)
 - Done when:
   - The run pauses at review points.
   - The user can approve with or without extra direction.
@@ -151,9 +151,9 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Frontend log consumption.
   - Status synchronization in the UI.
 - Key files:
-  - [backend/routers/stream.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/routers/stream.py)
-  - [backend/services/run_service.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/services/run_service.py)
-  - [frontend/app/runs/[id]/page.tsx](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/app/runs/[id]/page.tsx)
+  - [backend/routers/stream.py](../backend/routers/stream.py)
+  - [backend/services/run_service.py](../backend/services/run_service.py)
+  - [frontend/app/runs/[id]/page.tsx](../frontend/app/runs/[id]/page.tsx)
 - Done when:
   - Logs stream live.
   - Status updates appear without page refresh.
@@ -168,9 +168,9 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Download endpoints.
   - Final output formatting cleanup.
 - Key files:
-  - [backend/routers/outputs.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/routers/outputs.py)
-  - [backend/services/pdf_service.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/services/pdf_service.py)
-  - [frontend/components/OutputPanel.tsx](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/components/OutputPanel.tsx)
+  - [backend/routers/outputs.py](../backend/routers/outputs.py)
+  - [backend/services/pdf_service.py](../backend/services/pdf_service.py)
+  - [frontend/components/OutputPanel.tsx](../frontend/components/OutputPanel.tsx)
 - Done when:
   - Completed runs expose `.md` and `.pdf`.
   - Output is readable and formatted well.
@@ -186,11 +186,11 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Upload flow.
   - Run list and run detail UX.
 - Key files:
-  - [frontend/app/page.tsx](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/app/page.tsx)
-  - [frontend/app/new/page.tsx](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/app/new/page.tsx)
-  - [frontend/components/FileUpload.tsx](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/components/FileUpload.tsx)
-  - [frontend/components/RunCard.tsx](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/components/RunCard.tsx)
-  - [frontend/components/VerticalSelector.tsx](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/components/VerticalSelector.tsx)
+  - [frontend/app/page.tsx](../frontend/app/page.tsx)
+  - [frontend/app/new/page.tsx](../frontend/app/new/page.tsx)
+  - [frontend/components/FileUpload.tsx](../frontend/components/FileUpload.tsx)
+  - [frontend/components/RunCard.tsx](../frontend/components/RunCard.tsx)
+  - [frontend/components/VerticalSelector.tsx](../frontend/components/VerticalSelector.tsx)
 - Done when:
   - A user can create a run without confusion.
   - The detail page explains status, progress, and output clearly.
@@ -205,8 +205,8 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Format defaults.
   - Output quality rubric per playbook.
 - Key files:
-  - [backend/configs/verticals.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/configs/verticals.py)
-  - [frontend/lib/types.ts](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/lib/types.ts)
+  - [backend/configs/verticals.py](../backend/configs/verticals.py)
+  - [frontend/lib/types.ts](../frontend/lib/types.ts)
 - Done when:
   - Each playbook generates meaningfully different outputs.
   - Required fields are enforced.
@@ -221,10 +221,10 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Evaluation endpoints or services.
   - Benchmark dataset and score reporting.
 - Key files:
-  - [backend/routers/analytics.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/routers/analytics.py)
-  - [backend/services/eval_service.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/services/eval_service.py)
-  - [backend/utils/cost_tracker.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/utils/cost_tracker.py)
-  - [backend/tests/test_benchmark.py](/home/befikadusata/Devs/2026/agentic-research-factory/backend/tests/test_benchmark.py)
+  - [backend/routers/analytics.py](../backend/routers/analytics.py)
+  - [backend/services/eval_service.py](../backend/services/eval_service.py)
+  - [backend/utils/cost_tracker.py](../backend/utils/cost_tracker.py)
+  - [backend/tests/test_benchmark.py](../backend/tests/test_benchmark.py)
 - Done when:
   - You can answer "how much did this run cost?" and "how good was it?"
   - Evaluation results are repeatable.
@@ -240,10 +240,10 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
   - Deployment docs.
   - Observability and logging cleanup.
 - Key files:
-  - [backend/tests/](/home/befikadusata/Devs/2026/agentic-research-factory/backend/tests)
-  - [frontend/e2e/smoke.spec.ts](/home/befikadusata/Devs/2026/agentic-research-factory/frontend/e2e/smoke.spec.ts)
-  - [docs/deployment.md](/home/befikadusata/Devs/2026/agentic-research-factory/docs/deployment.md)
-  - [docs/reliability.md](/home/befikadusata/Devs/2026/agentic-research-factory/docs/reliability.md)
+  - [backend/tests/](../backend/tests)
+  - [frontend/e2e/smoke.spec.ts](../frontend/e2e/smoke.spec.ts)
+  - [docs/deployment.md](../docs/deployment.md)
+  - [docs/reliability.md](../docs/reliability.md)
 - Done when:
   - CI is green.
   - Critical flows have automated coverage.
@@ -251,16 +251,5 @@ This backlog is organized for handoff of an unfinished project. It prioritizes f
 
 ## Recommended Execution Order
 
-1. Sprint 0
-2. Sprint 1
-3. Sprint 2
-4. Sprint 3
-5. Sprint 4
-6. Sprint 5
-7. Sprint 6
-8. Sprint 7
-9. Sprint 8
-10. Sprint 9
-11. Sprint 10
-12. Sprint 11
-13. Sprint 12
+Sprint 0 through 12 in the order listed above, with 4b immediately after 4 (it
+builds on the retrieval work in 4).

@@ -7,6 +7,14 @@
 > This document defines the **visual language**: the why behind the palette,
 > typography, motion, and the signature components. For token values, code, and
 > the Tailwind wiring, see [`factotum-implementation.md`](./factotum-implementation.md).
+>
+> **Status: shipped.** This language is implemented in
+> [`frontend/app/globals.css`](../../frontend/app/globals.css) and
+> [`frontend/tailwind.config.ts`](../../frontend/tailwind.config.ts). Those files
+> are the source of truth for exact values; the hex codes quoted below are the
+> dark-mode originals and light mode deepens several of them for contrast.
+> "Factotum" names the design language, not the product — the app ships as
+> Agentic Research Factory.
 
 ---
 
@@ -89,9 +97,15 @@ off-white**, never a true or warm white.
 ```
 gray-050  #E9EEF4   primary text (cool off-white)
 gray-300  #93A2B4   secondary text
-gray-500  #556575   muted text, idle outlines, disabled
+gray-400  #6F8093   muted text, idle state, disabled
+gray-500  #556575   light-mode muted text
 gray-600  #3E4C5C   dividers
 ```
+
+Muted text and the idle state sit on `gray-400`, not `gray-500`: `gray-500`
+measures 2.9–3.4:1 on the dark surfaces and 3.20:1 as idle badge text, which
+fails AA for content like log timestamps. Light mode inverts the pair —
+`gray-400` measures 4.05:1 on white, so light `--text-muted` uses `gray-500`.
 
 ### 2.5 Feedback palette
 
@@ -125,8 +139,12 @@ Editor       #7E93C4   indigo-gray
 
 ### 2.7 Contrast & accessibility
 
-- Primary text (`gray-050`) on any surface ≥ **7:1** (AAA).
-- Secondary text (`gray-300`) on surfaces ≥ **4.5:1** (AA).
+- Primary text (`gray-050`) on any surface ≥ **7:1** (AAA) — measured 14.8–17.4:1.
+- Secondary text (`gray-300`) on surfaces ≥ **4.5:1** (AA) — measured 6.65–7.79:1.
+- **A hue used as real text must clear 4.5:1 itself.** On light surfaces the
+  status hues do not (cyan-600 measures 3.25:1, amber-500 2.53:1), so badges,
+  banners and the HITL eyebrow render neutral `text-content` and keep the hue
+  for the background tint, border, and glyph only.
 - **Never encode state in colour alone.** Every status colour is paired with an
   icon or glyph: active = pulse ring, complete = ✓, error = ✕, paused = ▮▮
   (pause bars), idle = hollow outline. Colour-blind users read the glyph.
@@ -141,7 +159,7 @@ A **mono + sans pairing** carries the "data instrument" identity.
 
 | Role | Family | Notes |
 | --- | --- | --- |
-| **Sans (UI/prose)** | `Inter` → fallback `Plus Jakarta Sans` | Neutral, precise, terminal-adjacent. Recommend migrating from Plus Jakarta (geometric/friendly) to Inter/Geist for a colder, more instrumental read. |
+| **Sans (UI/prose)** | `Inter` → fallback `Plus Jakarta Sans` | Neutral, precise, terminal-adjacent — colder and more instrumental than Plus Jakarta's geometric/friendly read, which is why Inter leads. |
 | **Mono (data/logs)** | `JetBrains Mono` → `IBM Plex Mono` | Timestamps, token counts, costs, IDs, log bodies, code, citation locators. |
 
 ### Type scale (1.20 minor-third, 4px rhythm)
@@ -387,7 +405,7 @@ BASE          raw primitives           --base-cyan-400: #3DE3F0
   ↓           (never used directly in components)
 SEMANTIC      meaning-mapped           --color-surface-2, --color-agent-active
   ↓           (dark default, light override)
-COMPONENT     component-scoped         --node-ring-active, --hitl-border
+COMPONENT     component-scoped         --node-active-border, --hitl-border
 ```
 
 Components consume **component** or **semantic** tokens only — never base

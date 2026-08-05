@@ -1,11 +1,21 @@
 # Factotum — Token Architecture & Implementation
 
-> Buildable spec for the Factotum design language. Token values, CSS custom
-> properties, Tailwind v3 wiring, and component build notes. Rationale and
-> visual intent live in [`factotum-design.md`](./factotum-design.md).
+> Token values, CSS custom properties, Tailwind v3 wiring, and component build
+> notes for the Factotum design language. Rationale and visual intent live in
+> [`factotum-design.md`](./factotum-design.md).
 >
 > **Stack:** Next.js 15 · React 19 · Tailwind CSS 3.4 (`darkMode: "class"`).
-> Dark mode is the **default**; light mode is an optional `:root.light` override.
+> Dark mode is the **default**; light mode is an opt-in `:root.light` override,
+> toggled by [`components/ThemeToggle.tsx`](../../frontend/components/ThemeToggle.tsx)
+> and applied before first paint by a blocking script in `app/layout.tsx`.
+>
+> **Status: built.** This shipped as
+> [`frontend/app/globals.css`](../../frontend/app/globals.css) and
+> [`frontend/tailwind.config.ts`](../../frontend/tailwind.config.ts), which are the
+> **source of truth**. The code blocks in §2–§7 are design intent, abridged, and
+> have not been re-verified line by line against the shipped files — read them as
+> the reasoning behind the tokens, not as the current values. Where the two
+> disagree, the CSS wins. §9 records what was built and what is still unbuilt.
 
 ---
 

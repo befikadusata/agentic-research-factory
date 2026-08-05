@@ -15,7 +15,7 @@
 [![Redis](https://img.shields.io/badge/Events-Redis-DC382D?logo=redis&logoColor=white)](docker-compose.yml)
 [![Celery](https://img.shields.io/badge/Workers-Celery-37814A?logo=celery&logoColor=white)](backend/celery_app.py)
 
-An AI-assisted market research platform that coordinates specialized agents, pauses for human review, and produces cited, export-ready briefs. It combines a stateful LangGraph workflow, hybrid retrieval, multi-tenant access control, and live Server-Sent Events (SSE) updates in a full-stack application.
+An AI-assisted market research platform that coordinates specialized agents, pauses for human review, and produces cited, export-ready briefs. It combines a stateful LangGraph workflow, hybrid retrieval, multi-tenant access control, and live Server-Sent Events (SSE) updates.
 
 ## Product Walkthrough
 
@@ -60,6 +60,7 @@ flowchart LR
     API --> AppDB
     API <--> Redis
     API --> Worker
+    Worker -->|"persist segment state"| AppDB
     API -->|"store upload"| Files
     Worker -->|"read to parse"| Files
     Worker --> Graph
@@ -75,8 +76,8 @@ The application database uses SQLAlchemy and Alembic. Document RAG stores its em
 ## Core Capabilities
 
 - Research playbooks for B2B lead intelligence, competitor analysis, and founder strategy
-- Dynamic routing across Strategist, Researcher, Analyst, Reviewer, Writer, Editor, and Lead Intel roles
-- Explicit research and analysis approval checkpoints
+- Strategist, Researcher, Analyst, Reviewer, Writer, Editor, and Lead Intel roles, routed by the playbook's task type
+- Explicit research, analysis, and final-output approval checkpoints
 - Uploaded-document RAG scoped to workspaces and optional vertical tags
 - Live pipeline status and agent-event streaming
 - Reusable monitors for scheduled follow-up research
@@ -121,7 +122,7 @@ For the real thing, keep reading.
 
 ### Core live research
 
-This path starts the web application, API, PostgreSQL, Redis, Celery workers, MinIO for uploaded files, and self-hosted SearXNG. It does not start the heavier self-hosted Firecrawl stack.
+This path starts the web application, API, PostgreSQL, Redis, a Celery worker, the Celery beat scheduler that fires due monitors, MinIO for uploaded files, and self-hosted SearXNG. It does not start the heavier self-hosted Firecrawl stack.
 
 Prerequisites: Docker with Compose and at least one supported LLM provider key. A Groq key is the simplest default.
 
@@ -167,7 +168,7 @@ Add only the providers required for the features you want:
 | Cloud search instead of SearXNG | `TAVILY_API_KEY` |
 | Cloud scraping | `FIRECRAWL_API_KEY`; when using Compose, remove or override its self-hosted `FIRECRAWL_API_URL` value |
 | LlamaParse PDF fallback | `LLAMA_CLOUD_API_KEY` |
-| LLM tracing | `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` |
+| LLM tracing | `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`; add `LANGFUSE_HOST` for a self-hosted instance, which otherwise defaults to Langfuse Cloud |
 
 Self-hosted Firecrawl is an opt-in five-container profile:
 
@@ -183,7 +184,7 @@ For hosted environments and production configuration, see the [deployment guide]
 
 The CI workflow runs backend tests with PostgreSQL and Redis, frontend linting, mocked Playwright end-to-end flows, and independent frontend/backend Docker builds.
 
-As of 2026-07-23, the backend suite passes **285 tests across 32 test files**, covering:
+As of 2026-08-05, the backend suite is **479 tests across 40 test files** — 463 pass and 16 skip, the skips being the model-eval harnesses that only run under `RUN_MODEL_EVALS=1`. Coverage:
 
 - agent routing, retry behavior, HITL pause/resume, and stuck-run recovery
 - authentication, workspace authorization, and cross-user access denial
