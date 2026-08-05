@@ -847,35 +847,11 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
       `WorkspaceSwitcher.tsx`, which was built independently of the sketch
       and shares none of its markup — see the §7 mapping table.
 
-      Note found while visually verifying 7.2 (Playwright screenshot
-      across all run statuses), since fixed: for `status: "failed"` runs,
-      every segment rendered idle instead of marking the failure point,
-      because `RUN_STATUS_MAP.failed = -1` and `pipelineNodeState`'s
-      `idx <= activeIdx` check could never be true — a pre-existing quirk
-      inherited unchanged from `AgentGraph.tsx`. Root cause: the backend
-      `Run` model only ever stored the terminal `status`, with no record
-      of which stage was active at the moment of failure. Fixed with a
-      new `runs.failed_at_status` column (migration
-      `15fd6ff9382d_add_failed_at_status_to_runs`, reusing the existing
-      `runstatus` Postgres enum type), populated in
-      `run_service._set_status()` by capturing the run's current status
-      right before it's overwritten to `failed`. Exposed on
-      `RunResponse`/`RunDetailResponse` (so both the dashboard list and
-      the run-detail page get it), threaded through
-      `pipelineNodeState(status, nodeId, failedAtStatus)` and both call
-      sites (`RunCard`/`PipelineProgress`, `app/runs/[id]/page.tsx`/
-      `AgentGraph`). The run-detail page also re-fetches the run on the
-      SSE `error` event (mirroring what it already did on `complete`),
-      since the backend commits `failed_at_status` before emitting that
-      event — so a run watched failing live shows the correct node
-      without needing a reload. Runs that failed before this migration
-      (`failed_at_status` still `null`) fall back to the old all-idle
-      rendering rather than guessing. Covered by
-      `test_set_status_records_stage_a_run_failed_at`,
-      `test_set_status_failed_twice_keeps_first_failure_stage`, and
-      `test_run_detail_exposes_failed_at_status` in
-      `backend/tests/test_runs.py`; verified visually via Playwright
-      screenshots of both the dashboard list and the run-detail graph.
+      Visual verification of 7.2 surfaced a data gap rather than a token
+      one: failed runs could not mark *where* they failed, because the
+      backend only stored the terminal status. Fixed in `79e311f` with a
+      `runs.failed_at_status` column that `pipelineNodeState` reads;
+      pre-migration runs render all-idle rather than guessing.
 - [x] Verify contrast: primary text ≥ 7:1, secondary ≥ 4.5:1 on every surface.
       Computed WCAG ratios for every text/surface pair. `text-primary`
       (14.8–17.4:1) and `text-secondary` (6.65–7.79:1) clear their targets
@@ -917,58 +893,48 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
       `localStorage`, plus a blocking inline script in `layout.tsx` to set
       it before first paint (no flash of the wrong theme).
 
-      Re-checking surfaced a deeper bug than a missing override: Tailwind's
-      `agent.*`/`feedback.*`/`primary`/`hitl` colors all resolve through the
-      `--rgb-cyan`/`--rgb-violet`/`--rgb-mint`/`--rgb-rose`/`--rgb-amber`
-      triples (required for opacity modifiers), not the `--color-*`
-      semantic aliases — so the `:root.light` overrides on `--color-primary`
-      /`--color-agent-active`/`--color-agent-paused`/`--color-hitl` were
-      dead code for every Tailwind utility class; they only ever reached
-      the component-layer tokens (`--node-*-border`, `--hitl-*`,
-      `--log-caret`, `--cite-*`, `--cost-*`) that reference them directly.
-      Fixed by overriding the `--rgb-*` triples themselves inside
-      `:root.light`, using new `--base-mint-600`/`--base-rose-600` (added;
-      only a `-400` existed before) plus the existing `-600` cyan/violet/
-      amber shades.
+      Four findings came out of the re-check, all fixed. They are worth
+      stating because three of them fail *silently* — the CSS parses, the
+      page renders, and only a measurement catches it.
 
-      Also found while re-checking: even the *deepened* shades the original
-      spec's `:root.light` block picked (cyan-600, amber-500) don't clear
-      4.5:1 as text on white (measured 3.25:1 / 2.53:1) — they only clear
-      the 3:1 non-text/border minimum. So every place a hue was used as
-      real (non-decorative) text — `AGENT_STATE_BADGE`, HITL/error/resuming
-      banners, the HITL eyebrow label — now uses neutral `text-content`
-      instead, with the hue kept for the background tint, border, and
-      decorative glyphs (state is still never color-only: badges also
-      carry the glyph from `AGENT_STATE_GLYPH`). Bumped `agent-paused`/
-      `hitl` from amber-500 to amber-600 for the border/glyph case (was
-      2.53:1, fails even 3:1).
+      **Semantic overrides can be dead code.** Tailwind's `agent.*`/
+      `feedback.*`/`primary`/`hitl` colours resolve through the
+      `--rgb-cyan`/`-violet`/`-mint`/`-rose`/`-amber` triples, which is what
+      opacity modifiers require — *not* through the `--color-*` semantic
+      aliases. So the `:root.light` overrides on `--color-primary` and
+      friends never reached a single utility class; they only reached the
+      component-layer tokens that reference them directly (`--node-*-border`,
+      `--hitl-*`, `--log-caret`). The fix is to override the `--rgb-*`
+      triples themselves, which added `--base-mint-600`/`--base-rose-600`.
 
-      Bonus fix found along the way: `bg-agent-idle/15` was silently
-      generating no CSS at all (Tailwind can't apply an opacity modifier to
-      a plain `var(--color-agent-idle)` hex string) — added `--rgb-gray-400`
-      and pointed `agent.idle` at it so the idle/pending badge tint
-      actually renders.
+      **A hue deep enough for a border is not deep enough for text.** Even
+      the deepened light-mode shades (cyan-600, amber-500) measure 3.25:1 and
+      2.53:1 on white — they clear the 3:1 non-text minimum and fail 4.5:1.
+      Every place a hue was real text (`AGENT_STATE_BADGE`, the HITL/error/
+      resuming banners, the HITL eyebrow) now renders neutral `text-content`,
+      keeping the hue for tint, border, and glyph. State is still never
+      colour-only; the badge carries its `AGENT_STATE_GLYPH` either way.
+      `agent-paused`/`hitl` moved amber-500 → amber-600, which failed 3:1.
 
-      Verified live in both themes via Playwright (toggle click + full-page
-      screenshots): sign-in page and a component harness covering all 6
-      status badges, the HITL card, and the agent log. No console errors.
+      **An opacity modifier on a hex variable emits nothing.** `bg-agent-idle/15`
+      generated no CSS at all, because Tailwind cannot apply `/15` to a plain
+      `var(--color-agent-idle)` hex string. Added `--rgb-gray-400` and pointed
+      `agent.idle` at it.
 
-      **Follow-up items found above are now fixed too:**
-      (1) `VERTICALS[].accentClass` moved off raw Tailwind defaults
-      (`text-violet-400 bg-violet-950/40`) onto a new `category.{sales,
-      competitor,strategy}` Tailwind color group backed by the same
-      light-mode-aware `--rgb-*` triples (added `--rgb-blue`/`--base-blue-
-      400/600` since no blue existed in the palette), with the tag text
-      switched to neutral `text-content` the same way the state badges
-      were; (2) `AGENT_COLORS` in `AgentLog.tsx` reads `--base-agent-*`
-      directly (by design, no Tailwind opacity use), so those seven base
-      values got direct `:root.light` overrides deepened to clear 4.5:1 on
-      white (dark-mode originals measured 1.98–3.06:1); (3) `OutputPanel.tsx`
-      and `HitlModal.tsx` both hardcoded `prose-invert` regardless of
-      theme — added `lib/useTheme.ts` (`useIsLightMode`, a `MutationObserver`
-      on `<html>`'s class list) so both now pick `prose` vs `prose-invert`
-      live. All three re-verified via the same Playwright toggle-and-
-      screenshot harness in both themes.
+      **Three call sites bypassed the token layer entirely.**
+      `VERTICALS[].accentClass` used raw Tailwind defaults
+      (`text-violet-400 bg-violet-950/40`) and moved onto a
+      `category.{sales,competitor,strategy}` group backed by the same
+      light-aware triples. `AGENT_COLORS` in `AgentLog.tsx` reads
+      `--base-agent-*` directly by design, so those seven base values got
+      their own `:root.light` overrides (dark originals measured 1.98–3.06:1
+      on white). `OutputPanel.tsx` and `HitlModal.tsx` hardcoded
+      `prose-invert` regardless of theme; `lib/useTheme.ts` now picks
+      `prose` vs `prose-invert` from a `MutationObserver` on `<html>`.
+
+      All verified live in both themes via Playwright — toggle click plus
+      full-page screenshots of the sign-in page and a harness covering the
+      six status badges, the HITL card, and the agent log.
 
 ---
 
