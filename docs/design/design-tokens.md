@@ -1,8 +1,8 @@
-# Factotum — Token Architecture & Implementation
+# Token Architecture & Implementation
 
 > Token values, CSS custom properties, Tailwind v3 wiring, and component build
-> notes for the Factotum design language. Rationale and visual intent live in
-> [`factotum-design.md`](./factotum-design.md).
+> notes. Rationale and visual intent live in
+> [`design-language.md`](./design-language.md).
 >
 > **Stack:** Next.js 15 · React 19 · Tailwind CSS 3.4 (`darkMode: "class"`).
 > Dark mode is the **default**; light mode is an opt-in `:root.light` override,
@@ -972,5 +972,5 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
 
 ---
 
-*See [`factotum-design.md`](./factotum-design.md) for visual rationale and
+*See [`design-language.md`](./design-language.md) for visual rationale and
 component intent.*

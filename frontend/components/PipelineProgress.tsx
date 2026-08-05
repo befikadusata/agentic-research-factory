@@ -9,7 +9,7 @@ const STATE_BAR_CLASS: Record<AgentState, string> = {
   paused: "bg-agent-paused animate-hitl-breath",
 };
 
-/** Compact, per-run pipeline progress — one segment per stage. See docs/design/factotum-implementation.md. */
+/** Compact, per-run pipeline progress — one segment per stage. See docs/design/design-tokens.md. */
 export function PipelineProgress({ status, failedAtStatus }: { status: RunStatus; failedAtStatus?: RunStatus | null }) {
   const activeIdx = Math.max(RUN_STATUS_MAP[status === "failed" ? (failedAtStatus ?? status) : status] ?? 0, 0);
 

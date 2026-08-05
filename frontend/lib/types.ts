@@ -335,7 +335,7 @@ export const RUN_STATUS_MAP: Record<RunStatus, number> = {
   failed:                     -1,
 };
 
-/** Factotum's six-state agent model — see docs/design/factotum-design.md. */
+/** The six-state agent model — see docs/design/design-language.md. */
 export type AgentState = "idle" | "active" | "thinking" | "complete" | "error" | "paused";
 
 export const STATUS_TO_AGENT_STATE: Record<RunStatus, AgentState> = {

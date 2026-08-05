@@ -1,26 +1,20 @@
-# Factotum — Visual Identity & Design Language
+# Visual Identity & Design Language
 
-> **Factotum** — an AI-powered market research automation platform. A LangGraph
-> supervisor orchestrates specialized agents (Strategist, Researcher, Analyst,
-> Writer, Editor…) through research pipelines in real time.
->
-> This document defines the **visual language**: the why behind the palette,
-> typography, motion, and the signature components. For token values, code, and
-> the Tailwind wiring, see [`factotum-implementation.md`](./factotum-implementation.md).
+> This document defines the interface's **visual language**: the why behind the
+> palette, typography, motion, and the signature components. For token values,
+> code, and the Tailwind wiring, see [`design-tokens.md`](./design-tokens.md).
 >
 > **Status: shipped.** This language is implemented in
 > [`frontend/app/globals.css`](../../frontend/app/globals.css) and
 > [`frontend/tailwind.config.ts`](../../frontend/tailwind.config.ts). Those files
 > are the source of truth for exact values; the hex codes quoted below are the
 > dark-mode originals and light mode deepens several of them for contrast.
-> "Factotum" names the design language, not the product — the app ships as
-> Agentic Research Factory.
 
 ---
 
 ## 1. Brand essence
 
-Factotum sits **between a Bloomberg terminal and a modern dev tool**. It is a
+The interface sits **between a Bloomberg terminal and a modern dev tool**. It is a
 serious instrument for professionals who watch machines think. The interface has
 two moods and must switch between them cleanly:
 
@@ -57,7 +51,7 @@ polished we are."
 A single cool blue-black spine runs the whole product. It is nearly black at the
 canvas and lifts, step by step, toward the user. Surfaces are distinguished by
 **value + a hairline border**, not by drop shadows (shadows read warm and soft;
-Factotum reads cold and precise).
+this reads cold and precise).
 
 ```
 surface-0  canvas        ▓ #04060A   deepest, behind everything
@@ -413,5 +407,5 @@ primitives — so a re-theme touches one layer.
 
 ---
 
-*Next: [`factotum-implementation.md`](./factotum-implementation.md) — token values,
+*Next: [`design-tokens.md`](./design-tokens.md) — token values,
 CSS variables, Tailwind config, and component build specs.*
