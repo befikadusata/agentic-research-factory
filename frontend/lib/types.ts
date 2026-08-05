@@ -209,6 +209,10 @@ export interface CreateMonitorInput {
   topic: string;
   format: OutputFormat;
   workspace_id?: string;
+  /** A monitor is a saved run template, so it carries the same playbook fields
+   *  a one-off run does — omitting them schedules generic research. */
+  vertical?: Vertical | null;
+  vertical_inputs?: Record<string, string>;
   interval_minutes: number;
   enabled: boolean;
   notify_channel?: string | null;

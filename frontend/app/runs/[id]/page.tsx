@@ -321,7 +321,15 @@ export default function RunPage() {
           {!run.monitor_id && (
             <div className="flex justify-end">
               <Link
-                href={`/monitors?topic=${encodeURIComponent(run.topic)}&format=${run.format}&name=${encodeURIComponent(run.topic.slice(0, 60))}`}
+                href={`/monitors?topic=${encodeURIComponent(run.topic)}&format=${run.format}&name=${encodeURIComponent(run.topic.slice(0, 60))}${
+                  // Carry the playbook too, so the monitor repeats *this* run
+                  // rather than a generic version of its topic.
+                  run.vertical ? `&vertical=${encodeURIComponent(run.vertical)}` : ""
+                }${
+                  run.vertical_inputs && Object.keys(run.vertical_inputs).length
+                    ? `&vertical_inputs=${encodeURIComponent(JSON.stringify(run.vertical_inputs))}`
+                    : ""
+                }`}
                 className="text-sm text-content-secondary hover:text-content border border-border-subtle hover:border-primary rounded-md px-4 py-2 flex items-center gap-2 transition-colors"
               >
                 <Radar size={16} /> Save as monitor

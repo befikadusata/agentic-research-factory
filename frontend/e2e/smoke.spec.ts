@@ -179,6 +179,64 @@ test.describe("Core Flow Smoke Tests", () => {
     await expect(page.getByText("Recovered market research")).toBeVisible();
   });
 
+  test("schedules a monitor against a playbook, with its required inputs", async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await mockBackendToken(page);
+
+    let createPayload: Record<string, unknown> | null = null;
+
+    await page.route("**/workspaces", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+    });
+    await page.route("**/monitors*", async (route) => {
+      // The page itself lives at /monitors — without this the mock answers the
+      // navigation and the browser renders the JSON body.
+      if (route.request().isNavigationRequest()) {
+        await route.continue();
+        return;
+      }
+      if (route.request().method() === "POST") {
+        createPayload = route.request().postDataJSON() as Record<string, unknown>;
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({ id: "monitor-9", name: "Acme watch" }),
+        });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+    });
+
+    await createSessionCookie(page);
+    await page.goto("/monitors");
+    await page.getByRole("button", { name: "New Monitor" }).click();
+    await page.getByText("B2B Sales Lead Intel").click();
+
+    await page.getByLabel("Name").fill("Acme watch");
+    await page.getByLabel("Research topic").fill("Acme buying signals");
+
+    // The playbook's required input is missing, so the form must name it rather
+    // than let the backend answer with a 422.
+    await page.getByRole("button", { name: "Create Monitor" }).click();
+    // Scoped to the form: Next's route announcer is also role="alert".
+    await expect(page.locator("#new-monitor-form").getByRole("alert")).toContainText(
+      '"Company URL" is required.',
+    );
+    expect(createPayload).toBeNull();
+
+    await page.getByLabel("Company URL").fill("https://acme.com");
+    await page.getByLabel(/Target Buyer Role/).fill("CISO");
+    await page.getByRole("button", { name: "Create Monitor" }).click();
+
+    await expect(page.getByRole("button", { name: "New Monitor" })).toBeVisible();
+    expect(createPayload).not.toBeNull();
+    expect(createPayload!.vertical).toBe("b2b_sales_lead_intel");
+    expect(createPayload!.vertical_inputs).toEqual({
+      company_url: "https://acme.com",
+      target_role: "CISO",
+    });
+  });
+
   test("explains monitor deletion before confirming it", async ({ page }) => {
     await mockAuthenticatedSession(page);
     await mockBackendToken(page);

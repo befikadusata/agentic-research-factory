@@ -8,14 +8,33 @@ import { getMonitors, createMonitor } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { MonitorCard } from "@/components/MonitorCard";
 import { FormatSelector } from "@/components/FormatSelector";
+import { VerticalSelector } from "@/components/VerticalSelector";
 import { CardListSkeleton, LoadError } from "@/components/ListState";
 import { INTERVAL_PRESETS } from "@/lib/monitors";
-import type { Monitor, OutputFormat } from "@/lib/types";
+import { useVerticals } from "@/lib/useVerticals";
+import type { Monitor, OutputFormat, Vertical } from "@/lib/types";
+
+/** Structured inputs arrive from the "Save as monitor" link as one JSON param.
+ *  Anything unparseable is dropped rather than thrown: a mangled link should
+ *  still open an empty form, not a broken page. */
+function parseVerticalInputs(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, string>)
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 export default function MonitorsPage() {
   const { status } = useSession();
   const { activeId, active } = useWorkspace();
   const params = useSearchParams();
+
+  const verticals = useVerticals();
 
   const [monitors, setMonitors] = useState<Monitor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +46,12 @@ export default function MonitorsPage() {
   const [name, setName] = useState(params.get("name") ?? "");
   const [topic, setTopic] = useState(prefillTopic);
   const [format, setFormat] = useState<OutputFormat>((params.get("format") as OutputFormat) || "report");
+  const [vertical, setVertical] = useState<Vertical | null>(
+    (params.get("vertical") as Vertical) || null,
+  );
+  const [verticalInputs, setVerticalInputs] = useState<Record<string, string>>(() =>
+    parseVerticalInputs(params.get("vertical_inputs")),
+  );
   const [interval, setInterval] = useState(1440);
   const [notify, setNotify] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -50,8 +75,45 @@ export default function MonitorsPage() {
     if (showForm) nameInputRef.current?.focus();
   }, [showForm]);
 
+  // Drop a playbook the backend doesn't offer — it can only have come from a
+  // hand-edited or stale link, and the server would reject the create anyway.
+  useEffect(() => {
+    if (vertical && !verticals.some((v) => v.key === vertical)) {
+      setVertical(null);
+      setVerticalInputs({});
+    }
+  }, [vertical, verticals]);
+
+  const verticalDef = verticals.find((v) => v.key === vertical) ?? null;
+
+  function handleVerticalChange(v: Vertical) {
+    if (v === vertical) return;
+    setVertical(v);
+    setVerticalInputs({});
+    const def = verticals.find((vd) => vd.key === v);
+    if (def) setFormat(def.defaultFormat);
+  }
+
+  function clearVertical() {
+    setVertical(null);
+    setVerticalInputs({});
+    setFormat("report");
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+
+    // Mirrors validate_vertical_inputs on the backend, which 422s on a missing
+    // required field. Checking here names the field instead.
+    if (verticalDef) {
+      for (const [key, schema] of Object.entries(verticalDef.inputSchema)) {
+        if (schema.required && !verticalInputs[key]?.trim()) {
+          setFormError(`"${schema.label}" is required.`);
+          return;
+        }
+      }
+    }
+
     setSubmitting(true);
     setFormError(null);
     try {
@@ -60,6 +122,8 @@ export default function MonitorsPage() {
         topic: topic.trim(),
         format,
         workspace_id: activeId ?? undefined,
+        vertical: vertical ?? undefined,
+        vertical_inputs: Object.keys(verticalInputs).length ? verticalInputs : undefined,
         interval_minutes: interval,
         enabled: true,
         notify_channel: notify.trim() || null,
@@ -67,6 +131,7 @@ export default function MonitorsPage() {
       setName("");
       setTopic("");
       setNotify("");
+      clearVertical();
       setShowForm(false);
       setAnnouncement(`${created.name} monitor created.`);
       load();
@@ -107,6 +172,71 @@ export default function MonitorsPage() {
           aria-busy={submitting}
           className="bg-surface-2 border border-border-subtle rounded-lg p-4 mb-8 space-y-5 sm:p-6"
         >
+          <div>
+            <label className="block text-sm font-medium text-content-secondary mb-2">
+              Playbook <span className="text-content-muted font-normal">(optional)</span>
+            </label>
+            <VerticalSelector value={vertical} onChange={handleVerticalChange} verticals={verticals} />
+            {vertical && (
+              <button
+                type="button"
+                onClick={clearVertical}
+                className="mt-3 text-xs text-primary hover:text-primary-hover font-medium"
+              >
+                Clear playbook and use general research
+              </button>
+            )}
+          </div>
+
+          {verticalDef && Object.entries(verticalDef.inputSchema).length > 0 && (
+            <div className="space-y-5 border border-border-subtle rounded-lg p-4 bg-surface-1 sm:p-5">
+              <p className="text-xs text-content-secondary uppercase tracking-wider font-bold">
+                {verticalDef.displayName} — Structured Context
+              </p>
+              {Object.entries(verticalDef.inputSchema).map(([key, schema]) => (
+                <div key={key}>
+                  <label
+                    htmlFor={`monitor-vertical-${key}`}
+                    className="block text-sm font-medium text-content-secondary mb-1.5"
+                  >
+                    {schema.label}{" "}
+                    {schema.required ? (
+                      <span className="text-primary">*</span>
+                    ) : (
+                      <span className="text-content-muted font-normal">(optional)</span>
+                    )}
+                  </label>
+                  {schema.type === "select" ? (
+                    <select
+                      id={`monitor-vertical-${key}`}
+                      value={verticalInputs[key] ?? ""}
+                      onChange={(e) =>
+                        setVerticalInputs((prev) => ({ ...prev, [key]: e.target.value }))
+                      }
+                      className="min-h-11 w-full bg-surface-3 border border-border-subtle rounded-md px-3 py-2 text-content text-base sm:text-sm focus:border-primary outline-none"
+                    >
+                      <option value="">{schema.placeholder}</option>
+                      {schema.options?.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      id={`monitor-vertical-${key}`}
+                      type={schema.type === "url" ? "url" : "text"}
+                      value={verticalInputs[key] ?? ""}
+                      onChange={(e) =>
+                        setVerticalInputs((prev) => ({ ...prev, [key]: e.target.value }))
+                      }
+                      placeholder={schema.placeholder}
+                      className="min-h-11 w-full bg-surface-3 border border-border-subtle rounded-md px-3 py-2 text-content text-base sm:text-sm placeholder:text-content-muted focus:border-primary outline-none"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div>
             <label htmlFor="monitor-name" className="block text-sm font-medium text-content-secondary mb-1">Name</label>
             <input
