@@ -11,11 +11,13 @@
 >
 > **Status: built.** This shipped as
 > [`frontend/app/globals.css`](../../frontend/app/globals.css) and
-> [`frontend/tailwind.config.ts`](../../frontend/tailwind.config.ts), which are the
-> **source of truth**. The code blocks in §2–§7 are design intent, abridged, and
-> have not been re-verified line by line against the shipped files — read them as
-> the reasoning behind the tokens, not as the current values. Where the two
-> disagree, the CSS wins. §9 records what was built and what is still unbuilt.
+> [`frontend/tailwind.config.ts`](../../frontend/tailwind.config.ts), which remain the
+> **source of truth** — where they and this document disagree, the code wins.
+>
+> §2–§6 were reconciled token-by-token against those two files on 2026-08-05 and
+> now match them. §7 is the exception: those blocks are **design sketches, not
+> shipped code** — see the note at the head of §7 for what each one really became.
+> §9 records what was built and what is still unbuilt.
 
 ---
 
@@ -37,7 +39,7 @@ base primitives. Re-theming touches semantic/component; the palette lives in bas
                         │ consumed by
 ┌── COMPONENT ──────────▼────────────────────────────────┐
 │ Component-scoped aliases of semantic tokens.            │
-│   --node-ring-active   --hitl-border   --log-caret       │
+│   --node-active-border   --hitl-border   --log-caret     │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -69,6 +71,11 @@ Naming: `--base-{family}-{weight}` · `--color-*` / `--text-*` / `--motion-*`
   --base-cyan-500: #14C6D9;
   --base-cyan-600: #0C9DB0;
   --base-cyan-700: #0A7C8C;
+  /* Dark teals — light-mode only. Cyan-600 measures 2.89–3.25:1 as text on
+     light surfaces; these clear 4.5:1. See §3.1 and the §9 contrast pass. */
+  --base-cyan-800: #0A7383;   /* 4.92:1 on surface-0; white label 5.28:1 */
+  --base-cyan-850: #086573;   /* hover — 5.99:1 on surface-0 */
+  --base-cyan-900: #06424C;   /* press — 9.88:1 on surface-0 */
 
   /* ── Violet — agent activity ──────────────────────────── */
   --base-violet-300: #C9B8FF;
@@ -94,6 +101,12 @@ Naming: `--base-{family}-{weight}` · `--color-*` / `--text-*` / `--motion-*`
   /* ── Feedback ─────────────────────────────────────────── */
   --base-mint-400: #3FD69A;
   --base-rose-400: #F26478;
+  --base-mint-600: #0F8560;   /* light-mode only: 4.62:1 on white (mint-400 is 1.86:1) */
+  --base-rose-600: #C43F55;   /* light-mode only: 5.01:1 on white (rose-400 is 3.06:1) */
+
+  /* ── Blue — vertical/category accent ──────────────────── */
+  --base-blue-400: #5B9EE8;
+  --base-blue-600: #2B6CB0;   /* light-mode only: 5.42:1 on white */
 
   /* ── Agent identity (fixed, muted) ────────────────────── */
   --base-agent-supervisor: #5FC7D4;
@@ -126,7 +139,7 @@ Naming: `--base-{family}-{weight}` · `--color-*` / `--text-*` / `--motion-*`
   /* ── Text ─────────────────────────────────────────────── */
   --text-primary:   var(--base-gray-050);
   --text-secondary: var(--base-gray-300);
-  --text-muted:     var(--base-gray-500);
+  --text-muted:     var(--base-gray-400);   /* gray-500 measured 2.9–3.4:1, fails AA */
   --text-inverse:   var(--base-obsidian-950);   /* on cyan/light */
   --text-link:      var(--base-cyan-400);
 
@@ -137,7 +150,7 @@ Naming: `--base-{family}-{weight}` · `--color-*` / `--text-*` / `--motion-*`
   --color-on-primary:     var(--base-obsidian-950);
 
   /* ── Agent status states ──────────────────────────────── */
-  --color-agent-idle:     var(--base-gray-500);
+  --color-agent-idle:     var(--base-gray-400);   /* gray-500 was 3.2:1 as badge text */
   --color-agent-active:   var(--base-cyan-400);
   --color-agent-thinking: var(--base-violet-400);   /* generating */
   --color-agent-complete: var(--base-mint-400);
@@ -155,9 +168,21 @@ Naming: `--base-{family}-{weight}` · `--color-*` / `--text-*` / `--motion-*`
   --color-hitl-quiet: var(--base-amber-500);
   --color-hitl-glow:   210 178 92;   /* amber-400 as RGB triplet */
 
-  /* ── Glow triplets (for rgba() composition) ───────────── */
-  --rgb-cyan:  61 227 240;
-  --rgb-amber: 233 178 92;
+  /* ── RGB triplets ─────────────────────────────────────────
+     Not just for glows: Tailwind's opacity modifiers (bg-primary/10,
+     border-hitl/30, bg-agent-idle/15…) only work against
+     rgb(var(--rgb-x) / <alpha-value>). A plain var(--color-x) hex string
+     silently generates no CSS at all when suffixed with /NN. Every
+     agent/feedback/primary/hitl/category colour in §6 resolves through
+     these, NOT through the --color-* aliases above — which is why §3.1
+     must re-point the triples, not just the aliases. */
+  --rgb-cyan:     61 227 240;   /* cyan-400   → primary, agent-active, info */
+  --rgb-violet:  163 139 245;   /* violet-400 → agent-thinking, category-sales */
+  --rgb-mint:     63 214 154;   /* mint-400   → agent-complete, success */
+  --rgb-rose:    242 100 120;   /* rose-400   → agent-error, error */
+  --rgb-amber:   233 178  92;   /* amber-400  → agent-paused, hitl, warning */
+  --rgb-blue:     91 158 232;   /* blue-400   → category-competitor */
+  --rgb-gray-400: 111 128 147;  /* gray-400   → agent-idle */
 
   /* ── Elevation ────────────────────────────────────────── */
   --shadow-hairline: inset 0 0 0 1px rgb(56 70 91 / 0.40);
@@ -196,24 +221,72 @@ existing `darkMode: "class"` config; add `light` to the html element to opt in).
 
   --text-primary:   #0E141E;
   --text-secondary: #45566A;
-  --text-muted:     #6F8093;
+  --text-muted:     #556575;   /* gray-400 is 4.05:1 on white; gray-500 gives 5.99:1 */
   --text-inverse:   #F7FAFC;
 
-  /* Deepen accents so they hold contrast on light surfaces */
-  --color-primary:       var(--base-cyan-600);
-  --color-agent-active:  var(--base-cyan-600);
-  --color-agent-paused:  var(--base-amber-500);
-  --color-hitl:          var(--base-amber-500);
+  /* Deepen accents so they hold contrast on light surfaces. --color-primary is
+     real text (nav link, asterisk), so it needs 4.5:1, not the 3:1 cyan-600
+     manages — hence the dark teals, and a white on-primary so button labels
+     still read against the darkened fill. */
+  --color-primary:        var(--base-cyan-800);
+  --color-primary-hover:  var(--base-cyan-850);
+  --color-primary-press:  var(--base-cyan-900);
+  --color-on-primary:     #F7FAFC;
+  --color-agent-active:   var(--base-cyan-600);
+  --color-agent-thinking: var(--base-violet-600);
+  --color-agent-complete: var(--base-mint-600);
+  --color-agent-error:    var(--base-rose-600);
+  --color-agent-paused:   var(--base-amber-600);   /* amber-500 is 2.53:1, fails even 3:1 */
+
+  --color-success: var(--base-mint-600);
+  --color-error:   var(--base-rose-600);
+  --color-warning: var(--base-amber-600);
+  --color-info:    var(--base-cyan-600);
+
+  --color-hitl:       var(--base-amber-600);
+  --color-hitl-quiet: var(--base-amber-600);
+
+  /* Required, not optional: every Tailwind utility reads these triples rather
+     than the --color-* aliases above (see §3). Without them, light mode keeps
+     rendering dark-mode hues no matter what the aliases say. */
+  --rgb-cyan:    12 157 176;   /* cyan-600   */
+  --rgb-violet: 106  79 203;   /* violet-600 */
+  --rgb-mint:    15 133  96;   /* mint-600   */
+  --rgb-rose:   196  63  85;   /* rose-600   */
+  --rgb-amber:  180 118  42;   /* amber-600  */
+  --rgb-blue:    43 108 176;   /* blue-600   */
 
   --shadow-hairline: inset 0 0 0 1px rgb(194 205 217 / 0.7);
+
+  /* Agent-identity hues are read as var(--base-agent-x) directly by
+     AgentLog.tsx, bypassing both the aliases and the triples, so they need
+     their own overrides. Dark-mode values measure 1.98–3.06:1 on white. */
+  --base-agent-supervisor: #0A7484;
+  --base-agent-strategist: #6A4FCB;
+  --base-agent-researcher: #1F6FB2;
+  --base-agent-analyst:    #127A5C;
+  --base-agent-reviewer:   #8C6425;
+  --base-agent-writer:     #8A4FAE;
+  --base-agent-editor:     #3F5C8A;
 }
 ```
+
+Note `--rgb-gray-400` is deliberately *not* overridden: `agent-idle` is never
+real text (`lib/types.ts` renders the idle badge as a `/10` tint plus a `/40`
+border with a neutral `text-content` label), so it only needs the 3:1
+non-text minimum, which #6F8093 clears on white at 4.05:1.
 
 ---
 
 ## 4. Component layer
 
 Component tokens alias semantics so a component can be re-skinned in isolation.
+This block matches `globals.css` exactly. Not all of it is *consumed*, though:
+only the `--node-*` tokens (via `AgentGraph.tsx`), `--hitl-surface` /
+`--hitl-backdrop` (via `HitlModal.tsx`) and `--log-scanline` / `--node-edge-*`
+(via the `.ftm-*` rules at the bottom of `globals.css`) have readers today. The
+`--cite-*` and `--cost-*` groups are declared ahead of components 7.6 and 7.7,
+which were never built (§9).
 
 ```css
 :root {
@@ -317,13 +390,17 @@ Component tokens alias semantics so a component can be re-skinned in isolation.
 ## 6. Tailwind wiring (v3.4)
 
 Map semantic tokens into Tailwind so utilities compose. Colours reference CSS
-vars, so dark/light switch automatically. This **replaces** the current ad-hoc
-`primary`/`status` block in `tailwind.config.ts` with the semantic system (the
-old `status.*` states map onto `agent.*` below).
+vars, so dark/light switch automatically. This replaced the old ad-hoc
+`primary`/`status` block (the `status.*` states map onto `agent.*` below;
+the alias was deleted outright rather than kept — see §9).
+
+Anything that takes an opacity modifier is declared as
+`rgb(var(--rgb-x) / <alpha-value>)`, not `var(--color-x)` — the reason is in §3.
 
 ```ts
 // tailwind.config.ts
 import type { Config } from "tailwindcss";
+import typography from "@tailwindcss/typography";
 
 const config: Config = {
   darkMode: "class",
@@ -349,23 +426,35 @@ const config: Config = {
           muted:    "var(--text-muted)",
           inverse:  "var(--text-inverse)",
         },
-        primary: { DEFAULT: "var(--color-primary)", hover: "var(--color-primary-hover)", press: "var(--color-primary-press)", on: "var(--color-on-primary)" },
+        primary: {
+          DEFAULT: "rgb(var(--rgb-cyan) / <alpha-value>)",
+          hover: "var(--color-primary-hover)",
+          press: "var(--color-primary-press)",
+          on:    "var(--color-on-primary)",
+        },
         // Agent status (supersedes old `status.*`)
         agent: {
-          idle:     "var(--color-agent-idle)",
-          active:   "var(--color-agent-active)",
-          thinking: "var(--color-agent-thinking)",
-          complete: "var(--color-agent-complete)",
-          error:    "var(--color-agent-error)",
-          paused:   "var(--color-agent-paused)",
+          idle:     "rgb(var(--rgb-gray-400) / <alpha-value>)",
+          active:   "rgb(var(--rgb-cyan) / <alpha-value>)",
+          thinking: "rgb(var(--rgb-violet) / <alpha-value>)",
+          complete: "rgb(var(--rgb-mint) / <alpha-value>)",
+          error:    "rgb(var(--rgb-rose) / <alpha-value>)",
+          paused:   "rgb(var(--rgb-amber) / <alpha-value>)",
         },
         feedback: {
-          success: "var(--color-success)",
-          error:   "var(--color-error)",
-          warning: "var(--color-warning)",
-          info:    "var(--color-info)",
+          success: "rgb(var(--rgb-mint) / <alpha-value>)",
+          error:   "rgb(var(--rgb-rose) / <alpha-value>)",
+          warning: "rgb(var(--rgb-amber) / <alpha-value>)",
+          info:    "rgb(var(--rgb-cyan) / <alpha-value>)",
         },
-        hitl: "var(--color-hitl)",
+        hitl: "rgb(var(--rgb-amber) / <alpha-value>)",
+        // Vertical/category tags — reuse agent hues so they inherit the same
+        // light-mode awareness from the triples.
+        category: {
+          sales:      "rgb(var(--rgb-violet) / <alpha-value>)",
+          competitor: "rgb(var(--rgb-blue) / <alpha-value>)",
+          strategy:   "rgb(var(--rgb-mint) / <alpha-value>)",
+        },
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
@@ -382,45 +471,80 @@ const config: Config = {
       transitionTimingFunction: {
         standard: "var(--ease-standard)", entrance: "var(--ease-entrance)", exit: "var(--ease-exit)",
       },
+      // Without this, the `duration-base` used throughout §7 and the shipped
+      // components resolves to nothing.
+      transitionDuration: {
+        instant: "var(--motion-instant)", fast: "var(--motion-fast)", base: "var(--motion-base)",
+        slow: "var(--motion-slow)", deliberate: "var(--motion-deliberate)",
+      },
       animation: {
         "node-pulse":  "ftm-node-pulse var(--loop-pulse) var(--ease-standard) infinite",
         "hitl-breath": "ftm-hitl-breath var(--loop-breath) ease-in-out infinite",
         "hitl-enter":  "ftm-hitl-enter var(--motion-slow) var(--ease-entrance)",
         "log-in":      "ftm-log-in var(--motion-fast) var(--ease-entrance)",
-        "caret":       "ftm-caret var(--loop-caret) step-end infinite",
+        caret:         "ftm-caret var(--loop-caret) step-end infinite",
         "node-shake":  "ftm-node-shake 320ms var(--ease-standard)",
       },
     },
   },
-  plugins: [require("@tailwindcss/typography")],
+  plugins: [typography],
 };
 export default config;
 ```
 
-> **Migration note.** Existing components use `status.*` (`pending`,
-> `researching`, `awaiting_hitl`, `writing`, `complete`, `failed`). Map them:
-> `pending→agent-idle`, `researching→agent-active`, `awaiting_hitl→agent-paused`,
-> `writing→agent-thinking`, `complete→agent-complete`, `failed→agent-error`.
-> Keep a thin `status` alias in the config during migration if needed.
+> **Migration note (done).** The old `status.*` scale (`pending`, `researching`,
+> `awaiting_hitl`, `writing`, `complete`, `failed`) mapped onto `agent.*` as
+> `pending→agent-idle`, `researching→agent-active`,
+> `awaiting_hitl→agent-paused`, `writing→agent-thinking`,
+> `complete→agent-complete`, `failed→agent-error`. Every call site moved in one
+> pass, so no transitional `status` alias was ever added.
 
 ### Fonts
 
-Prefer `next/font` over the current Google Fonts `@import` (removes a render-
-blocking request and sets the `--font-*` vars used above):
+The original plan here was `next/font` (Inter + JetBrains Mono) to drop the
+render-blocking Google Fonts `@import`. **That is not what shipped.** The
+`@import` was removed, but nothing replaced it: `app/layout.tsx` wires no font
+loader at all, and `--font-sans` / `--font-mono` are plain local stacks that
+degrade to `system-ui` / `ui-monospace` when Inter and JetBrains Mono are not
+installed on the client.
 
-```ts
-// app/layout.tsx
-import { Inter, JetBrains_Mono } from "next/font/google";
-const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
-const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
-// <html className={`${sans.variable} ${mono.variable}`}>
+```css
+--font-sans: "Inter", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+--font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
 ```
+
+This was deliberate — it keeps production and Docker builds from depending on a
+third-party font fetch at build time — but it does mean most visitors see the
+system stack, not Inter. Self-hosting the two families via `next/font/local`
+would give the intended typography back without reintroducing that dependency.
 
 ---
 
 ## 7. Component build specs
 
 React 19 + Tailwind. Each component reads `data-state` and lets tokens do the work.
+
+> **These blocks are design sketches, not shipped source.** Unlike §2–§6, they
+> were never reconciled against the repository, because the components they
+> describe were built against real data models rather than transcribed. Read
+> them for the state→token mapping, which did survive; do not expect the JSX to
+> compile or the props to match. What each one actually became:
+>
+> | Spec | Shipped as | Main deviation |
+> | --- | --- | --- |
+> | 7.1 Agent node | [`AgentGraph.tsx`](../../frontend/components/AgentGraph.tsx) | Built on `@xyflow/react`, so nodes are React Flow nodes styled by inline `--node-*` tokens, not the `<div>` below. The `.ftm-edge` CSS in `globals.css` is consequently **dead** — React Flow draws its own edges. |
+> | 7.2 Pipeline progress | [`PipelineProgress.tsx`](../../frontend/components/PipelineProgress.tsx) | Close to the sketch. State derivation lives in `pipelineNodeState()` in `lib/types.ts`, shared with 7.1. |
+> | 7.3 HITL card | [`HitlModal.tsx`](../../frontend/components/HitlModal.tsx) | Same tokens and `role="alertdialog"`; different layout and props. |
+> | 7.4 Log stream | [`AgentLog.tsx`](../../frontend/components/AgentLog.tsx) | Keeps `.ftm-scanline` and the agent-hue prefix column; not virtualized. |
+> | 7.5 Playbook selector | [`VerticalSelector.tsx`](../../frontend/components/VerticalSelector.tsx), [`FormatSelector.tsx`](../../frontend/components/FormatSelector.tsx) | Split across two components. |
+> | 7.6 Citation pill | — | Not built. `--cite-*` tokens are declared but unread. |
+> | 7.7 Cost widget | — | Not built. `--cost-*` tokens are declared but unread. |
+> | 7.8 Tenant switcher | [`WorkspaceSwitcher.tsx`](../../frontend/components/WorkspaceSwitcher.tsx) | Real implementation is unrelated to the sketch. |
+>
+> One correction that applies throughout: several sketches use a hue as text
+> (`text-agent-complete`, `text-hitl`). The shipped components use neutral
+> `text-content` with the hue as a `/10` tint and `/40` border instead, because
+> the light-mode hues do not clear 4.5:1 as real text — see §9.
 
 ### 7.1 Agent node
 
@@ -704,8 +828,11 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
       (Old `status.*` block removed outright rather than aliased — every
       call site was migrated to `agent.*`/`statusBadgeClass()` in the same
       pass, so no transitional alias was needed.)
-- [x] Swap Google-Fonts `@import` for `next/font` (Inter + JetBrains Mono),
-      wiring `--font-sans` / `--font-mono`.
+- [~] Drop the Google-Fonts `@import`. Removed, but **not** replaced with
+      `next/font` as planned — `--font-sans`/`--font-mono` are local stacks and
+      `layout.tsx` loads no font. Deliberate (no third-party fetch at build
+      time), with the trade-off that most visitors get the system stack rather
+      than Inter. See the Fonts note in §6.
 - [~] Build components 7.1–7.8 against semantic/component tokens only.
       Done for the specs with a real counterpart in this app: 7.1 Agent
       node → `AgentGraph.tsx`, 7.2 Pipeline progress bar →
@@ -714,8 +841,11 @@ export function TenantSwitcher({ current, role }: { current: { name: string; mon
       `pipelineNodeState()` helper in `lib/types.ts`), 7.3 HITL checkpoint
       → `HitlModal.tsx`, 7.4 Log stream → `AgentLog.tsx`, 7.5 Playbook
       selector → `VerticalSelector.tsx`/`FormatSelector.tsx`. 7.6
-      (citation pill), 7.7 (cost widget), 7.8 (tenant switcher) have no
-      existing component to retrofit — not built, not needed yet.
+      (citation pill) and 7.7 (cost widget) have no existing component to
+      retrofit — not built, not needed yet, though their `--cite-*` and
+      `--cost-*` tokens are already declared in §4. 7.8's role is filled by
+      `WorkspaceSwitcher.tsx`, which was built independently of the sketch
+      and shares none of its markup — see the §7 mapping table.
 
       Note found while visually verifying 7.2 (Playwright screenshot
       across all run statuses), since fixed: for `status: "failed"` runs,
