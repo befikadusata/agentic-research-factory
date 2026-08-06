@@ -1,16 +1,19 @@
-from pydantic import BaseModel, Field, model_validator
-from uuid import UUID
 from datetime import datetime
+from typing import Any
 from urllib.parse import urlparse
-from models import RunStatus
-from typing import Optional, Any
+from uuid import UUID
+
+from pydantic import BaseModel, Field, model_validator
+
 from configs.verticals import VALID_VERTICALS, VERTICALS
+from models import RunStatus
+
 
 class RegisterRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     # bcrypt only uses the first 72 bytes; cap length so nothing is silently ignored.
     password: str = Field(..., min_length=8, max_length=72)
-    name: Optional[str] = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
 
 
 class LoginRequest(BaseModel):
@@ -20,15 +23,15 @@ class LoginRequest(BaseModel):
 
 class UserResponse(BaseModel):
     email: str
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class RegisterResponse(BaseModel):
     email: str
-    name: Optional[str] = None
+    name: str | None = None
     verification_required: bool = True
     # Only populated in development so the flow is testable without real email.
-    dev_verification_url: Optional[str] = None
+    dev_verification_url: str | None = None
 
 
 class VerifyEmailRequest(BaseModel):
@@ -46,10 +49,10 @@ class ResendVerificationRequest(BaseModel):
 
 class SimpleStatusResponse(BaseModel):
     status: str = "ok"
-    dev_verification_url: Optional[str] = None
+    dev_verification_url: str | None = None
 
 
-def validate_vertical_inputs(vertical: Optional[str], vertical_inputs: dict[str, Any]) -> None:
+def validate_vertical_inputs(vertical: str | None, vertical_inputs: dict[str, Any]) -> None:
     """Validate a vertical key and its structured inputs. Shared by run and
     monitor request models (a monitor is a saved run template). Raises
     ValueError on any problem so it surfaces as a 422 from Pydantic."""
@@ -85,8 +88,8 @@ class CreateRunRequest(BaseModel):
     topic: str = Field(..., min_length=3, max_length=500)
     format: str = Field(..., pattern="^(report|linkedin|summary)$")
     doc_ids: list[str] = Field(default_factory=list)
-    workspace_id: Optional[UUID] = None
-    vertical: Optional[str] = None
+    workspace_id: UUID | None = None
+    vertical: str | None = None
     vertical_inputs: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -95,7 +98,7 @@ class CreateRunRequest(BaseModel):
         return self
 
 class HitlApproveRequest(BaseModel):
-    instruction: Optional[str] = None
+    instruction: str | None = None
 
 class RunResponse(BaseModel):
     id: UUID
@@ -107,12 +110,12 @@ class RunResponse(BaseModel):
     topic: str
     format: str
     status: RunStatus
-    failed_at_status: Optional[RunStatus] = None
-    workspace_id: Optional[UUID]
+    failed_at_status: RunStatus | None = None
+    workspace_id: UUID | None
     # Set when a monitor spawned this run. Without it the UI can't tell a
     # monitored run from a one-off and offers to "save as monitor" for both.
-    monitor_id: Optional[UUID] = None
-    vertical: Optional[str] = None
+    monitor_id: UUID | None = None
+    vertical: str | None = None
     vertical_inputs: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
@@ -141,11 +144,13 @@ class LogEntryResponse(BaseModel):
 class RunDetailResponse(RunResponse):
     updated_at: datetime
     logs: list[LogEntryResponse]
-    research_output: Optional[str]
-    analysis_output: Optional[str]
-    final_output: Optional[str]
-    error_message: Optional[str]
-    citations: list[dict] = Field(default_factory=list)
+    research_output: str | None
+    analysis_output: str | None
+    final_output: str | None
+    error_message: str | None
+    # Citations live under `metrics.citations` — that is where the pipeline
+    # writes them and where the UI reads them. They were also mirrored to a
+    # top-level field here, which nothing ever read.
     metrics: dict = Field(default_factory=dict)
     costs: list[RunCostResponse] = Field(default_factory=list)
 
@@ -161,12 +166,12 @@ class CreateMonitorRequest(BaseModel):
     topic: str = Field(..., min_length=3, max_length=500)
     format: str = Field(..., pattern="^(report|linkedin|summary)$")
     doc_ids: list[str] = Field(default_factory=list)
-    workspace_id: Optional[UUID] = None
-    vertical: Optional[str] = None
+    workspace_id: UUID | None = None
+    vertical: str | None = None
     vertical_inputs: dict[str, Any] = Field(default_factory=dict)
     interval_minutes: int = Field(default=1440, ge=_MIN_INTERVAL, le=_MAX_INTERVAL)
     enabled: bool = True
-    notify_channel: Optional[str] = Field(default=None, max_length=512)
+    notify_channel: str | None = Field(default=None, max_length=512)
 
     @model_validator(mode="after")
     def validate_vertical(self) -> "CreateMonitorRequest":
@@ -178,27 +183,27 @@ class UpdateMonitorRequest(BaseModel):
     """Partial update — only schedule/label/toggle fields. The run template
     (topic, vertical, docs) is immutable so a monitor's history stays coherent;
     create a new monitor to watch something different."""
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    interval_minutes: Optional[int] = Field(default=None, ge=_MIN_INTERVAL, le=_MAX_INTERVAL)
-    enabled: Optional[bool] = None
-    notify_channel: Optional[str] = Field(default=None, max_length=512)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    interval_minutes: int | None = Field(default=None, ge=_MIN_INTERVAL, le=_MAX_INTERVAL)
+    enabled: bool | None = None
+    notify_channel: str | None = Field(default=None, max_length=512)
 
 
 class MonitorResponse(BaseModel):
     id: UUID
     user_id: str
-    workspace_id: Optional[UUID]
+    workspace_id: UUID | None
     name: str
     topic: str
     format: str
-    vertical: Optional[str]
+    vertical: str | None
     vertical_inputs: dict[str, Any] = Field(default_factory=dict)
     interval_minutes: int
     enabled: bool
     next_run_at: datetime
-    last_run_id: Optional[UUID]
-    last_run_at: Optional[datetime]
-    notify_channel: Optional[str]
+    last_run_id: UUID | None
+    last_run_at: datetime | None
+    notify_channel: str | None
     created_at: datetime
     updated_at: datetime
 

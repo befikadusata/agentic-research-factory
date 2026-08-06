@@ -1,7 +1,7 @@
-import structlog
-import logging
 import sys
 from contextvars import ContextVar
+
+import structlog
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
@@ -20,10 +20,8 @@ def setup_logger():
     ]
 
     if sys.stderr.isatty():
-        # Pretty print for development
         processors.append(structlog.dev.ConsoleRenderer())
     else:
-        # JSON for production
         processors.append(structlog.processors.JSONRenderer())
 
     structlog.configure(

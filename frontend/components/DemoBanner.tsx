@@ -2,13 +2,11 @@ import { FlaskConical } from "lucide-react";
 import { IS_DEMO } from "@/lib/demo";
 
 /**
- * Persistent "this is not real data" marker for demo builds.
+ * Persistent "this is not real data" marker for demo builds; renders nothing
+ * otherwise.
  *
- * It stays for the whole session rather than being dismissible on purpose: the
- * demo is meant to be screenshotted and linked, and a banner that can be closed
- * is a banner that will be missing from the screenshot.
- *
- * Renders nothing outside demo mode, so it costs a production build nothing.
+ * Not dismissible: the demo gets screenshotted and linked, and a banner that can
+ * be closed will be missing from the screenshot.
  */
 export function DemoBanner() {
   if (!IS_DEMO) return null;

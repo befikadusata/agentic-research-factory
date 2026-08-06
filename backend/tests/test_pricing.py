@@ -1,8 +1,7 @@
 """
-Regression tests for §4.1: `_log_token_usages` used to hardcode
-`total_cost=0.0` for every call, so `RunCost.total_cost` (and the
-`/analytics/costs` endpoint's `total_cost_usd`) always reported $0.00
-regardless of real spend.
+`calculate_cost` is what turns tracked token counts into the dollar figure
+`RunCost.total_cost` and `/analytics/costs` report, so every slug the pipeline
+can actually route to must be priced here.
 """
 from utils.pricing import calculate_cost
 
@@ -25,9 +24,9 @@ def test_calculate_cost_free_model_is_zero():
 
 
 def test_calculate_cost_routed_free_openrouter_model_is_priced():
-    # openrouter/tencent/hy3:free is the cross-provider fallback slug; it used to
-    # be absent from the table and log unknown_model_pricing on every call.
-    # Sourced from MODEL_REGISTRY now, it prices to $0 (free) — not "unknown".
+    # The cross-provider fallback slug must be present in the pricing table, or
+    # every fallback leg logs unknown_model_pricing. It happens to price to $0,
+    # which the assertion alone can't tell apart from the unknown-model default.
     assert calculate_cost("openrouter/tencent/hy3:free", 5000, 5000) == 0.0
 
 

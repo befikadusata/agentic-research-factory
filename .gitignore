@@ -65,9 +65,19 @@ Thumbs.db
 desktop.ini
 
 # ── Editors ──────────────────────────────────────────────────────────────────
-# Note: .vscode/settings.json is tracked on purpose (shared editor config), so
-# .vscode/ is not ignored here.
+# .vscode/ was tracked for a while on the theory that it was shared editor
+# config. It held one key disabling an AI extension's MCP prompt — a personal
+# preference, not a project setting. Nothing here needs a committed editor
+# config; add one back only if a setting is required to build or test.
+.vscode/
 .idea/
 *.swp
 *.swo
 *~
+
+# ── Local AI tooling ─────────────────────────────────────────────────────────
+# Assistant workspaces and vendored skill packs. Machine-local and not part of
+# the project.
+.gemini/
+.claude/
+CLAUDE.md

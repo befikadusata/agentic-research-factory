@@ -6,7 +6,7 @@
    on downloading font files from a third-party service. */
 
 /* ════════════════════════════════════════════════════════════════════
-   Factotum design tokens — see docs/design/factotum-{design,implementation}.md
+   Design tokens — see docs/design/design-{language,tokens}.md
    Three layers: base (raw hex) → semantic (themeable) → component (scoped).
    Components must read semantic/component tokens only, never base directly.
    ════════════════════════════════════════════════════════════════════ */

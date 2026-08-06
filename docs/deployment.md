@@ -58,18 +58,10 @@ filesystem, so uploaded PDFs go to object storage that both can reach.
 |----------|-------|
 | `ENVIRONMENT` | `production` |
 | `DATABASE_URL` | `postgresql+asyncpg://user:pass@host:5432/dbname` |
-| `LLM_MODEL` | Optional legacy override for every agent |
+| `REDIS_URL` | `redis://host:6379/0` — the Celery broker and the SSE Pub/Sub bus; the API will not pass its own health check without it |
 | `GROQ_API_KEY` | Your Groq API key |
 | `OPENROUTER_API_KEY` | Your OpenRouter API key |
-| `GEMINI_API_KEY` | Your Google AI Studio key |
-| `STRATEGIST_MODEL` | `groq/llama-3.1-8b-instant` |
-| `RESEARCHER_MODEL` | `meta-llama/llama-3.3-70b-instruct:free` |
-| `ANALYST_MODEL` | `openrouter/free` |
-| `WRITER_MODEL` | `openrouter/free` |
-| `EDITOR_MODEL` | `openrouter/free` |
-| `REVIEWER_MODEL` | `openrouter/free` |
-| `QUERY_REWRITER_MODEL` | `groq/llama-3.1-8b-instant` |
-| `EVAL_MODEL` | `openrouter/free` |
+| `GEMINI_API_KEY` | Your Google AI Studio key — embeddings only; Gemini is deliberately not a routing citizen |
 | `EMBEDDING_MODEL` | `gemini-embedding-2` |
 | `TAVILY_API_KEY` | Your Tavily API key |
 | `FIRECRAWL_API_KEY` | Your Firecrawl API key |
@@ -82,6 +74,17 @@ filesystem, so uploaded PDFs go to object storage that both can reach.
 | `STORAGE_ACCESS_KEY` | Blank to use an instance/task IAM role instead |
 | `STORAGE_SECRET_KEY` | Blank to use an instance/task IAM role instead |
 | `STORAGE_REGION` | e.g. `us-east-1` |
+| `VECTOR_DB_URL` | Optional. Defaults to `DATABASE_URL` with the async driver stripped, so the application database also serves the `vecs` collections. Set it only to point embeddings at a different Postgres, which must have the `vector` extension |
+
+**Leave every model variable blank.** With `LLM_MODEL` unset, [`services/llm_router.py`](../backend/services/llm_router.py) selects each agent's model from its declared capability (`light`, `reasoning`, `writing`, `tool_use`, `judge`) against `MODEL_REGISTRY`, using whichever provider keys are present. Per-role tiering works on a single provider's keys.
+
+Set one only to deviate from that:
+
+| Variable | Effect |
+|----------|--------|
+| `LLM_MODEL` | Legacy single-provider mode. If set, every non-judge agent uses this one model and capability routing is bypassed entirely |
+| `JUDGE_MODEL` | Pins the reviewer and the eval-confidence judge to a model distinct from the generators they grade, so a model does not grade its own output. Applies in legacy mode too |
+| `STRATEGIST_MODEL`, `RESEARCHER_MODEL`, `LEAD_INTEL_MODEL`, `ANALYST_MODEL`, `WRITER_MODEL`, `EDITOR_MODEL`, `REVIEWER_MODEL`, `QUERY_REWRITER_MODEL`, `EVAL_MODEL` | Pin one role to one model slug. The value must be a litellm-resolvable slug; use one of the keys in `MODEL_REGISTRY` unless you have also added pricing for it |
 
 `NEXTAUTH_SECRET` is a frontend-only variable; the backend never reads it.
 
@@ -97,6 +100,36 @@ filesystem, so uploaded PDFs go to object storage that both can reach.
 5. Deploy. Verify `GET /health` returns `{"status": "ok"}`.
 
 > **Note:** Setting `ENVIRONMENT=production` enables fail-fast startup. The backend refuses to start if `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, or `LLAMA_CLOUD_API_KEY` are missing, logging an explicit error listing the absent keys. It also refuses to start if `BACKEND_JWT_SECRET` is still one of the development values the repo ships, or is shorter than 32 characters.
+
+---
+
+## Step 2b: Deploy Celery Worker
+
+The API only enqueues work. Without a worker, runs are created and then sit in `pending` forever, and uploaded PDFs are never parsed — with no error surfaced anywhere.
+
+1. Create a second Railway service from the same repo, **Root Directory** `backend`.
+2. Set the **Start Command** to:
+   ```
+   celery -A celery_app worker --loglevel=info --concurrency=1 -Q default
+   ```
+   `-Q default` is required. [`celery_app.py`](../backend/celery_app.py) routes every task — `execute_run_task`, `ingest_doc_task`, `dispatch_due_monitors_task`, `reap_orphaned_runs_task` — to the `default` queue, so a worker left on Celery's built-in `celery` queue consumes nothing and fails silently.
+3. Give it **the same environment variables as Step 2**, including all five `STORAGE_*` values. The worker reads back exactly what the API wrote, so any divergence in bucket, endpoint, or credentials breaks uploads.
+
+Scale by running more worker services or raising `--concurrency`. Note that `worker_max_tasks_per_child=1` recycles the child process after every task, so each task starts with a clean event loop; this is deliberate and should not be removed.
+
+---
+
+## Step 2c: Deploy Celery Beat
+
+Beat is only required if you use scheduled monitors or want orphaned runs reaped automatically.
+
+1. Create a third service from the same repo, **Root Directory** `backend`, same environment variables.
+2. Set the **Start Command** to:
+   ```
+   celery -A celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+   ```
+
+**Run exactly one beat instance.** Beat is a scheduler, not a worker: two instances mean every scheduled monitor fires twice and bills twice. It dispatches `dispatch_due_monitors_task` every 60s and `reap_orphaned_runs_task` every 300s; the runs those spawn execute on the Step 2b worker, not in beat itself.
 
 ---
 

@@ -1,14 +1,15 @@
-from crewai.tools import BaseTool
 import asyncio
 from functools import lru_cache
+
+from crewai.tools import BaseTool
 from firecrawl import FirecrawlApp
-from config import settings
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+from config import settings
 from logger import logger
+from tools.untrusted import wrap_untrusted
 from utils.cache import tool_cache
 from utils.source_ledger import record_retrieved_url
-from tools.untrusted import wrap_untrusted
-from typing import List, Dict
 
 # Self-hosted Firecrawl authenticates nothing (USE_DB_AUTHENTICATION=false in
 # docker-compose.yml), but firecrawl-py 1.5.0 raises ValueError unless *some*
@@ -29,21 +30,20 @@ _UNAVAILABLE = (
 def _firecrawl_app() -> FirecrawlApp:
     """Build the Firecrawl client on first use, never at import.
 
-    This used to be an eager `Field(default_factory=...)` on both tools, which
-    ran when the module was imported — and `agents/researcher.py` imports this
-    module unconditionally. With no FIRECRAWL_API_KEY set, the client's own
-    `raise ValueError('No API key provided')` therefore killed the import of the
-    researcher agent, and with it every run. Scraping is documented as optional
-    and degrading to search snippets, so it must never break import.
+    `agents/researcher.py` imports this module unconditionally, and FirecrawlApp
+    raises `ValueError('No API key provided')` in its constructor, so building it
+    eagerly kills the import of the researcher agent — and with it every run — on
+    any machine with no FIRECRAWL_API_KEY. Scraping is optional and degrades to
+    search snippets, so it must never break import.
 
-    It hid well locally: crewai calls load_dotenv() at import, so firecrawl-py's
-    os.getenv fallback finds a key in backend/.env even when settings has none.
-    Only a machine whose .env genuinely omits it — the documented self-hosted
-    setup — hits the crash.
+    That failure hides locally: crewai calls load_dotenv() at import, so
+    firecrawl-py's os.getenv fallback finds a key in backend/.env even when
+    settings has none. Only a .env that genuinely omits it — the documented
+    self-hosted setup — reaches the crash.
 
-    With neither a key nor a URL there is nothing to talk to; let the ValueError
-    escape here, where the callers' except-blocks turn it into the normal
-    "scraping unavailable" degradation instead of an import-time crash.
+    With neither a key nor a URL there is nothing to talk to, and the ValueError
+    escapes from here, where the callers' except-blocks turn it into the normal
+    "scraping unavailable" degradation.
     """
     api_key = _set(settings.FIRECRAWL_API_KEY)
     api_url = _set(settings.FIRECRAWL_API_URL)
@@ -121,7 +121,7 @@ class BatchScrapeTool(_FirecrawlClientMixin, BaseTool):
         "Input: a list of URL strings. Use this to quickly get the full text of multiple articles at once."
     )
 
-    async def _scrape_single(self, url: str) -> Dict:
+    async def _scrape_single(self, url: str) -> dict:
         """Scrape a single URL with caching."""
         cached = tool_cache.get("scrape_webpage", url)
         if cached:
@@ -141,35 +141,33 @@ class BatchScrapeTool(_FirecrawlClientMixin, BaseTool):
             tool_cache.set("scrape_webpage", url, result)
             record_retrieved_url(url)
             return {"url": url, "content": result.get("markdown", "")[:6000]}
-        except (Exception, asyncio.TimeoutError) as e:
+        except (TimeoutError, Exception) as e:
             logger.warning("firecrawl_batch_scrape_failed", url=url, error=str(e))
             return {"url": url, "content": f"Error: {str(e)}"}
 
-    def _run(self, urls: List[str]) -> str:
+    def _run(self, urls: list[str]) -> str:
         """Sync wrapper for the async batch scrape."""
         if not _scraping_configured():
             logger.warning("firecrawl_not_configured", count=len(urls) if isinstance(urls, list) else 1)
             return _UNAVAILABLE.format(url="the requested pages", reason="not configured")
 
-        if not isinstance(urls, list):
-            if isinstance(urls, str):
-                if urls.startswith("[") and urls.endswith("]"):
-                    try:
-                        import ast
-                        urls = ast.literal_eval(urls)
-                    except:
-                        urls = [urls]
-                else:
+        if not isinstance(urls, list) and isinstance(urls, str):
+            if urls.startswith("[") and urls.endswith("]"):
+                try:
+                    import ast
+                    urls = ast.literal_eval(urls)
+                except Exception:
                     urls = [urls]
+            else:
+                urls = [urls]
         
         logger.info("firecrawl_batch_scrape_start", count=len(urls))
         
         try:
-            # Check if there is an existing running loop
             try:
                 loop = asyncio.get_running_loop()
-                # If we're here, we're in an async context, but _run is sync.
-                # CrewAI often runs tools in threads, so this might be okay.
+                # A loop is already running (CrewAI may call this tool from one),
+                # and _run is sync — nest_asyncio makes run_until_complete legal.
                 import nest_asyncio
                 nest_asyncio.apply()
                 return loop.run_until_complete(self._async_run(urls))
@@ -179,7 +177,7 @@ class BatchScrapeTool(_FirecrawlClientMixin, BaseTool):
             logger.warning("firecrawl_batch_run_error", error=str(e))
             return f"Batch scrape failed: {str(e)}"
 
-    async def _async_run(self, urls: List[str]) -> str:
+    async def _async_run(self, urls: list[str]) -> str:
         results = await asyncio.gather(*[self._scrape_single(u) for u in urls])
         output = []
         for res in results:

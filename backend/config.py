@@ -1,5 +1,7 @@
 import os
+
 from pydantic_settings import BaseSettings
+
 from logger import logger
 
 
@@ -19,23 +21,16 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = None
 
     # Per-agent model OVERRIDES. Unset (None) → the agent is routed by capability
-    # via llm_router.MODEL_REGISTRY / ROLE_CAPS, which picks the cheapest model
-    # fit for the role from whichever providers have keys. That routing works on
-    # a single provider (e.g. Groq 8B for light work, Groq 70B for reasoning),
-    # so it no longer collapses when only one provider key is set. Set one of
-    # these to pin a specific agent to a specific slug (it wins over routing);
-    # the `openrouter/` prefix is explicit so litellm routes it correctly.
+    # via llm_router.MODEL_REGISTRY / ROLE_CAPS, which picks the cheapest model fit
+    # for the role from whichever providers have keys, and works on a single
+    # provider (Groq 8B for light work, Groq 70B for reasoning/writing/judging).
+    # Setting one pins that agent to a specific slug and wins over routing; the
+    # `openrouter/` prefix must be explicit so litellm routes it correctly.
     #
-    # The default routing is expressed as capabilities in the registry:
-    #   - light (strategist, query_rewriter)        → Groq 8B-instant
-    #   - reasoning/writing/tool-use (core path)     → Groq 70B-versatile
-    #   - reasoning/judging (analyst, reviewer,      → Groq 70B-versatile
-    #     eval)
     # OpenRouter's free Tencent hy3 is a reasoning model that returns empty
     # `content` under real crewai load (fails the stage), so it is NOT a routed
-    # primary — it stays only as the cross-provider *fallback* slug and for
-    # pricing (see services/llm_router.py). Set a *_MODEL override to pin a
-    # specific slug (e.g. a paid reasoning model for the judges).
+    # primary — it stays only as the cross-provider fallback slug and for pricing
+    # (see services/llm_router.py).
     STRATEGIST_MODEL: str | None = None
     QUERY_REWRITER_MODEL: str | None = None
     RESEARCHER_MODEL: str | None = None
@@ -50,11 +45,11 @@ class Settings(BaseSettings):
     # not be the same model as the generators they grade — a model grading its
     # own output shares its blind spots, and that self-assessment is surfaced to
     # the human as "AI Confidence." When set, JUDGE_MODEL pins the judges to a
-    # distinct model in BOTH legacy and routed mode (in legacy mode every agent
-    # otherwise collapses onto the single LLM_MODEL). Unset → judges follow the
+    # distinct model in BOTH legacy and routed mode (legacy mode otherwise
+    # collapses every agent onto the single LLM_MODEL). Unset → judges follow the
     # normal resolution (legacy: LLM_MODEL; routed: REVIEWER_MODEL/EVAL_MODEL).
-    # A different model on the same provider (e.g. a second Groq model) is enough
-    # to break the shared blind spot without needing a second provider key. (M2)
+    # A different model on the same provider is enough to break the shared blind
+    # spot; it does not need a second provider key.
     JUDGE_MODEL: str | None = None
 
     # A run stuck in a non-terminal state (pending / researching / analyzing /
@@ -62,18 +57,14 @@ class Settings(BaseSettings):
     # this — with no segment task advancing it — is considered orphaned and
     # reaped to `failed` by the beat-driven reaper. Must exceed the Celery hard
     # task limit (~11 min) plus a margin, so a still-running segment is never
-    # mistaken for a dead one. (M3)
+    # mistaken for a dead one.
     RUN_STUCK_TIMEOUT_MIN: int = 20
 
-    # Celery per-task limits, and the LLM budget derived from them. These live
-    # together because they have to stay consistent: the retry budget used to be
-    # set independently (LLM_STAGE_TIMEOUT_SEC x 3 tenacity attempts = 900s, and a
-    # resumed segment makes two such calls ≈ 1800s) against a 600s soft limit, so
-    # a slow stage was SIGKILLed mid-flight and the run sat non-terminal until the
-    # RUN_STUCK_TIMEOUT_MIN reaper caught it. run_service now spends one shared
-    # SEGMENT budget across every invoke in a task, and that budget is kept under
-    # the soft limit by SEGMENT_BUDGET_MARGIN_SEC so the segment always fails
-    # cleanly — persisting `failed` and an error message — inside its own task.
+    # Celery per-task limits, and the LLM budget derived from them. run_service
+    # spends one shared SEGMENT budget across every invoke in a task, and
+    # SEGMENT_BUDGET_MARGIN_SEC keeps that budget under the soft limit so a slow
+    # segment fails cleanly inside its own task — persisting `failed` and an error
+    # message — instead of being killed mid-flight and left non-terminal.
     TASK_SOFT_TIME_LIMIT_SEC: int = 600   # SIGTERM; task can still clean up
     TASK_TIME_LIMIT_SEC: int = 660        # SIGKILL if it ignored the above
     # Cap on a single graph invoke. The segment budget can shrink it further.
@@ -85,11 +76,9 @@ class Settings(BaseSettings):
     # Per-run LLM spend ceiling in USD. Once a run's accumulated cost (summed from
     # its run_costs rows plus the in-flight segment) reaches this, the reviewer
     # retry loop stops re-running the heavy research→analyse→review triad and the
-    # graph ships what it has (graceful degrade) instead of burning up to the full
-    # retry budget regardless of spend. On the free-tier default config every
-    # routed model prices to ~$0, so this never trips there; it exists so a
-    # paid-key deployment can't run away. Set to None or <= 0 to disable the
-    # ceiling entirely (the retry cap of 3 still bounds the loop).
+    # graph ships what it has. On the free-tier default config every routed model
+    # prices to ~$0, so this only ever trips a paid-key deployment. Set to None or
+    # <= 0 to disable the ceiling (the retry cap of 3 still bounds the loop).
     RUN_COST_CEILING_USD: float | None = 1.0
 
     # Researcher pass budget. The first pass is deliberately shallow to fit Groq's
@@ -98,7 +87,7 @@ class Settings(BaseSettings):
     # undersized pass just re-fails and re-bills it, so the budget escalates per
     # retry (more ReAct iterations + a larger synthesis reservation) to actually
     # act on the reviewer's feedback. Raise the base values on a paid key where the
-    # per-minute ceiling isn't the binding constraint. (gap #3)
+    # per-minute ceiling isn't the binding constraint.
     RESEARCHER_MAX_ITER: int = 2
     RESEARCHER_MAX_TOKENS: int = 900
     RESEARCHER_RETRY_TOKEN_STEP: int = 500
@@ -108,7 +97,7 @@ class Settings(BaseSettings):
     # reviewer's retry feedback). Every stage is completion-capped, so these are
     # normally under budget and pass through untouched; this only bounds an
     # unusually large upstream output (big source docs, a verbose paid model) so
-    # the re-sent context can't balloon a downstream call. (gap #4)
+    # the re-sent context can't balloon a downstream call.
     CONTEXT_MAX_CHARS: int = 6000
 
     # Gemini embeddings for RAG.
@@ -125,10 +114,9 @@ class Settings(BaseSettings):
     #
     # Retrieval ranks 1000-character windows because that is what the embedder and
     # the re-ranker can read in full (see docs/optimizations.md), but 1000
-    # characters is not a unit of meaning. The window that scores highest is
+    # characters is not a unit of meaning: the window that scores highest is
     # regularly the one that names the thing, while the sentence qualifying it sits
-    # in the next window and never reaches the agent. Retrieving small and reading
-    # large is the standard answer, and it costs one indexed lookup.
+    # in the next window and never reaches the agent.
     #
     # Expansion never crosses a page boundary, so the citation stays exact — see
     # tools/rag.expand_context. 0 disables it and restores chunk-at-a-time output.
@@ -137,24 +125,12 @@ class Settings(BaseSettings):
     # Score the best-reranked chunk must reach before retrieval answers at all.
     # Below it, RAGTool abstains and tells the agent to use web search instead.
     #
-    # MEASURED, and measured twice, because the first measurement asked the wrong
-    # question.
-    #
-    # It shipped at 0.0 on the reasoning that ms-marco-MiniLM-L-6-v2 is trained to
-    # put relevant pairs above zero. True on MS MARCO web text, false on
-    # business-document prose: backend/evals/rerank_calibration.py scored 34
-    # labelled pairs and found 0.0 would hide 9 of 12 relevant passages. That
-    # moved the default to -11.0, just above the tight off-topic band those pairs
-    # clustered in (-11.35 to -11.01).
-    #
-    # backend/evals/retrieval_eval.py then ran the real pipeline over a real
-    # corpus and showed -11.0 barely gates anything: it rejected 1 of 10
-    # unanswerable queries. The gap is not noise, it is a category error. The
-    # calibration scores a chosen (query, passage) pair. The gate compares against
-    # the best chunk retrieval could find anywhere in the corpus — and a
-    # recall-first pool searching 54 chunks surfaces something far more plausible
-    # than a passage picked to be off-topic. Best-of-pool scores sit well above
-    # isolated-pair scores, so a threshold set from pair scores sits far too low.
+    # Measured by backend/evals/retrieval_eval.py running the real pipeline over a
+    # real corpus. It must be set from those best-of-pool numbers, not from the
+    # isolated (query, passage) scores backend/evals/rerank_calibration.py
+    # produces: the gate compares against the best chunk retrieval can find
+    # anywhere in the corpus, and best-of-pool scores sit well above pair scores,
+    # so a threshold taken from pair scores lands far too low to gate anything.
     #
     # Best-chunk score over 62 answerable and 10 unanswerable queries:
     #
@@ -167,20 +143,17 @@ class Settings(BaseSettings):
     #      -8.5            1/62                     1/10
     #      -7.5            7/62                     0/10
     #
-    # -9.0 buys six of those nine back for nothing: false abstentions do not move
-    # until -8.0, and the single one at -9.0 is a colloquial paraphrase that -11.0
-    # already missed. It is not pushed lower to -8.5 on purpose — the lowest
-    # answerable query that still passes scores -8.351, so -8.5 would sit 0.15
-    # from a real answer and is tuned to this corpus rather than robust to the
-    # next one. -9.0 keeps 0.65 of headroom.
+    # -9.0 rather than the tighter -8.5: the lowest answerable query that still
+    # passes scores -8.351, so -8.5 would sit 0.15 from a real answer and is tuned
+    # to this corpus rather than robust to the next one. -9.0 keeps 0.65 of
+    # headroom, and false abstentions do not start climbing until -8.0.
     #
     # The three unanswerable queries -9.0 still admits are company-financial
-    # questions against a corpus full of company financials. That is the known
-    # limit, not a bad number: both instruments agree that relevant and
-    # same-topic-but-wrong overlap almost entirely, so NO absolute threshold
+    # questions against a corpus full of company financials. Relevant and
+    # same-topic-but-wrong overlap almost entirely, so no absolute threshold
     # separates "answers the question" from "is about the same subject". The gate
-    # catches "these documents are not about this at all" and nothing finer.
-    # Ordering, not thresholding, is what selects among chunks that clear it.
+    # catches "these documents are not about this at all" and nothing finer;
+    # ordering, not thresholding, selects among the chunks that clear it.
     RAG_MIN_RERANK_SCORE: float = -9.0
 
     # Optional in development; required in production (enforced by validate_config).
@@ -204,8 +177,8 @@ class Settings(BaseSettings):
     # value or every authenticated request 401s — see _validate_secret below.
     #
     # NEXTAUTH_SECRET is deliberately absent: it belongs to NextAuth in the
-    # frontend and nothing here has ever read it. Declaring it required meant a
-    # fresh clone refused to boot over a variable the backend does not use.
+    # frontend and nothing here reads it, so declaring it required would stop a
+    # fresh clone booting over a variable the backend does not use.
     BACKEND_JWT_SECRET: str
     FRONTEND_URL: str = "http://localhost:3000"
     BACKEND_URL: str = "http://localhost:8000"
@@ -234,9 +207,9 @@ class Settings(BaseSettings):
     # Where an uploaded PDF lives between the API that receives it and the
     # Celery worker that parses it. Those are separate processes — separate
     # containers under Compose — so "local" is only correct when both share a
-    # filesystem. They don't by default, which silently broke uploaded-document
-    # RAG entirely: the worker's open() raised ENOENT, parse_pdf swallowed it,
-    # and the document was recorded as having no extractable text.
+    # filesystem. They don't by default, and when they don't the worker's open()
+    # raises ENOENT, parse_pdf swallows it, and the document is recorded as having
+    # no extractable text.
     #
     # "s3" is any S3-compatible object store — the MinIO service Compose runs,
     # or real S3/R2/Spaces in a hosted deployment — which both processes reach
@@ -284,9 +257,9 @@ if os.environ.get("TESTING") == "1":
     # test. Tests that exercise the s3 path set this themselves.
     settings.STORAGE_BACKEND = "local"
 
-# Older configs named this SUPABASE_DB_URL. Without this the value would be
-# ignored and the derivation below would silently repoint the vector store at
-# the local database — moving someone's embeddings out from under them.
+# Older configs named this SUPABASE_DB_URL. Without this the value is ignored and
+# the derivation below silently repoints the vector store at the local database —
+# moving someone's embeddings out from under them.
 if settings.SUPABASE_DB_URL and not settings.VECTOR_DB_URL:
     settings.VECTOR_DB_URL = settings.SUPABASE_DB_URL
     logger.warning("SUPABASE_DB_URL is deprecated — rename it to VECTOR_DB_URL")
@@ -319,8 +292,8 @@ _FEATURE_LABEL = {
 # The signing keys the repo ships. backend/.env.example, frontend/.env.local.example
 # and docker-compose.yml all carry the same throwaway value on purpose, so that
 # `cp backend/.env.example backend/.env && docker compose up` authenticates with
-# no manual edits. Previously they disagreed, and the stack booted healthy while
-# every authenticated request 401'd with nothing pointing at the cause.
+# no manual edits. When they disagree the stack boots healthy and every
+# authenticated request 401s with nothing pointing at the cause.
 #
 # "test-secret" is CI's value; it is listed for the same reason.
 _DEV_JWT_SECRETS = frozenset({
@@ -361,9 +334,8 @@ def _is_blank(value: str | None) -> bool:
 
     These come from a `.env` file, where `TAVILY_API_KEY=` is a far more natural
     way to disable a key than deleting the line — and pydantic reads that as `""`,
-    not `None`. An `is None` check let it through, so production booted clean and
-    then failed on the first search call, which is exactly what the fail-fast is
-    supposed to prevent.
+    not `None`. An `is None` check lets it through, so production boots clean and
+    then fails on the first search call.
     """
     return value is None or not value.strip()
 
@@ -374,10 +346,9 @@ _STORAGE_BACKENDS = frozenset({"local", "s3"})
 def _validate_storage(s: Settings) -> None:
     """Reject a storage setting that would fail only at upload time.
 
-    A typo here is the same class of bug this setting exists to fix: an
-    unrecognised value silently selecting local storage, uploads landing in a
-    filesystem the worker cannot see, and the failure surfacing much later as
-    "no text could be extracted" from a PDF that parses fine.
+    An unrecognised value silently selects local storage, so uploads land in a
+    filesystem the worker cannot see and the failure surfaces much later as "no
+    text could be extracted" from a PDF that parses fine.
     """
     if s.STORAGE_BACKEND not in _STORAGE_BACKENDS:
         raise RuntimeError(

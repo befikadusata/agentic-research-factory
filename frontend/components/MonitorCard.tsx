@@ -2,8 +2,12 @@ import Link from "next/link";
 import { Radar } from "lucide-react";
 import type { Monitor } from "@/lib/types";
 import { formatInterval, formatRelative } from "@/lib/monitors";
+import { PlaybookIcon } from "@/components/PlaybookIcon";
+import { useVertical } from "@/lib/useVerticals";
 
 export function MonitorCard({ monitor }: { monitor: Monitor }) {
+  const vDef = useVertical(monitor.vertical);
+
   return (
     <Link
       href={`/monitors/${monitor.id}`}
@@ -28,6 +32,12 @@ export function MonitorCard({ monitor }: { monitor: Monitor }) {
         </span>
       </div>
       <div className="flex items-center gap-3 mt-4 text-xs text-content-muted flex-wrap">
+        {vDef && (
+          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold border px-2 py-0.5 rounded-sm ${vDef.accentClass}`}>
+            <PlaybookIcon vertical={vDef.key} size={12} />
+            {vDef.displayName}
+          </span>
+        )}
         <span>{formatInterval(monitor.interval_minutes)}</span>
         <span aria-hidden>·</span>
         <span>

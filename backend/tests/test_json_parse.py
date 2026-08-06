@@ -1,10 +1,12 @@
-"""Tests for the tolerant LLM-JSON parser (L4).
+"""Tests for the tolerant LLM-JSON parser.
 
-The old call sites hand-stripped a single ``` fence then json.loads()'d, which
-broke on prose preambles, ```json variants, and trailing notes.
+Hand-stripping a single ``` fence then json.loads()'ing breaks on prose
+preambles, ```json variants, and trailing notes — all of which models emit.
 """
 import json
+
 import pytest
+
 from utils.json_parse import parse_json
 
 

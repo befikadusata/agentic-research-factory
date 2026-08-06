@@ -1,21 +1,28 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import (
+    create_email_verification_token,
+    hash_password,
+    verify_email_verification_token,
+    verify_password,
+)
+from config import settings
 from database import get_db
 from models import User
 from schemas import (
-    RegisterRequest, RegisterResponse, LoginRequest, UserResponse,
-    VerifyEmailRequest, VerifyEmailResponse, ResendVerificationRequest,
+    LoginRequest,
+    RegisterRequest,
+    RegisterResponse,
+    ResendVerificationRequest,
     SimpleStatusResponse,
+    UserResponse,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
 )
-from auth import (
-    hash_password, verify_password,
-    create_email_verification_token, verify_email_verification_token,
-)
-from config import settings
 from utils.email import send_verification_email
 
 # Unauthenticated router: these endpoints ARE the login path, so they must not
@@ -68,7 +75,7 @@ async def verify_email(body: VerifyEmailRequest, db: AsyncSession = Depends(get_
     if not user:
         raise HTTPException(400, "This verification link is invalid or has expired.")
     if user.email_verified_at is None:  # idempotent: re-verifying is a no-op
-        user.email_verified_at = datetime.now(timezone.utc)
+        user.email_verified_at = datetime.now(UTC)
         await db.commit()
     return VerifyEmailResponse(email=user.email, verified=True)
 

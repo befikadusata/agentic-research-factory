@@ -7,13 +7,12 @@ place means the two callers can't drift (e.g. forget to set a new column).
 Lives in its own light module rather than run_service.py so importing it (from
 the FastAPI router) doesn't pull in the heavy pipeline/LLM stack.
 """
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Run
 from celery_app import execute_run_task
+from models import Run
 
 
 def build_run(
@@ -21,11 +20,11 @@ def build_run(
     user_id: str,
     topic: str,
     format: str,
-    doc_paths: Optional[list] = None,
-    workspace_id: Optional[UUID] = None,
-    vertical: Optional[str] = None,
-    vertical_inputs: Optional[dict] = None,
-    monitor_id: Optional[UUID] = None,
+    doc_paths: list | None = None,
+    workspace_id: UUID | None = None,
+    vertical: str | None = None,
+    vertical_inputs: dict | None = None,
+    monitor_id: UUID | None = None,
 ) -> Run:
     """Construct a Run row (unpersisted). Callers add/commit it themselves so
     they control the surrounding transaction — the dispatcher, for instance,

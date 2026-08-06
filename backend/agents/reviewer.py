@@ -1,6 +1,8 @@
 from crewai import Agent, Task
+
 from configs.prompt_loader import get_prompt
 from services.llm_router import get_llm
+
 
 def reviewer_agent() -> Agent:
     prompt = get_prompt("reviewer")
@@ -9,8 +11,8 @@ def reviewer_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        # H3: cap the completion (pipeline-wide token invariant); an audit report
-        # is concise, so a tight cap suffices.
+        # Cap the completion (pipeline-wide token invariant); an audit report is
+        # concise, so a tight cap suffices.
         llm=get_llm("reviewer", max_tokens=800),
         verbose=True,
     )

@@ -1,10 +1,11 @@
-from fastapi import HTTPException, Header
-from sqlalchemy.ext.asyncio import AsyncSession
-import jwt as pyjwt
-import bcrypt
 import time
+
+import bcrypt
+import jwt as pyjwt
+from fastapi import Header, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from config import settings
-from typing import Optional
 
 _EMAIL_VERIFY_PURPOSE = "email_verify"
 
@@ -23,7 +24,7 @@ def create_email_verification_token(email: str, expires_hours: int = 24) -> str:
     return pyjwt.encode(payload, settings.BACKEND_JWT_SECRET, algorithm="HS256")
 
 
-def verify_email_verification_token(token: str) -> Optional[str]:
+def verify_email_verification_token(token: str) -> str | None:
     """Return the email if the token is a valid, unexpired verify token, else None."""
     try:
         payload = pyjwt.decode(token, settings.BACKEND_JWT_SECRET, algorithms=["HS256"])
@@ -47,7 +48,7 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def get_current_user(authorization: Optional[str] = Header(None)) -> str:
+def get_current_user(authorization: str | None = Header(None)) -> str:
     """Extract user_id from backend bearer token."""
     if not authorization:
         raise HTTPException(401, "Missing auth token")
@@ -66,13 +67,15 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> str:
             raise ValueError("No subject in token")
         return user_id
     except Exception:
-        raise HTTPException(401, "Invalid auth token")
+        # `from None`: the decode failure is deliberately not chained onto the
+        # 401 — the client gets no detail about *why* the token was rejected.
+        raise HTTPException(401, "Invalid auth token") from None
 
 
 _ROLE_RANK = {"viewer": 0, "operator": 1, "admin": 2}
 
 
-def role_meets(role: Optional[str], min_role: str) -> bool:
+def role_meets(role: str | None, min_role: str) -> bool:
     """True if a workspace role ranks at or above `min_role`.
 
     The single place workspace roles are ordered. An absent or unrecognised role
@@ -82,7 +85,7 @@ def role_meets(role: Optional[str], min_role: str) -> bool:
     return _ROLE_RANK.get(role or "", 0) >= _ROLE_RANK[min_role]
 
 
-async def assert_run_access(run, user_id: str, db: AsyncSession, min_role: Optional[str] = None) -> None:
+async def assert_run_access(run, user_id: str, db: AsyncSession, min_role: str | None = None) -> None:
     """Raise HTTP 404 if user is neither the run owner nor a workspace member.
 
     If `min_role` is given, a workspace member whose role ranks below it is

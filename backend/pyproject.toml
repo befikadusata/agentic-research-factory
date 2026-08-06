@@ -41,8 +41,6 @@ dependencies = [
   "torch==2.12.0",
   "torchvision==0.27.0",
   "langgraph>=0.2.35",
-  "pytest==8.3.3",
-  "pytest-asyncio==0.24.0",
   "structlog==24.4.0",
   "tenacity==9.0.0",
   "langchain-core>=0.3.29",
@@ -74,6 +72,51 @@ explicit = true
 # models. The two must come from the same index.
 torch = { index = "pytorch-cpu" }
 torchvision = { index = "pytorch-cpu" }
+
+# Test-only, so declared here rather than as runtime deps: the Dockerfile builds
+# with `uv sync --no-dev` and CI with a plain `uv sync`, which includes this
+# group. Only pytest-asyncio actually leaves the image — crewai-tools 0.14.0
+# declares pytest as a runtime dependency, so it ships either way.
+[dependency-groups]
+dev = [
+  "pytest==8.3.3",
+  "pytest-asyncio==0.24.0",
+  "ruff==0.16.1",
+]
+
+[tool.ruff]
+target-version = "py311"
+exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+ignore = [
+  # The codebase has ~450 long lines, nearly all of them prose in docstrings and
+  # agent prompts where wrapping hurts readability. Every other pycodestyle
+  # error stays on.
+  "E501",
+  # Would rewrite DocumentStatus/RunStatus from `(str, enum.Enum)` to StrEnum.
+  # Those back SQLAlchemy `SAEnum` columns, and StrEnum changes `__str__`/
+  # `__format__` to return the bare value — a silent change to anything that
+  # interpolates a status into a string. Not worth the blast radius.
+  "UP042",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's whole dependency-injection style is B008 ("function call in default
+# argument") by construction — `def route(db = Depends(get_db))`. These calls are
+# declarations, not shared mutable state, so exempt them rather than littering
+# the routers with noqa.
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.Query",
+  "fastapi.Path",
+  "fastapi.Body",
+  "fastapi.Header",
+  "fastapi.Form",
+  "fastapi.File",
+  "fastapi.Security",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

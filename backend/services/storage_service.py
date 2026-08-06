@@ -4,9 +4,9 @@ Upload and ingestion are deliberately split: `POST /upload` returns `pending`
 immediately and a Celery task parses the file later. That split means the two
 halves are different processes, and under Compose different containers — so the
 bytes have to land somewhere both can reach. A container-local path is not that
-place, and using one broke uploaded-document RAG completely and silently: the
-worker's open() raised ENOENT, `parse_pdf` caught it and returned no chunks, and
-the document was recorded as having no extractable text.
+place, and it fails silently: the worker's open() raises ENOENT, `parse_pdf`
+catches it and returns no chunks, and the document is recorded as having no
+extractable text.
 
 The `s3` backend puts them in any S3-compatible object store — MinIO under
 Compose, real S3/R2/Spaces when hosted — which is reachable over the network no
@@ -23,8 +23,8 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 from uuid import UUID
 
 from config import settings

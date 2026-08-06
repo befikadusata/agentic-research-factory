@@ -12,8 +12,8 @@ from alembic import context
 # Add the parent directory to sys.path to allow importing models and config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models import Base
 from config import settings
+from models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -8,10 +8,10 @@ that matters is store-here / read-there, not either half alone.
 """
 
 import os
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
+import pytest
 from botocore.exceptions import ClientError
 
 from config import settings
@@ -54,8 +54,6 @@ def _client_error(code: str) -> ClientError:
     return ClientError({"Error": {"Code": code}}, "op")
 
 
-# ── local backend ─────────────────────────────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_local_store_writes_bytes_and_returns_path(local_backend):
     doc_id = uuid4()
@@ -68,8 +66,8 @@ async def test_local_store_writes_bytes_and_returns_path(local_backend):
 
 @pytest.mark.asyncio
 async def test_local_store_creates_upload_dir(local_backend):
-    """UPLOAD_DIR used to be created at import time in the router. Storing has
-    to create it itself now, or the first upload after a fresh boot fails."""
+    """Storing has to create UPLOAD_DIR itself rather than relying on the router
+    to do it at import time, or the first upload after a fresh boot fails."""
     assert not os.path.exists(settings.UPLOAD_DIR)
     await store_upload(uuid4(), b"%PDF")
     assert os.path.isdir(settings.UPLOAD_DIR)
@@ -91,8 +89,6 @@ async def test_local_materialize_raises_when_file_is_gone(local_backend):
         async with materialize(str(local_backend / "never-written.pdf")):
             pass
 
-
-# ── s3 backend ────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_s3_store_puts_object_and_returns_uri(s3_backend):
@@ -160,8 +156,6 @@ async def test_s3_materialize_propagates_other_client_errors(s3_backend):
             pass
 
 
-# ── bucket bootstrap ──────────────────────────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_bucket_is_created_when_absent(monkeypatch):
     """A fresh MinIO volume has no buckets, so the first upload has to make one
@@ -196,8 +190,6 @@ async def test_bucket_check_propagates_permission_error(monkeypatch):
         await store_upload(uuid4(), b"%PDF")
     client.create_bucket.assert_not_called()
 
-
-# ── configuration guard ───────────────────────────────────────────────────────
 
 def test_unrecognised_storage_backend_is_rejected():
     """A typo silently selecting local storage is the exact failure mode this

@@ -100,11 +100,10 @@ def test_recall_does_not_collapse_before_reranking(measured):
 
 
 def test_hybrid_retrieval_contributes_more_than_the_vector_half(measured):
-    """The lexical half once returned nothing at all for every question-shaped
-    query, because plainto_tsquery ANDs its terms — the pool was exactly the
-    vector half's 10 results, for 72 queries running. Nothing failed; hybrid
-    search had simply stopped being hybrid. A mean pool at the vector limit is
-    that failure's signature."""
+    """A mean pool sitting exactly at the vector half's limit is the signature of
+    a lexical half returning nothing — plainto_tsquery ANDs its terms, so every
+    question-shaped query can come back empty. Nothing else fails: hybrid search
+    just quietly stops being hybrid."""
     from tools.rag import _CANDIDATES_PER_QUERY
 
     summary, _, _ = measured

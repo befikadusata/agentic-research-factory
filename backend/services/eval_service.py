@@ -1,4 +1,5 @@
 from litellm import acompletion
+
 from services.llm_router import get_completion_settings
 from utils.context import compact_text
 from utils.cost_tracker import log_direct_call
@@ -17,10 +18,9 @@ async def evaluate_output(
     Score output on 4 dimensions (0-100 each).
     Returns: { accuracy, relevance, completeness, writing_quality, overall, issues }
 
-    This judge is a direct litellm call (not a crew node), so it runs at every
-    approval gate without being counted anywhere. When `run_id` is given its
-    cost is persisted to run_costs under `agent_name`, so /analytics/costs stops
-    under-reporting the judge traffic.
+    This judge is a direct litellm call, not a crew node, so it bypasses the
+    crew-node token accounting. Pass `run_id` to persist its cost to run_costs
+    under `agent_name`, which is what keeps /analytics/costs complete.
     """
     specialized = ""
     score_shape = ""

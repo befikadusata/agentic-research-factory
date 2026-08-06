@@ -1,6 +1,8 @@
 from crewai import Agent, Task
+
 from configs.prompt_loader import get_prompt
 from services.llm_router import get_llm
+
 
 def strategist_agent() -> Agent:
     prompt = get_prompt("strategist")
@@ -9,7 +11,7 @@ def strategist_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[],
-        # H3: every agent caps its completion so no single call can breach the
+        # Every agent caps its completion so no single call can breach the
         # free-tier 12K-tok/min ceiling — and, because each stage's output is
         # bounded, the uncapped upstream text every downstream node re-feeds is
         # bounded too. The plan is short, so a tight cap suffices here.

@@ -1,21 +1,23 @@
 """
-Regression tests for M3: nothing used to rescue a run stuck in a non-terminal
-state. A segment task SIGKILLed at the Celery time limit (or a crashed worker)
-leaves the run in researching/analyzing/writing forever; a monitor-spawned run
-whose auto-advance dispatch was lost hangs at an awaiting_* gate with no human to
-approve it. `reap_orphaned_runs` fails those orphans so they can't linger.
+`reap_orphaned_runs` is what rescues a run stuck in a non-terminal state. A
+segment task SIGKILLed at the Celery time limit (or a crashed worker) leaves the
+run in researching/analyzing/writing forever; a monitor-spawned run whose
+auto-advance dispatch was lost hangs at an awaiting_* gate with no human to
+approve it. The reaper fails those orphans so they can't linger.
 
 Manual runs parked at an approval gate are a legitimate wait, not an orphan, and
 must be left alone.
 """
 import uuid
+from datetime import UTC, datetime
+
 import pytest
+
 import database
-from datetime import datetime, timezone
-from database import AsyncSessionLocal
-from models import Run, RunStatus, Monitor
-from config import settings
 import services.run_service as run_service
+from config import settings
+from database import AsyncSessionLocal
+from models import Monitor, Run, RunStatus
 
 
 @pytest.fixture(autouse=True)
@@ -32,10 +34,10 @@ async def _fresh_engine_pool(monkeypatch):
 
 
 async def _make_run(db, **overrides) -> Run:
-    fields = dict(
-        id=uuid.uuid4(), user_id="test_user", topic="t", format="report",
-        vertical=None, doc_paths=[], status=RunStatus.pending,
-    )
+    fields = {
+        "id": uuid.uuid4(), "user_id": "test_user", "topic": "t", "format": "report",
+        "vertical": None, "doc_paths": [], "status": RunStatus.pending,
+    }
     fields.update(overrides)
     run = Run(**fields)
     db.add(run)
@@ -89,7 +91,7 @@ async def test_reaps_autonomous_gate(monkeypatch):
         monitor = Monitor(
             id=uuid.uuid4(), user_id="test_user", name="w", topic="t",
             format="report", interval_minutes=60,
-            next_run_at=datetime.now(timezone.utc),
+            next_run_at=datetime.now(UTC),
         )
         db.add(monitor)
         await db.commit()

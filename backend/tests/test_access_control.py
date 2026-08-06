@@ -1,9 +1,8 @@
+
 import pytest
-from uuid import uuid4
-from models import Run, RunStatus, Workspace, WorkspaceMember, Document
 
+from models import Document, Run, RunStatus, Workspace, WorkspaceMember
 
-# ── helpers ────────────────────────────────────────────────────────────────────
 
 async def _create_run(db, user_id: str, workspace_id=None) -> Run:
     run = Run(
@@ -30,8 +29,6 @@ async def _create_workspace_with_member(db, owner_id: str, member_id: str):
     await db.refresh(ws)
     return ws
 
-
-# ── stranger is denied ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_stranger_cannot_get_run(client, db_session, auth_as):
@@ -77,8 +74,6 @@ async def test_stranger_cannot_stream(client, db_session, auth_as):
     assert resp.status_code == 404
 
 
-# ── workspace member is allowed ────────────────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_workspace_member_can_get_run(client, db_session, auth_as):
     owner = "owner@example.com"
@@ -103,8 +98,6 @@ async def test_workspace_member_can_get_md_output(client, db_session, auth_as):
     assert resp.status_code == 200
 
 
-# ── workspace list is scoped ───────────────────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_workspace_list_scoped_to_member(client, db_session, auth_as):
     owner = "owner@example.com"
@@ -113,21 +106,17 @@ async def test_workspace_list_scoped_to_member(client, db_session, auth_as):
 
     ws = await _create_workspace_with_member(db_session, owner, member)
 
-    # outsider sees nothing
     auth_as(outsider)
     resp = await client.get("/workspaces")
     assert resp.status_code == 200
     assert all(str(ws.id) != w["id"] for w in resp.json())
 
-    # member sees the workspace
     auth_as(member)
     resp = await client.get("/workspaces")
     assert resp.status_code == 200
     ids = [w["id"] for w in resp.json()]
     assert str(ws.id) in ids
 
-
-# ── owner always has access ────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_owner_can_access_own_run_without_workspace(client, db_session, auth_as):
@@ -138,8 +127,6 @@ async def test_owner_can_access_own_run_without_workspace(client, db_session, au
     resp = await client.get(f"/runs/{run.id}")
     assert resp.status_code == 200
 
-
-# ── create_run rejects cross-tenant workspace/doc injection ───────────────────
 
 @pytest.mark.asyncio
 async def test_create_run_rejects_non_member_workspace(client, db_session, auth_as):

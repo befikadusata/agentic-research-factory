@@ -1,12 +1,11 @@
 """Measure where the cross-encoder actually separates relevant chunks from noise.
 
 `settings.RAG_MIN_RERANK_SCORE` decides whether retrieval answers or abstains,
-and it shipped as 0.0 on the reasoning that ms-marco-MiniLM-L-6-v2 is trained so
-relevant pairs land above zero. That is a claim about the model, not a
-measurement of this application's documents — and the cost of being wrong is
-asymmetric in a way that is easy to miss: too high and internal documents go
-silently unused (the agent falls back to the web and nobody sees a failure), too
-low and irrelevant excerpts come back formatted exactly like evidence.
+and the cost of being wrong is asymmetric in a way that is easy to miss: too
+high and internal documents go silently unused (the agent falls back to the web
+and nobody sees a failure), too low and irrelevant excerpts come back formatted
+exactly like evidence. What the model's training implies about where relevant
+pairs land is a claim about the model, not about this application's documents.
 
 So: score labelled pairs with the real model and look at the distribution.
 
@@ -26,16 +25,16 @@ Run it:
     uv run python -m evals.rerank_calibration
 
 This is a calibration instrument, not a retrieval eval. It scores fixed pairs;
-it does not measure whether retrieval *finds* the right chunk (hit rate, MRR,
-NDCG). That harness is still to be built, and it needs a real corpus and golden
-queries rather than the hand-written passages below.
+it does not measure whether retrieval *finds* the right chunk. `retrieval_eval.py`
+does that, over a real corpus and golden queries rather than the hand-written
+passages below.
 """
 
 from dataclasses import dataclass
 
 # (query, passage, label) — label ∈ {relevant, hard_negative, off_topic}
 PAIRS: list[tuple[str, str, str]] = [
-    # ── relevant ─────────────────────────────────────────────────────────────
+    # relevant
     (
         "What is Acme's enterprise pricing?",
         "Enterprise plans start at $2,400 per month for up to 50 seats, billed "
@@ -127,7 +126,7 @@ PAIRS: list[tuple[str, str, str]] = [
         "relevant",
     ),
 
-    # ── hard negatives: same domain and vocabulary, wrong question ───────────
+    # hard negatives: same domain and vocabulary, wrong question
     (
         "What is Acme's enterprise pricing?",
         "Enterprise customers receive a dedicated customer success manager and "
@@ -213,7 +212,7 @@ PAIRS: list[tuple[str, str, str]] = [
         "hard_negative",
     ),
 
-    # ── off topic: the corpus simply does not discuss this ───────────────────
+    # off topic: the corpus simply does not discuss this
     (
         "What is the best recipe for sourdough bread?",
         "Enterprise plans start at $2,400 per month for up to 50 seats, billed "
@@ -300,7 +299,7 @@ def score_pairs() -> list[tuple[str, float]]:
 
     model = _reranker()
     scores = model.predict([(query, passage) for query, passage, _ in PAIRS])
-    return [(label, float(score)) for (_, _, label), score in zip(PAIRS, scores)]
+    return [(label, float(score)) for (_, _, label), score in zip(PAIRS, scores, strict=True)]
 
 
 def summarise(scored: list[tuple[str, float]]) -> dict[str, LabelStats]:

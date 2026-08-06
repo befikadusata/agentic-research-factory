@@ -1,34 +1,49 @@
 """
-LangGraph Supervisor — replaces the sequential CrewAI crew.
+LangGraph supervisor over the single-agent CrewAI nodes.
 
 task_type routing:
-  "research_report"  → Researcher → Analyst → Writer → Editor
-  "lead_intel"       → LeadIntel agent only
+  "research_report"  → plan → research → analyse → review → write → edit
+                       (a non-PASS review loops back to research)
+  "lead_intel"       → lead_intel → lead_review
+                       (a non-PASS review loops back to lead_intel)
 """
 import operator
 import re
-from datetime import datetime, timezone
-from typing import TypedDict, Literal, Optional, List, Annotated
+from contextlib import nullcontext
+from datetime import UTC, datetime
+from typing import Annotated, Literal, TypedDict
+
+from crewai import Crew, Process
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
+
+from config import settings
 from configs.verticals import get_vertical
 from logger import logger
+from services.llm_router import reset_actual_model, resolve_actual_model
+from utils.agent_output import strip_agent_scaffolding
+from utils.context import compact_text
+from utils.cost_tracker import reset_side_costs, take_side_costs
+from utils.langfuse_utils import get_langfuse
+from utils.pricing import calculate_cost
+
 
 class ResearchState(TypedDict):
     topic: str
-    vertical: Optional[str]
+    vertical: str | None
     vertical_inputs: dict
     task_type: Literal["research_report", "lead_intel"]
     context_docs: str
     workspace_id: str
-    collection_name: Optional[str]
+    collection_name: str | None
     output_format: str
     plan_output: str
     research_output: str
     analysis_output: str
     final_output: str
     review_output: str
-    user_feedback: Optional[str]
+    user_feedback: str | None
     retry_count: int
     # Run spend (USD) already persisted to run_costs *before* this graph
     # invocation started — seeded by run_service from the DB so the budget check
@@ -41,20 +56,7 @@ class ResearchState(TypedDict):
     # recycling, so state is rebuilt from the DB and re-entered mid-graph). When
     # present, route_entry sends START straight to this node instead of plan/
     # research. Empty/absent for a normal first invoke.
-    _resume_from: Optional[str]
-
-
-# ── node helpers ────────────────────────────────────────────────────────────
-
-from contextlib import nullcontext
-from crewai import Crew, Process
-from config import settings
-from services.llm_router import resolve_actual_model, reset_actual_model
-from utils.agent_output import strip_agent_scaffolding
-from utils.context import compact_text
-from utils.cost_tracker import reset_side_costs, take_side_costs
-from utils.langfuse_utils import get_langfuse
-from utils.pricing import calculate_cost
+    _resume_from: str | None
 
 
 def _researcher_budget(retry_count: int) -> tuple[int, int]:
@@ -63,9 +65,9 @@ def _researcher_budget(retry_count: int) -> tuple[int, int]:
     The first pass (retry_count 0) keeps the free-tier-tuned base budget. Each
     retry — which only happens after the reviewer FAILed the prior pass — gets one
     more ReAct iteration and a larger synthesis reservation, so it can act on the
-    feedback instead of repeating the same undersized pass that already failed and
-    re-billing it. retry_count is naturally bounded (the route caps retries at 3),
-    so the escalation can't run away. (gap #3)
+    feedback instead of repeating (and re-billing) the undersized pass that already
+    failed. retry_count is bounded by the route's retry cap of 3, so the escalation
+    can't run away.
     """
     n = max(retry_count, 0)
     max_iter = settings.RESEARCHER_MAX_ITER + n
@@ -89,8 +91,8 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
     )
 
     logger.info("crew_node_start", node=result_key)
-    # H4: clear the captured served-model so resolve_actual_model() below reads
-    # only what *this* kickoff used (the primary, or a fallback if it spilled).
+    # Clear the captured served-model so resolve_actual_model() below reads only
+    # what *this* kickoff used (the primary, or a fallback if it spilled).
     reset_actual_model()
     # Clear the side-cost buffer so we drain only the direct litellm calls (the
     # RAG query_rewriter) fired during *this* node's kickoff.
@@ -113,17 +115,16 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
             raise
         usage = result.token_usage
         # Model that actually served this call — the configured primary, or the
-        # fallback slug if litellm spilled over during a provider outage (H4).
-        # Pricing keys off this, so a fallback leg is costed correctly instead of
-        # being priced against a primary that never ran.
+        # fallback slug if litellm spilled over during a provider outage. Pricing
+        # keys off this, so a fallback leg is costed correctly instead of being
+        # priced against a primary that never ran.
         model = resolve_actual_model(agent_key)
         prompt_tokens     = usage.prompt_tokens     if usage else 0
         completion_tokens = usage.completion_tokens if usage else 0
         if span is not None:
-            # L1: correlate the Langfuse trace with the DB run and its cost rows.
-            # Tag the span with the run id (the graph thread_id) plus the exact
-            # model / token / cost that run_service also writes to run_costs, so a
-            # trace lines up with the run and the spend it produced.
+            # Correlate the Langfuse trace with the DB run and its cost rows: the
+            # run id (the graph thread_id) plus the exact model / token / cost that
+            # run_service also writes to run_costs.
             rid = (config.get("configurable") or {}).get("thread_id")
             span.update(
                 output=str(result),
@@ -152,22 +153,18 @@ def _run_crew_node(agents_list, tasks_list, state: ResearchState, config: Runnab
     }
 
 
-# ── nodes ────────────────────────────────────────────────────────────────────
-
 def node_plan(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.strategist import strategist_agent, planning_task
+    from agents.strategist import planning_task, strategist_agent
     agent = strategist_agent()
     task = planning_task(agent, state["topic"])
     return _run_crew_node([agent], [task], state, config, "plan_output", "strategist")
 
 
 def node_research(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.researcher import researcher_agent, research_task
-    from tools.search import tavily_search_tool
-    from tools.scraper import firecrawl_tool, batch_scrape_tool
+    from agents.researcher import research_task, researcher_agent
     from tools.rag import RAGTool
+    from tools.search import tavily_search_tool
 
-    # Workspace-based RAG tool
     collection = state.get("collection_name") or "default_workspace"
     custom_rag = RAGTool(collection_name=collection, vertical=state.get("vertical"))
 
@@ -177,28 +174,27 @@ def node_research(state: ResearchState, config: RunnableConfig) -> dict:
     # pass under the ceiling.
     tools = [tavily_search_tool, custom_rag]
 
-    # Deeper budget on a retry (gap #3): a re-run after a review FAIL gets more
-    # iterations + a larger synthesis reservation than the shallow first pass.
+    # Deeper budget on a retry: a re-run after a review FAIL gets more iterations
+    # and a larger synthesis reservation than the shallow first pass.
     max_iter, max_tokens = _researcher_budget(state.get("retry_count", 0))
     agent = researcher_agent(tools=tools, max_iter=max_iter, max_tokens=max_tokens)
 
     # Enrich topic with plan if available. The plan is re-sent on every ReAct
     # iteration, so cap it — the full plan pushed each researcher call over Groq's
     # free 12K tokens/min ceiling. Head+tail keeps the intent up front and any
-    # closing constraints, rather than a blind head clip (gap #4).
+    # closing constraints, rather than a blind head clip.
     topic = state["topic"]
     if state.get("plan_output"):
         plan = compact_text(state["plan_output"], 1200)
         topic = f"{topic}\n\n**RESEARCH PLAN**:\n{plan}"
 
-    # NEW: Add feedback if available
     if state.get("user_feedback"):
         topic = f"{topic}\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
 
     # If we are retrying (the reviewer's verdict was anything but PASS), fold the
     # audit back in as retry feedback — read from the verdict field, not a bare
-    # "FAIL" substring (H2). Bound it so a verbose audit can't balloon the retry
-    # prompt on the rate-limited retry path (gap #4).
+    # "FAIL" substring. Bound it so a verbose audit can't balloon the retry prompt
+    # on the rate-limited retry path.
     if state.get("review_output") and review_verdict(state["review_output"]) != "PASS":
         feedback = compact_text(state["review_output"], settings.CONTEXT_MAX_CHARS)
         topic = f"{topic}\n\n**RETRY FEEDBACK**:\n{feedback}"
@@ -249,14 +245,14 @@ def lead_intel_contract_failures(
     if not source_years:
         failures.append("No publication/update date supports current personnel claims")
     else:
-        current_year = current_year or datetime.now(timezone.utc).year
+        current_year = current_year or datetime.now(UTC).year
         if max(source_years) < current_year - 1:
             failures.append("Target-buyer title is supported only by stale sources")
     return failures
 
 
 def node_lead_review(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.reviewer import reviewer_agent, review_task
+    from agents.reviewer import review_task, reviewer_agent
 
     vertical_config = get_vertical(state.get("vertical"))
     rubric = vertical_config["quality_rubric"] if vertical_config else "Verify buyer identity, freshness, sources, and purchase readiness."
@@ -280,28 +276,27 @@ def node_lead_review(state: ResearchState, config: RunnableConfig) -> dict:
 
 
 def node_analyse(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.analyst import analyst_agent, analysis_task
+    from agents.analyst import analysis_task, analyst_agent
     agent = analyst_agent()
     
     topic = state["topic"]
     if state.get("plan_output"):
         topic = f"{topic}\n\n**RESEARCH PLAN**:\n{state['plan_output']}"
-        
-    # NEW: Add feedback if available
+
     if state.get("user_feedback"):
         topic = f"{topic}\n\n**USER FEEDBACK**:\n{state['user_feedback']}"
     
     task = analysis_task(agent, topic)
     task.context = []
     # Reference material for the analysis — bound it so an oversized research brief
-    # can't balloon this prompt (gap #4); normally under budget and unchanged.
+    # can't balloon this prompt; normally under budget and unchanged.
     research = compact_text(state["research_output"], settings.CONTEXT_MAX_CHARS)
     task.description = f"Research summary:\n{research}\n\n" + task.description
     return _run_crew_node([agent], [task], state, config, "analysis_output", "analyst")
 
 
 def node_review(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.reviewer import reviewer_agent, review_task
+    from agents.reviewer import review_task, reviewer_agent
     
     vertical_config = get_vertical(state.get("vertical"))
     rubric = vertical_config["quality_rubric"] if vertical_config else "Ensure accuracy, depth, and citation completeness."
@@ -316,12 +311,12 @@ def node_review(state: ResearchState, config: RunnableConfig) -> dict:
 
 
 def node_write(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.writer import writer_agent, write_task
+    from agents.writer import write_task, writer_agent
     agent = writer_agent()
     task = write_task(agent, state["topic"], state["output_format"])
     # Prior work is reference the writer draws from (not the deliverable itself),
-    # so bound it (gap #4). This hop is post-review, so trimming can't trigger a
-    # review retry; normally under budget and passed through unchanged.
+    # so bound it. This hop is post-review, so trimming can't trigger a review
+    # retry; normally under budget and passed through unchanged.
     prior = state.get("analysis_output") or state.get("research_output", "")
     prior = compact_text(prior, settings.CONTEXT_MAX_CHARS)
     task.description = f"Prior work:\n{prior}\n\n" + task.description
@@ -331,14 +326,12 @@ def node_write(state: ResearchState, config: RunnableConfig) -> dict:
 
 
 def node_edit(state: ResearchState, config: RunnableConfig) -> dict:
-    from agents.editor import editor_agent, edit_task
+    from agents.editor import edit_task, editor_agent
     agent = editor_agent()
     task = edit_task(agent, state["topic"])
     task.description = f"Draft:\n{state['final_output']}\n\n" + task.description
     return _run_crew_node([agent], [task], state, config, "final_output", "editor")
 
-
-# ── routing ──────────────────────────────────────────────────────────────────
 
 def route_after_research(state: ResearchState) -> str:
     return "analyse"
@@ -366,12 +359,12 @@ def route_entry(state: ResearchState) -> str:
 # the first line of its report; failing that, the human-readable "Quality Audit:"
 # header. We read the verdict *only* from that dedicated field — never a bare
 # substring scan of the prose, where "passes accuracy but fails completeness"
-# would false-match "PASS" and skip a warranted retry (H2).
+# would false-match "PASS" and skip a warranted retry.
 _VERDICT_RE = re.compile(r"VERDICT\s*[:\-]\s*\[?\s*(PASS|FAIL)", re.IGNORECASE)
 _AUDIT_HEADER_RE = re.compile(r"Quality\s+Audit\s*[:\-]\s*\[?\s*(PASS|FAIL)", re.IGNORECASE)
 
 
-def review_verdict(review_output: str) -> Optional[str]:
+def review_verdict(review_output: str) -> str | None:
     """Extract the reviewer's binary verdict from its labeled field.
 
     Returns "PASS"/"FAIL", or None if no verdict field is present/parseable
@@ -420,9 +413,8 @@ def route_after_review(state: ResearchState) -> str:
         return "write"
 
     # FAIL or unparseable: retry from research while BOTH the retry budget and the
-    # cost ceiling allow it. If we've spent the run's budget, ship what we have
-    # (graceful degrade) rather than burning the full retry allowance regardless
-    # of spend — the fix for a looping run with no cost input.
+    # cost ceiling allow it. Once the run's spend ceiling is reached, ship what we
+    # have rather than burning the full retry allowance regardless of spend.
     if review_output and state.get("retry_count", 0) < 3 and not _over_budget(state):
         return "research"
 
@@ -436,10 +428,6 @@ def route_after_lead_review(state: ResearchState) -> str:
         return "lead_intel"
     return "end"
 
-
-# ── graph ────────────────────────────────────────────────────────────────────
-
-from langgraph.checkpoint.memory import InMemorySaver
 
 # One process-lifetime checkpointer shared by every run; runs are isolated from
 # each other by thread_id (the run id), and run_service purges a run's entries
@@ -490,12 +478,10 @@ def build_graph() -> StateGraph:
     g.add_edge("write",      "edit")
     g.add_edge("edit",       END)
 
-    # interrupt_before makes these pauses real: the compiled graph stops execution
+    # interrupt_before is what makes the HITL gates real: the compiled graph stops
     # before "analyse" and before "write" and returns control to run_service, which
     # only resumes it (via .invoke(None, config)) after a human approves the prior
-    # stage. Without this, .invoke() runs the whole graph to END in one call and the
-    # HITL gates in run_service were just re-invoking it with hand-rolled state,
-    # never actually pausing anything.
+    # stage. Without it, .invoke() runs the whole graph to END in one call.
     return g.compile(checkpointer=checkpointer, interrupt_before=["analyse", "write"])
 
 

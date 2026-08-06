@@ -45,8 +45,6 @@ def model():
     return f"test:{uuid.uuid4()}:384"
 
 
-# ── round trip ───────────────────────────────────────────────────────────────
-
 def test_stores_and_returns_a_vector(cache, model):
     cache.set_many(model, [("hello", VECTOR)])
     assert cache.get_many(model, ["hello"]) == [pytest.approx(VECTOR)]
@@ -67,8 +65,6 @@ def test_empty_input_returns_empty(cache, model):
     assert cache.get_many(model, []) == []
 
 
-# ── keying ───────────────────────────────────────────────────────────────────
-
 def test_a_different_model_is_a_different_key(cache, model):
     """The bug this prevents: flipping GEMINI_API_KEY would otherwise serve
     Gemini vectors to the local model and mix two vector spaces in one
@@ -87,8 +83,6 @@ def test_text_and_model_cannot_collide_across_the_separator(cache):
     would hash identically."""
     assert cache._key("a", "bc") != cache._key("ab", "c")
 
-
-# ── packing ──────────────────────────────────────────────────────────────────
 
 def test_packing_is_little_endian_float32(cache):
     """Pinned explicitly: native byte order would corrupt entries across
@@ -109,8 +103,6 @@ def test_corrupt_entry_reads_as_a_miss(cache, model):
     cache.client.set(cache._key(model, "bad"), b"\x00\x01\x02")
     assert cache.get_many(model, ["bad"]) == [None]
 
-
-# ── failure is never fatal ───────────────────────────────────────────────────
 
 def test_disabled_cache_is_a_silent_miss():
     with patch.object(settings, "EMBEDDING_CACHE_ENABLED", False):
@@ -139,8 +131,6 @@ def test_unreachable_redis_disables_rather_than_raising():
 
     assert not instance.enabled
 
-
-# ── integration with _embed ──────────────────────────────────────────────────
 
 def test_embed_serves_repeats_from_cache_without_recomputing(cache, model):
     """The end the cache exists for: a second identical query costs nothing."""

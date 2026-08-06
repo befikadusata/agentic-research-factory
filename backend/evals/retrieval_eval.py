@@ -43,12 +43,10 @@ collide with real documents.
 
 Sub-query expansion is **pinned off by default**. `generate_sub_queries` calls
 an LLM at temperature 0.4 and falls back to the original query on any failure,
-so with it on, two runs measure two different query sets — and in an environment
-with no LLM configured it silently degrades to the pinned behaviour anyway while
-still claiming to have measured expansion. Off by default means the number moves
-when retrieval changes, which is what a regression harness is for. Pass
-`--expand` to measure the production path end to end; the report says which was
-used, because the two are not comparable.
+so with it on, two runs measure two different query sets — and with no LLM
+configured it silently degrades to the pinned behaviour while still claiming to
+have measured expansion. Pass `--expand` to measure the production path end to
+end; the report says which was used, because the two are not comparable.
 
 The embedder is whatever config selects, and the report names it. Gemini and
 `all-MiniLM-L6-v2` produce different retrieval, so a number carried across a
@@ -58,10 +56,9 @@ change of embedder is meaningless.
 
 `--compare` runs the ablations in [`retrieval_baselines.py`](retrieval_baselines.py)
 over the same corpus: naive dense top-k, dense + re-ranking, and production. A
-hit@5 of 0.903 means nothing until plain vector search over the same 54 chunks
-has been asked the same questions, and on this corpus it does better — see the
-"Known limits" note in docs/optimizations.md, which is where that result is
-discussed rather than buried.
+hit@5 number means nothing until plain vector search over the same chunks has
+been asked the same questions, and on this corpus it does better — see the
+"Known limits" note in docs/optimizations.md.
 
 ## What it does not measure
 
@@ -71,9 +68,11 @@ LLM-mediated and needs a different instrument.
 """
 
 import argparse
+import contextlib
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING
 
 from evals.retrieval_corpus import (
     ADVERSARIAL,
@@ -101,11 +100,10 @@ EVAL_COLLECTION = "retrieval_eval"
 K_VALUES = (1, 3, 5, 10)
 
 
-# ── metrics ──────────────────────────────────────────────────────────────────
+# metrics
 #
-# Pure functions over a ranked list of chunk ids. No models, no database — they
-# are unit-tested in tests/test_retrieval_metrics.py, because a metric that is
-# quietly wrong produces confident numbers and is worse than no metric at all.
+# Pure functions over a ranked list of chunk ids. No models, no database; unit
+# tested in tests/test_retrieval_metrics.py.
 
 
 def hit_at_k(ranked_ids: list[str], relevant: set[str], k: int) -> float:
@@ -159,7 +157,7 @@ def ndcg_at_k(ranked_ids: list[str], gains: dict[str, int], k: int) -> float:
     return dcg_at_k(ranked_ids, gains, k) / idcg
 
 
-# ── running ──────────────────────────────────────────────────────────────────
+# running
 
 
 @dataclass
@@ -206,10 +204,9 @@ def ingest_corpus(collection_name: str = EVAL_COLLECTION) -> None:
     from tools.rag import _get_client, ingest_documents
 
     vx = _get_client()
-    try:
+    # First run, or a vecs version without delete_collection — get_or_create handles it.
+    with contextlib.suppress(Exception):
         vx.delete_collection(collection_name)
-    except Exception:
-        pass  # first run, or a vecs version without it — get_or_create handles it
 
     # Sorted into reading order before ingest. `ingest_documents` numbers chunks
     # by their position in the list it is handed, which is how neighbour
@@ -256,7 +253,7 @@ def _rank(
     query: str,
     collection_name: str,
     expand: bool,
-    retriever: Optional[Retriever] = None,
+    retriever: Retriever | None = None,
 ) -> _Ranking:
     from tools.rag import _RESULTS_RETURNED, expand_context, retrieve
 
@@ -290,7 +287,7 @@ def _rank(
 def run_golden(
     collection_name: str = EVAL_COLLECTION,
     expand: bool = False,
-    retriever: Optional[Retriever] = None,
+    retriever: Retriever | None = None,
 ) -> list[QueryResult]:
     results = []
     for golden in GOLDEN:
@@ -311,7 +308,7 @@ def run_golden(
 def run_adversarial(
     collection_name: str = EVAL_COLLECTION,
     expand: bool = False,
-    retriever: Optional[Retriever] = None,
+    retriever: Retriever | None = None,
 ) -> list[AdversarialResult]:
     results = []
     for query in ADVERSARIAL:
@@ -327,7 +324,7 @@ def run_adversarial(
     return results
 
 
-# ── aggregation ──────────────────────────────────────────────────────────────
+# aggregation
 
 
 def summarise(results: list[QueryResult]) -> dict:
@@ -443,7 +440,7 @@ def compare_variants(collection_name: str = EVAL_COLLECTION) -> list[dict]:
     return rows
 
 
-# ── report ───────────────────────────────────────────────────────────────────
+# report
 
 
 def _print_comparison(rows: list[dict], adversarial_total: int) -> None:
@@ -470,7 +467,9 @@ def _print_comparison(rows: list[dict], adversarial_total: int) -> None:
         print(f"    {row['variant'].name:<16} — {row['variant'].description}")
 
     print("\n    what each stage buys (read the differences, not the rows):")
-    for earlier, later in zip(rows, rows[1:]):
+    # strict=False is the point here: this walks consecutive pairs, so the two
+    # operands are deliberately of different length.
+    for earlier, later in zip(rows, rows[1:], strict=False):
         a, b = earlier["summary"], later["summary"]
         print(
             f"      {earlier['variant'].name} -> {later['variant'].name}: "

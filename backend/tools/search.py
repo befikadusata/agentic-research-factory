@@ -1,13 +1,15 @@
-from crewai.tools import BaseTool
 import httpx
-from tavily import TavilyClient
-from config import settings
+from crewai.tools import BaseTool
 from pydantic import Field
+from tavily import TavilyClient
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+from config import settings
 from logger import logger
+from tools.untrusted import wrap_untrusted
 from utils.cache import tool_cache
 from utils.source_ledger import record_retrieved_url
-from tools.untrusted import wrap_untrusted
+
 
 class SearxngSearchTool(BaseTool):
     name: str = "web_search"
@@ -39,9 +41,9 @@ class SearxngSearchTool(BaseTool):
         try:
             results = self._execute_search(query)
             output = []
-            # 4 results × 150-char snippets (was 8 × 300): search output persists
-            # in the researcher's ReAct context across iterations, so trimming it
-            # here compounds — keeps the pass under Groq's free 12K tokens/min.
+            # 4 results × 150-char snippets: search output persists in the
+            # researcher's ReAct context across iterations, so trimming it here
+            # compounds and keeps the pass under Groq's free 12K tokens/min.
             for r in results.get("results", [])[:4]:
                 # Ledger only the results the agent is actually shown, so a
                 # citation counts as verified when the run really saw it.

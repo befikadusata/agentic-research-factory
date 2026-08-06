@@ -1,6 +1,6 @@
-import pytest
 import unittest.mock
-from uuid import uuid4
+
+import pytest
 
 from models import Run, RunStatus, Workspace, WorkspaceMember
 
@@ -87,9 +87,9 @@ async def test_hitl_approve_rejects_invalid_status(client, auth_as, db_session):
 
 @pytest.mark.asyncio
 async def test_hitl_approve_denies_viewer_role(client, auth_as, db_session):
-    """§2.1 regression: assert_run_access used to ignore WorkspaceMember.role
-    entirely, so a "viewer" — same as any other member — could approve/resume
-    a HITL-gated run with an arbitrary instruction, same as an admin."""
+    """assert_run_access must read WorkspaceMember.role, not just membership.
+    Ignoring it lets a "viewer" approve/resume a HITL-gated run with an
+    arbitrary instruction, exactly as an admin can."""
     owner_id = "owner@example.com"
     viewer_id = "viewer@example.com"
     run_id = await _create_workspace_run(
@@ -169,9 +169,9 @@ async def test_output_none_content_returns_404(client, auth_as, db_session, fmt)
 
 @pytest.mark.asyncio
 async def test_md_download_applies_linkedin_formatting(client, auth_as, db_session):
-    """§7.1 regression: outputs.py used to serve run.final_output verbatim
-    regardless of run.format, so a format="linkedin" run downloaded as raw
-    Markdown ([text](url), # headers) instead of LinkedIn-safe plain text."""
+    """outputs.py must format run.final_output for run.format rather than
+    serving it verbatim, or a format="linkedin" run downloads as raw Markdown
+    ([text](url), # headers) instead of LinkedIn-safe plain text."""
     owner_id = "owner@example.com"
     run_id = await _create_run(
         db_session, owner_id, RunStatus.complete,

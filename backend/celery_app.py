@@ -1,4 +1,5 @@
 from celery import Celery
+
 from config import settings
 
 celery_app = Celery(
@@ -13,14 +14,13 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    # Each task now runs ONE pipeline segment (research / analyse / write /
-    # finalize) and returns — human-in-the-loop waits happen *between* tasks, not
-    # inside them (a paused run holds no worker; run_service persists an
-    # awaiting_* status and the next segment is queued on approval). So this limit
-    # bounds pure compute for a single segment, not a whole multi-gate run, and no
-    # longer has to exceed any HITL timeout.
-    # Sourced from config so run_service can derive its LLM retry budget from the
-    # same numbers — the two used to drift apart and the budget overran the limit.
+    # Each task runs ONE pipeline segment (research / analyse / write / finalize)
+    # and returns — human-in-the-loop waits happen *between* tasks, not inside them
+    # (a paused run holds no worker; run_service persists an awaiting_* status and
+    # the next segment is queued on approval). So this limit bounds pure compute
+    # for a single segment, not a whole multi-gate run, and need not exceed any
+    # HITL timeout. Sourced from config so run_service derives its LLM retry budget
+    # from the same numbers rather than drifting past the limit.
     task_soft_time_limit=settings.TASK_SOFT_TIME_LIMIT_SEC,
     task_time_limit=settings.TASK_TIME_LIMIT_SEC,
     # Each task runs its own event loop via asyncio.run(). The module-level
@@ -62,6 +62,7 @@ def execute_run_task(run_id: str, approved_gate: str | None = None):
     # that gate and to no-op stale/duplicate resumes.
     import asyncio
     from uuid import UUID
+
     from services.run_service import execute_run
     asyncio.run(execute_run(UUID(run_id), approved_gate))
 
@@ -70,6 +71,7 @@ def execute_run_task(run_id: str, approved_gate: str | None = None):
 def ingest_doc_task(doc_id: str):
     import asyncio
     from uuid import UUID
+
     from services.ingest_service import ingest_doc
     asyncio.run(ingest_doc(UUID(doc_id)))
 
@@ -77,6 +79,7 @@ def ingest_doc_task(doc_id: str):
 @celery_app.task(name="dispatch_due_monitors_task")
 def dispatch_due_monitors_task():
     import asyncio
+
     from services.monitor_service import dispatch_due_monitors
     asyncio.run(dispatch_due_monitors())
 
@@ -84,5 +87,6 @@ def dispatch_due_monitors_task():
 @celery_app.task(name="reap_orphaned_runs_task")
 def reap_orphaned_runs_task():
     import asyncio
+
     from services.run_service import reap_orphaned_runs
     asyncio.run(reap_orphaned_runs())

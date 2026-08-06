@@ -29,17 +29,17 @@ one query, one vector search.
     uv run python -m evals.retrieval_eval --compare
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from config import settings
 from tools.rag import (
     _CANDIDATES_PER_QUERY,
+    Candidate,
     _embed,
     _get_client,
     _reranker,
     _safe_collection,
-    Candidate,
     retrieve,
 )
 
@@ -90,7 +90,7 @@ def dense_rerank(query: str, collection_name: str) -> list[Candidate]:
     return sorted(
         (
             Candidate(chunk_id=c.chunk_id, metadata=c.metadata, score=float(score))
-            for c, score in zip(candidates, scores)
+            for c, score in zip(candidates, scores, strict=True)
         ),
         key=lambda c: c.score,
         reverse=True,

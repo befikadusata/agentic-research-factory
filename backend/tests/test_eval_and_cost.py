@@ -1,12 +1,12 @@
 import json
-import pytest
 import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from sqlalchemy import select
+
 from models import Run, RunCost, RunStatus
 
-
-# ── eval_service ─────────────────────────────────────────────────────────────
 
 def _make_completion_response(content: str):
     msg = MagicMock()
@@ -56,24 +56,28 @@ async def test_evaluate_output_strips_markdown_fence():
 async def test_evaluate_output_raises_on_malformed_json():
     from services.eval_service import evaluate_output
 
-    with patch("services.eval_service.acompletion", AsyncMock(return_value=_make_completion_response("not json"))):
-        with pytest.raises(json.JSONDecodeError):
-            await evaluate_output("content", "research", "topic")
+    with (
+        patch("services.eval_service.acompletion", AsyncMock(return_value=_make_completion_response("not json"))),
+        pytest.raises(json.JSONDecodeError),
+    ):
+        await evaluate_output("content", "research", "topic")
 
 
 @pytest.mark.asyncio
 async def test_evaluate_output_propagates_llm_exception():
     from services.eval_service import evaluate_output
 
-    with patch("services.eval_service.acompletion", AsyncMock(side_effect=RuntimeError("API down"))):
-        with pytest.raises(RuntimeError, match="API down"):
-            await evaluate_output("content", "research", "topic")
+    with (
+        patch("services.eval_service.acompletion", AsyncMock(side_effect=RuntimeError("API down"))),
+        pytest.raises(RuntimeError, match="API down"),
+    ):
+        await evaluate_output("content", "research", "topic")
 
 
 @pytest.mark.asyncio
 async def test_evaluate_output_logs_cost_when_run_id_given():
-    """The gate eval judge used to be a direct litellm call counted nowhere.
-    With a run_id it now persists its cost under the given agent label."""
+    """The gate eval judge is a direct litellm call, so given a run_id it has to
+    persist its own cost under the given agent label or it is counted nowhere."""
     from services.eval_service import evaluate_output
 
     raw = json.dumps(VALID_SCORES)
@@ -122,8 +126,6 @@ async def test_lead_intel_evaluation_adds_buyer_freshness_and_readiness_dimensio
     assert '"purchase_readiness"' in prompt
 
 
-# ── query_rewriter side-cost (in-crew direct call) ────────────────────────────
-
 def test_query_rewriter_records_side_cost():
     """generate_sub_queries fires its own litellm call inside the researcher's
     tool loop; it must buffer that cost so the crew node can persist it."""
@@ -166,8 +168,6 @@ async def test_run_cost_total_sums_rows(db_session, monkeypatch):
     total = await ct.run_cost_total(run.id)
     assert abs(total - 0.03) < 1e-9
 
-
-# ── cost_tracker ─────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_log_cost_writes_run_cost_row(db_session):
@@ -213,10 +213,10 @@ async def test_log_cost_multiple_agents(db_session):
 
 @pytest.mark.asyncio
 async def test_log_token_usages_computes_real_cost_not_zero(db_session, monkeypatch):
-    """§4.1 regression: unlike the tests above (which call log_cost() directly
-    with a hand-picked total_cost), this goes through the actual production
-    caller — run_service._log_token_usages — which used to hardcode
-    total_cost=0.0 regardless of the model or token counts."""
+    """Unlike the tests above (which call log_cost() directly with a hand-picked
+    total_cost), this goes through the actual production caller,
+    run_service._log_token_usages, so it catches a total_cost that ignores the
+    model and token counts."""
     import services.run_service as run_service_module
     from services.run_service import _log_token_usages
 

@@ -1,10 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID, uuid4
-from typing import Optional
-from database import get_db
-from models import Document, DocumentStatus, WorkspaceMember
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from auth import get_current_user
+from database import get_db
+from models import Document, WorkspaceMember
 from services.storage_service import store_upload
 
 router = APIRouter()
@@ -17,7 +18,7 @@ MAX_SIZE_MB = 20
 async def upload_file(
     file: UploadFile = File(...),
     workspace_id: UUID = Query(...),
-    vertical: Optional[str] = Query(None),
+    vertical: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):

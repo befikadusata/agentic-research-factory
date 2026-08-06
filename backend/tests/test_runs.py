@@ -1,5 +1,5 @@
 import pytest
-from httpx import AsyncClient
+
 from models import Run, RunCost, RunStatus
 
 
@@ -69,12 +69,11 @@ async def test_list_runs_pagination(client, auth_as, db_session):
     await _make_run(db_session, uid, RunStatus.complete)
     await _make_run(db_session, uid, RunStatus.complete)
 
-    # limit=1 returns one result
     resp = await client.get("/runs?limit=1&offset=0")
     assert resp.status_code == 200
     assert len(resp.json()) == 1
 
-    # offset skips records — exactly 3 rows exist for this uid
+    # Exactly 3 rows exist for this uid, so offset=1 must return 2.
     resp_all = await client.get("/runs?limit=10&offset=0")
     resp_offset = await client.get("/runs?limit=10&offset=1")
     assert len(resp_all.json()) == 3
@@ -190,8 +189,12 @@ async def test_run_detail_citations_populated(client, auth_as, db_session):
     resp = await client.get(f"/runs/{run.id}")
     assert resp.status_code == 200
     data = resp.json()
-    assert "citations" in data
-    assert data["citations"] == [{"source": "a.pdf", "page": "1"}, {"source": "b.pdf", "page": "5"}]
+    # Under metrics, which is the only place they are published — SourcesPanel
+    # reads `run.metrics.citations`.
+    assert data["metrics"]["citations"] == [
+        {"source": "a.pdf", "page": "1"},
+        {"source": "b.pdf", "page": "5"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -202,7 +205,7 @@ async def test_run_detail_citations_empty_when_no_metrics(client, auth_as, db_se
 
     resp = await client.get(f"/runs/{run.id}")
     assert resp.status_code == 200
-    assert resp.json()["citations"] == []
+    assert resp.json()["metrics"].get("citations", []) == []
 
 
 @pytest.mark.asyncio

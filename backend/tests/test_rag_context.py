@@ -36,8 +36,6 @@ def _expand(candidates, found=None, radius=1):
         return expand_context(candidates, "ws_test", radius=radius)
 
 
-# ── stitching ────────────────────────────────────────────────────────────────
-
 def test_stitch_removes_the_overlap_the_splitter_added():
     left = "The rate limit is 600 requests per minute per workspace."
     right = "per minute per workspace. Enterprise tiers may request more."
@@ -103,8 +101,6 @@ def test_stitching_reverses_the_real_splitter():
     assert rejoined == passage
 
 
-# ── grouping into blocks ─────────────────────────────────────────────────────
-
 def _piece(ordinal, *, page=1, source="doc.pdf", rank=None, text=None):
     return _Piece(
         source=source,
@@ -165,8 +161,6 @@ def test_chunks_without_an_ordinal_stay_separate():
 
     assert len(blocks) == 2
 
-
-# ── expansion ────────────────────────────────────────────────────────────────
 
 def test_expansion_requests_the_chunks_either_side():
     with patch("tools.rag._get_client"), \

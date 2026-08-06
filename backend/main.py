@@ -1,15 +1,27 @@
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
-from database import init_db
-from routers import runs, stream, hitl, upload, outputs, workspaces, analytics, verticals, monitors, auth as auth_router
+
 from config import settings, validate_config
-from utils.redis_client import init_redis_pool, close_redis_pool
-from logger import logger, request_id_var
+from logger import request_id_var
+from routers import (
+    analytics,
+    hitl,
+    monitors,
+    outputs,
+    runs,
+    stream,
+    upload,
+    verticals,
+    workspaces,
+)
+from routers import auth as auth_router
+from utils.redis_client import close_redis_pool, init_redis_pool
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -20,7 +32,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Agentic Research Factory", lifespan=lifespan)
 
-# Instrumentator setup
 Instrumentator().instrument(app).expose(app)
 
 @app.middleware("http")
@@ -57,6 +68,7 @@ app.include_router(auth_router.router, prefix="/auth",        tags=["auth"])
 async def health():
     from fastapi.responses import JSONResponse
     from sqlalchemy import text
+
     from database import AsyncSessionLocal
     from utils.redis_client import get_redis_client
 

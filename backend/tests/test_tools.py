@@ -1,8 +1,7 @@
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 
-# ── TavilySearchTool ─────────────────────────────────────────────────────────
 
 def _make_tavily_response(answer: str = "summary", results: list = None):
     return {
@@ -68,9 +67,9 @@ def test_tavily_search_no_results_returns_fallback():
 
 
 def test_tavily_search_uses_provider_scoped_cache_key():
-    """§8.2 regression: TavilySearchTool/SearxngSearchTool both have
-    name == "web_search", so caching keyed on `self.name` collided between
-    providers. Cache calls must use a provider-specific namespace instead."""
+    """TavilySearchTool and SearxngSearchTool both have name == "web_search", so
+    caching keyed on `self.name` collides between providers. Cache calls must use
+    a provider-specific namespace."""
     from tools.search import TavilySearchTool
 
     tool = TavilySearchTool()
@@ -82,8 +81,6 @@ def test_tavily_search_uses_provider_scoped_cache_key():
     mock_cache.get.assert_called_with("web_search:tavily", "AI trends")
     mock_cache.set.assert_called_with("web_search:tavily", "AI trends", _make_tavily_response())
 
-
-# ── SearxngSearchTool ─────────────────────────────────────────────────────────
 
 def _make_searxng_response(results: list = None):
     return {
@@ -162,8 +159,8 @@ def test_searxng_search_no_results_returns_fallback(searxng_url):
 
 
 def test_searxng_search_uses_provider_scoped_cache_key(searxng_url):
-    """§8.2 regression: same as the Tavily-side test above, but for SearXNG —
-    the two providers must never read/write each other's cached results."""
+    """Same as the Tavily-side test above, but for SearXNG — the two providers
+    must never read/write each other's cached results."""
     from tools.search import SearxngSearchTool
 
     tool = SearxngSearchTool()
@@ -179,8 +176,6 @@ def test_searxng_search_uses_provider_scoped_cache_key(searxng_url):
     mock_cache.get.assert_called_with("web_search:searxng", "AI trends")
     mock_cache.set.assert_called_with("web_search:searxng", "AI trends", _make_searxng_response())
 
-
-# ── FirecrawlTool ─────────────────────────────────────────────────────────────
 
 def test_firecrawl_scrape_success():
     from tools.scraper import FirecrawlTool
@@ -233,8 +228,6 @@ def test_firecrawl_no_markdown_returns_fallback():
     assert result == "No content extracted from this page."
 
 
-# ── BatchScrapeTool ───────────────────────────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_batch_scrape_fetches_multiple_urls():
     from tools.scraper import BatchScrapeTool
@@ -264,12 +257,12 @@ async def test_batch_scrape_single_url_failure_includes_error():
     assert "Error" in result
 
 
-# ── Firecrawl configuration / import safety ──────────────────────────────────
-# Scraping is optional: docker-compose.yml puts self-hosted Firecrawl behind the
-# "scraping" profile and the README says a plain `docker compose up` skips it.
-# The tools used to build their client in an eager pydantic default_factory, so
-# importing tools.scraper — which agents/researcher.py does unconditionally —
-# raised ValueError('No API key provided') and took every run down with it.
+# Firecrawl configuration / import safety. Scraping is optional: docker-compose
+# puts self-hosted Firecrawl behind the "scraping" profile and a plain
+# `docker compose up` skips it. So importing tools.scraper — which
+# agents/researcher.py does unconditionally — must never need Firecrawl config;
+# building the client eagerly raises ValueError('No API key provided') and takes
+# every run down with it.
 
 
 @pytest.fixture

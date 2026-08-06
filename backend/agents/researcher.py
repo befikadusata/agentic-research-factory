@@ -1,8 +1,10 @@
 from crewai import Agent, Task
-from tools.search import tavily_search_tool
-from tools.scraper import firecrawl_tool, batch_scrape_tool
+
 from configs.prompt_loader import get_prompt
 from services.llm_router import get_llm
+from tools.scraper import batch_scrape_tool, firecrawl_tool
+from tools.search import tavily_search_tool
+
 
 def researcher_agent(tools: list = None, max_iter: int = 2, max_tokens: int = 900) -> Agent:
     if tools is None:
@@ -18,13 +20,13 @@ def researcher_agent(tools: list = None, max_iter: int = 2, max_tokens: int = 90
         # max_tokens caps the (token-heavy) synthesis call so a full pass stays
         # under Groq's free 12K tokens/min ceiling — see get_llm docstring. The
         # caller escalates it (and max_iter) on a retry so a re-run after a review
-        # FAIL gets more depth than the deliberately-shallow first pass. (gap #3)
+        # FAIL gets more depth than the deliberately-shallow first pass.
         llm=get_llm("researcher", max_tokens=max_tokens),
         verbose=True,
-        # Base 2 (was 10): each ReAct iteration re-sends the whole accumulating
-        # context AND its tokens count against Groq's rolling free 12K tokens/min
-        # window; deeper loops pushed the final synthesis call to 429. 2 iterations
-        # (≈1 search + 1 synthesis) leaves room for a full brief under the ceiling.
+        # Each ReAct iteration re-sends the whole accumulating context, and those
+        # tokens count against Groq's rolling free 12K tokens/min window; deeper
+        # loops push the final synthesis call to 429. The base of 2 (≈1 search +
+        # 1 synthesis) leaves room for a full brief under the ceiling.
         max_iter=max_iter,
     )
 

@@ -1,8 +1,9 @@
 from litellm import completion
+
+from logger import logger
 from services.llm_router import get_completion_settings, reconcile_served_model
 from utils.cost_tracker import record_side_cost
 from utils.json_parse import parse_json
-from logger import logger
 
 
 def _record_cost(response) -> None:
@@ -20,12 +21,6 @@ def _record_cost(response) -> None:
         )
     except Exception as e:
         logger.warning("query_rewriter_cost_record_failed", error=str(e))
-
-
-# A single-rewrite `rewrite_query()` lived here and had no caller: sub-query
-# expansion below superseded it, covering ambiguity better than one rewrite
-# could. Reinstating it would put an extra LLM round trip — and an extra failure
-# mode — in front of a fan-out that already handles the same problem.
 
 
 def generate_sub_queries(original_query: str, n: int = 3) -> list[str]:

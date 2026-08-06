@@ -1,15 +1,15 @@
-import asyncio
+import json
 import time
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import UUID
-import json
-from database import get_db, AsyncSessionLocal
+from sse_starlette.sse import EventSourceResponse
+
+from auth import assert_run_access, get_current_user
+from database import AsyncSessionLocal, get_db
 from models import Run, RunStatus
-from utils.redis_client import get_redis_client, LOG_CHANNEL_PREFIX
-from auth import get_current_user, assert_run_access
+from utils.redis_client import LOG_CHANNEL_PREFIX, get_redis_client
 
 router = APIRouter()
 

@@ -1,29 +1,13 @@
 /**
  * Demo mode — the whole product, browsable with zero API keys and no backend.
  *
- * Enabled by NEXT_PUBLIC_DEMO=1. When it is on, every function in `lib/api.ts`
+ * Enabled by NEXT_PUBLIC_DEMO=1. Every function in `lib/api.ts` then
  * short-circuits into the in-memory store below instead of calling the backend,
  * and `lib/auth.ts` registers a one-click "demo" provider so there is nothing to
- * sign in *to*. `npm run demo` is then genuinely the only step: no Postgres, no
- * Redis, no Groq key, no OAuth client.
+ * sign in *to*.
  *
- * This started as the route-intercept fixtures in `e2e/smoke.spec.ts`, which
- * already described every backend response the UI needs. Those fixtures proved
- * the UI is fully exercisable from canned data — this module is that same idea
- * promoted out of the test file so a human can click through it too.
- *
- * Two properties keep it honest:
- *
- *   1. Nothing here can leak into a real deployment's data path. Demo mode
- *      replaces the *entire* backend surface, so the sign-in shortcut grants
- *      access to this file's fake rows and nothing else. There is no real
- *      database reachable from a demo build.
- *   2. It is visibly a demo. `DemoBanner` is pinned to the top of the shell for
- *      the whole session, so a screenshot can never be mistaken for live data.
- *
- * State lives in module-level maps: it survives client-side navigation and dies
- * on a hard reload, which is the right lifetime for a sandbox someone is poking
- * at. Nothing is persisted.
+ * State lives in module-level maps: nothing is persisted, so it survives
+ * client-side navigation and dies on a hard reload.
  */
 
 import type {
@@ -47,13 +31,13 @@ export const DEMO_EMAIL = "demo@research-factory.dev";
 export const DEMO_NAME = "Demo User";
 
 /**
- * How the backend would see this user. `lib/auth.ts` namespaces the principal as
- * `<provider>:<email>`, and the provider id is "demo" — so seed rows that need
- * to look owned by the signed-in user must use exactly this string.
+ * How the backend would see this user: `lib/auth.ts` namespaces the principal as
+ * `<provider>:<email>`. Seed rows that must look owned by the signed-in user
+ * have to use exactly this string.
  */
 export const DEMO_PRINCIPAL = `demo:${DEMO_EMAIL}`;
 
-// --- seed data ---------------------------------------------------------------
+// Seed data
 
 // Timestamps are relative to page load, not hard-coded, so the demo never shows
 // a "last run: 8 months ago" list that makes the product look abandoned.
@@ -67,8 +51,8 @@ const WS_ACME = "demo-ws-acme";
 const WS_PERSONAL = "demo-ws-personal";
 
 function seedWorkspaces(): Workspace[] {
-  // The demo user is admin in both, matching the `members` seed below — so
-  // every action stays reachable rather than gated behind a role they lack.
+  // Admin in both, matching the `members` seed below, so every action stays
+  // reachable rather than gated behind a role the demo user lacks.
   return [
     { id: WS_ACME, name: "Acme Research", owner_id: DEMO_PRINCIPAL, role: "admin" },
     { id: WS_PERSONAL, name: "Personal", owner_id: DEMO_PRINCIPAL, role: "admin" },
@@ -269,8 +253,7 @@ function seedRuns(): RunDetail[] {
           issues: ["Pricing tiers were captured from a single regional page and may vary by market."],
         },
         // One unverified source on purpose: agents do cite pages they never
-        // fetched, and the demo is not honest about the product if it only
-        // ever shows the clean case.
+        // fetched, so the demo shows that case and not only the clean one.
         citations: [
           { source: "Northwind pricing page", page: "https://northwind-logistics.example/pricing", verified: true },
           { source: "Q3 partner announcement", page: "https://northwind-logistics.example/press/q3-partners", verified: true },
@@ -388,9 +371,8 @@ function seedRuns(): RunDetail[] {
       final_output: null,
       error_message:
         "Run failed: not enough sources could be retrieved. 6 of 8 pages timed out during scraping.",
-      // A failed run still spent money before it died. This is the case the cost
-      // panel exists for — it renders outside the "complete" branch so this run
-      // reports its spend rather than swallowing it.
+      // A failed run still spent money before it died; the cost panel renders
+      // outside the "complete" branch so that spend is still reported.
       costs: seedCosts("demo-failed-run", daysAgo(2), [
         ["Researcher", 8_140, 1_260, 0.0057],
       ]),
@@ -429,13 +411,12 @@ function seedRuns(): RunDetail[] {
  * Build the `run_costs` rows a run would have accumulated.
  *
  * The backend writes one row per LLM call, so an agent that ran twice gets two
- * rows — the seed keeps that shape rather than pre-summing, because folding
- * rows per agent is exactly what the panel under test does.
+ * rows; the seed keeps that shape rather than pre-summing, because folding rows
+ * per agent is the cost panel's job.
  *
- * The seeded figures are a *paid*-model scenario. A default deployment routes
- * to free-tier models and really does spend $0, which the scripted live run
- * below demonstrates instead; seeding both means neither branch of the display
- * is dead code.
+ * These figures are a *paid*-model scenario. A default deployment routes to
+ * free-tier models and really does spend $0 — the scripted live run below covers
+ * that branch of the display.
  */
 let costRowSeq = 0;
 function seedCosts(
@@ -494,16 +475,15 @@ function seedMonitors(): Monitor[] {
   ];
 }
 
-// --- store -------------------------------------------------------------------
+// Store
 
 const workspaces: Workspace[] = seedWorkspaces();
 const members: Record<string, WorkspaceMember[]> = seedMembers();
 /**
  * Uploaded docs, keyed by doc id. Nothing is parsed or indexed, but the
- * pending → ready transition is modelled on a timer: real ingestion happens in
- * a worker after the upload responds, and the upload UI's whole job is to not
- * claim success before it finishes. A demo that returned "ready" instantly
- * would leave that path untested and unshown.
+ * pending → ready transition is modelled on a timer because real ingestion
+ * happens in a worker after the upload responds — returning "ready" instantly
+ * would hide the state the upload UI exists to show.
  */
 const documents = new Map<string, { filename: string; readyAt: number }>();
 const DEMO_INGEST_MS = 2_000;
@@ -538,7 +518,7 @@ function byNewestFirst<T extends { created_at: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
-// --- live run streaming ------------------------------------------------------
+// Live run streaming
 
 type Listener = (event: SSEEvent) => void;
 
@@ -555,10 +535,9 @@ function emit(id: string, event: SSEEvent) {
 /**
  * Subscribe to a run's live events, replacing the SSE connection.
  *
- * A newly created run's script only starts on the first subscribe. That removes
- * the race the real backend doesn't have: without it, the scripted logs could
- * fire between `createRun` returning and the run page mounting its stream, and
- * the first few lines would silently vanish.
+ * A newly created run's script only starts on the first subscribe: otherwise the
+ * scripted logs could fire between `createRun` returning and the run page
+ * mounting its stream, and the first few lines would silently vanish.
  */
 export function subscribeToDemoRun(id: string, listener: Listener): () => void {
   const set = listeners.get(id) ?? new Set<Listener>();
@@ -598,9 +577,8 @@ const BEAT = 850;
 /**
  * The scripted pipeline a demo run walks through.
  *
- * It deliberately pauses at the research gate rather than running start to
- * finish: the human-in-the-loop checkpoint is the part of this product that is
- * hardest to convey in a screenshot, so the demo makes you use it.
+ * It pauses at the research gate rather than running start to finish, so the
+ * human-in-the-loop checkpoint has to be exercised by hand.
  */
 async function playRunScript(id: string, topic: string) {
   await sleep(BEAT / 2);
@@ -663,10 +641,8 @@ async function playRunScript(id: string, topic: string) {
         issues: ["Demo output — generated from a fixed script, not from live sources."],
       },
     };
-    // Zero-cost on purpose. A default deployment routes every agent to a
-    // free-tier model, so this is what a freshly configured install actually
-    // records — and it is the case the cost panel has to report honestly
-    // instead of showing "$0.00" as though the meter failed.
+    // Zero-cost on purpose: a default deployment routes every agent to a
+    // free-tier model, so this is what a freshly configured install records.
     finished.costs = seedCosts(id, new Date().toISOString(), [
       ["Researcher", 11_240, 2_060, 0],
       ["Analyst", 8_470, 2_910, 0],
@@ -741,12 +717,12 @@ it — an analysis is more useful when you can tell what it declined to say.
 `;
 }
 
-// --- the API surface ---------------------------------------------------------
-// One function per export in `lib/api.ts`, same signatures, same shapes.
+// The API surface: one function per export in `lib/api.ts`, same signatures,
+// same shapes.
 
 export const demoApi = {
   async authHeaders(): Promise<Record<string, string>> {
-    // No backend to authenticate against. Returning a header rather than
+    // No backend to authenticate against; returning a header rather than
     // throwing keeps every caller's happy path identical to production.
     return { Authorization: "Bearer demo-mode" };
   },
@@ -836,9 +812,8 @@ export const demoApi = {
   /**
    * Mirrors `GET /analytics/metrics`, including its scoping quirk: **completed
    * runs only**. A failed run has nothing to score, so it is absent here while
-   * its spend still shows up in `getAnalyticsCosts` below — the two panels
-   * genuinely count different populations, and the demo would misrepresent the
-   * product if it smoothed that over.
+   * its spend still shows up in `getAnalyticsCosts` below — the two panels count
+   * different populations.
    */
   async getAnalyticsMetrics(workspaceId?: string): Promise<AnalyticsMetrics> {
     const scoped = [...runs.values()].filter(
@@ -952,7 +927,8 @@ export const demoApi = {
       name: payload.name,
       topic: payload.topic,
       format: payload.format,
-      vertical: null,
+      vertical: payload.vertical ?? null,
+      vertical_inputs: payload.vertical_inputs ?? {},
       interval_minutes: payload.interval_minutes,
       enabled: payload.enabled,
       next_run_at: new Date(Date.now() + payload.interval_minutes * 60_000).toISOString(),
@@ -1002,9 +978,8 @@ export const demoApi = {
     const run = runs.get(runId);
     if (!run?.final_output) throw new Error("This run has no output to download yet.");
     if (format === "pdf") {
-      // The real PDF is rendered server-side. Faking one here would mean either
-      // shipping a PDF library for a demo or handing over a .pdf that is really
-      // markdown — saying so plainly is better than either.
+      // The real PDF is rendered server-side; the demo declines rather than
+      // handing over a .pdf that is really markdown.
       throw new Error(
         "PDF export is rendered by the backend, so it's unavailable in demo mode. Download MD for the full report.",
       );

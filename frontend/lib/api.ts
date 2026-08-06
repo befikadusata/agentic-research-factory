@@ -15,24 +15,21 @@ import { IS_DEMO, demoApi } from "./demo";
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 // Demo mode (NEXT_PUBLIC_DEMO=1) swaps every call below for the in-memory seed
-// in `lib/demo.ts`, so the app runs with no backend and no API keys. The guards
-// are written out one per function rather than hidden behind a wrapper: this is
-// the file where "does this reach the network?" has to be answerable by reading
-// it.
+// in `lib/demo.ts`, so the app runs with no backend and no API keys. Each guard
+// is written out per function rather than hidden behind a wrapper, so "does this
+// reach the network?" stays answerable by reading this file.
 //
 // IS_DEMO is inlined at build time, so a normal build never takes these
-// branches — but it does still bundle the seed (~24 kB of fixture text in a
-// shared chunk), because `demoApi` is a static import. That is a size cost, not
-// a correctness one: unreachable sample markdown. Removing it would mean
-// dynamic imports in five call sites, two of which are synchronous render
-// paths, which is a worse trade than the kilobytes are worth.
+// branches; it does still bundle the seed (~24 kB of unreachable fixture text)
+// because `demoApi` is a static import. Dropping that would need dynamic imports
+// in five call sites, two of them synchronous render paths.
 
 // Simple cache
 const cache = new Map<string, { data: unknown; expires: number }>();
-const CACHE_TTL = 30 * 1000; // 30 seconds
+const CACHE_TTL = 30 * 1000;
 
 let cachedAuth: { token: string; expiresAt: number } | null = null;
-const TOKEN_REFRESH_MARGIN = 30 * 1000; // refresh this long before actual expiry
+const TOKEN_REFRESH_MARGIN = 30 * 1000;
 
 function decodeJwtExpiry(token: string): number {
   try {
@@ -75,7 +72,6 @@ export async function createRun(payload: {
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await res.text());
-  // Invalidate runs list cache on new run
   cache.clear();
   return res.json();
 }
@@ -142,7 +138,7 @@ export async function getDocument(docId: string): Promise<DocumentState> {
   return res.json();
 }
 
-// --- Analytics ------------------------------------------------------------
+// Analytics
 // Both endpoints scope to a workspace the caller belongs to, or — with no
 // workspace_id — to the caller's own runs. The UI always has an active
 // workspace, so it always passes one.
@@ -165,7 +161,7 @@ export async function getAnalyticsCosts(workspaceId?: string): Promise<Analytics
   return res.json();
 }
 
-// --- Workspaces -----------------------------------------------------------
+// Workspaces
 
 export async function getWorkspaces(): Promise<Workspace[]> {
   if (IS_DEMO) return demoApi.getWorkspaces();
@@ -220,7 +216,7 @@ export async function removeWorkspaceMember(workspaceId: string, userId: string)
   if (!res.ok) throw new Error(await res.text());
 }
 
-// --- Monitors -------------------------------------------------------------
+// Monitors
 
 export async function getMonitors(workspaceId?: string): Promise<Monitor[]> {
   if (IS_DEMO) return demoApi.getMonitors(workspaceId);

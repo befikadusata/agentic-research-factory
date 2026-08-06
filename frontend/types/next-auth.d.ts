@@ -17,9 +17,9 @@ declare module "next-auth" {
 
 declare module "next-auth/jwt" {
   interface JWT {
-    // Which provider the user signed in with ("google" | "credentials").
-    // Used to namespace the backend principal so the same email on different
-    // providers maps to distinct, non-overlapping identities.
+    /** Which provider the user signed in with ("google" | "credentials").
+     *  Namespaces the backend principal, so the same email on two providers
+     *  maps to distinct, non-overlapping identities. */
     provider?: string;
   }
 }

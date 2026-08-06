@@ -20,18 +20,15 @@ per 384-dim vector against 1.5KB packed is worth its own store.
 ## Keying
 
 The key covers *provider, model, and dimension*, not just the text. Vectors from
-two different models are not comparable, and `tools/rag.py` is emphatic that the
-embedder is chosen by config alone precisely so a collection never ends up
-holding a mixture. A cache keyed on text alone would reintroduce exactly that
-bug the moment someone set or cleared `GEMINI_API_KEY` — the old vectors would
-still hit. Keyed this way, flipping providers simply misses every entry, which
-is correct and self-healing.
+two different models are not comparable, which is why `tools/rag.py` picks the
+embedder from config alone. A cache keyed on text alone would still hit on the
+old vectors the moment someone set or cleared `GEMINI_API_KEY`; keyed this way,
+flipping providers simply misses every entry.
 
 ## Failure
 
 Never raises. A cache miss and a broken Redis are the same thing to the caller:
-compute it. Nothing here is allowed to break embedding, because a cache that can
-fail the operation it accelerates is worse than no cache.
+compute it. Nothing here is allowed to break embedding.
 """
 
 import hashlib
@@ -99,9 +96,9 @@ class EmbeddingCache:
     def _pack(vector: list[float]) -> bytes:
         # Explicit little-endian float32. Native byte order would corrupt entries
         # for anyone sharing a Redis across architectures, and a byte-swapped
-        # vector is the worst kind of bug: right length, plausible magnitudes,
-        # silently wrong retrieval. float32 loses nothing that survives storage
-        # anyway — pgvector's own element type is single precision.
+        # vector reads as valid: right length, plausible magnitudes, wrong
+        # retrieval. float32 costs nothing — pgvector's element type is single
+        # precision.
         return struct.pack(f"<{len(vector)}f", *vector)
 
     @staticmethod

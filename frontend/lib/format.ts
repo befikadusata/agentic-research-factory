@@ -1,14 +1,11 @@
 /**
  * Display formatting for the measurement surfaces (run cost panel, analytics).
  *
- * Shared rather than inlined because the two views must agree: a run that reads
- * "12,480 tokens · $0.0031" on its own page and a different rounding of the same
- * number in the workspace total reads as a bug in the accounting, not a
- * formatting choice.
+ * Shared rather than inlined so the two views round identically: the same figure
+ * displayed two ways reads as an accounting bug.
  */
 
-/** Thousands-separated integer. Token counts get large fast and are unreadable
- *  as a bare run of digits. */
+/** Thousands-separated integer, since token counts get large fast. */
 export function formatTokens(n: number): string {
   return Math.round(n).toLocaleString("en-US");
 }
@@ -26,8 +23,7 @@ export function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-/** Seconds as "4m 12s" — a wall-clock figure people compare against their own
- *  patience, which minutes express and raw seconds don't. */
+/** Seconds as "4m 12s"; raw seconds read poorly above a minute. */
 export function formatDuration(sec: number): string {
   const total = Math.round(sec);
   if (total < 60) return `${total}s`;

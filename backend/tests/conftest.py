@@ -1,20 +1,22 @@
 import os
+
 # Must be set before any project module (config/database/main) is imported so
 # config.py redirects the DB to an isolated test database. Otherwise the
 # drop_all/create_all below would wipe the running app's data.
 os.environ["TESTING"] = "1"
 
-import pytest
 import asyncio
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-from main import app
+
 from auth import get_current_user
-from database import get_db, Base
 from config import settings
-import models
+from database import Base, get_db
+from main import app
 
 
 def _ensure_test_database() -> None:
@@ -70,7 +72,6 @@ async def db_session(engine):
 
 @pytest.fixture
 async def client(db_session):
-    # Override get_db to use the fixture's session
     async def _get_db_override():
         yield db_session
     
@@ -141,6 +142,7 @@ def run_driver(monkeypatch):
 
     async def drive(run_id, *, approve=True, instruction=None, observer=None, max_steps=30):
         from uuid import UUID
+
         from database import AsyncSessionLocal
         from models import Run, RunStatus
 

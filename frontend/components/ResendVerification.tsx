@@ -6,9 +6,9 @@ import { resendVerification } from "@/lib/verification";
 /**
  * An email field and a submit that request a fresh verification link.
  *
- * It carries its own email input rather than taking one as a prop because the
- * screen that needs it most has no address to work from: an expired link's
- * token is exactly what the server just refused to decode.
+ * It carries its own email input rather than taking one as a prop: the screen
+ * that needs it most reached an expired link, whose token the server just
+ * refused to decode, so no address is available.
  */
 export function ResendVerification() {
   const [email, setEmail] = useState("");

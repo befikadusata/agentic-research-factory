@@ -7,13 +7,13 @@ filtering can't catch those; only comparing against the retrieved sources can.
 """
 import pytest
 
+from tools.rag import extract_citations
 from utils.source_ledger import (
     canonical_url,
     record_retrieved_url,
     reset_seen_sources,
     take_seen_sources,
 )
-from tools.rag import extract_citations
 
 
 @pytest.fixture(autouse=True)
@@ -22,8 +22,6 @@ def clean_ledger():
     yield
     reset_seen_sources()
 
-
-# ── canonical_url ─────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("a,b", [
     ("http://onyx.app/a", "https://onyx.app/a"),          # scheme
@@ -57,8 +55,6 @@ def test_canonical_url_survives_a_malformed_url():
     assert canonical_url("") == ""
 
 
-# ── the ledger ────────────────────────────────────────────────────────────────
-
 def test_ledger_records_canonically_and_deduplicates():
     record_retrieved_url("https://www.onyx.app/leaderboard/")
     record_retrieved_url("http://onyx.app/leaderboard?utm_source=news")
@@ -87,8 +83,6 @@ def test_record_never_raises_on_junk():
     record_retrieved_url("https://host:notaport/x")
     take_seen_sources()  # must not blow up
 
-
-# ── extract_citations grounding ───────────────────────────────────────────────
 
 REAL = "https://onyx.app/self-hosted-llm-leaderboard"
 FAKE = "https://www.dataqualityreport.com/rag-data-requirements"

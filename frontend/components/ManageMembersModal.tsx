@@ -50,8 +50,8 @@ export function ManageMembersModal({
 }) {
   const { data: session } = useSession();
   // Mirrors the backend's two independent grants: the admin role, or ownership.
-  // Gating on ownership alone hid these controls from a promoted admin the
-  // server would have accepted.
+  // Either alone is enough, so gating on both would hide controls the server
+  // would have accepted.
   const mayManage = session?.user?.id === workspace.owner_id || workspace.role === "admin";
 
   const [members, setMembers] = useState<WorkspaceMember[]>([]);

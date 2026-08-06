@@ -3,17 +3,17 @@ Benchmark smoke test — runs execute_run against the real LangGraph supervisor,
 with fake leaf-node functions swapped in for the CrewAI-backed ones (same
 technique as test_run_service_hitl.py's `_install_fake_graph`).
 
-§11.5 regression: this test used to patch `_invoke_supervisor_with_retry` with
-a fake that just merged hardcoded strings into state, so the real graph in
-crew.py (routing, checkpointer, interrupt_before) never ran — it couldn't have
-caught the HITL orchestration bug that the §5.1 fix addressed. It also mocked
-`evaluate_output` wholesale and asserted `eval_scores["overall"] >= 70` against
-`FAKE_EVAL_SCORES`, a constant defined in this same file, so the "quality bar"
-assertion could never fail. Now only the eval LLM call boundary (`acompletion`)
-is faked; the real graph routing/interrupt/resume logic and the real
-`evaluate_output` JSON-parsing both execute for real, and the run is driven
-across its segmented HITL gates via the `run_driver` fixture (operator approving
-each stage) rather than a single blocking execute_run call.
+The faking has to stop at the eval LLM call boundary (`acompletion`). Patch
+`_invoke_supervisor_with_retry` instead and the real graph in crew.py (routing,
+checkpointer, interrupt_before) never runs, so no HITL orchestration bug can be
+caught. Here the real graph routing/interrupt/resume logic and the real
+`evaluate_output` JSON-parsing both execute, and the run is driven across its
+segmented HITL gates via the `run_driver` fixture (operator approving each
+stage) rather than a single blocking execute_run call.
+
+Note that the `eval_scores["overall"] >= 70` assertion below is NOT a quality
+bar: the scores come from `FAKE_EVAL_SCORES` in this file, so it can only fail
+if the scores stop surviving the parse-and-persist path.
 """
 import json
 import uuid
@@ -25,12 +25,9 @@ from sqlalchemy import select as sa_select
 import agents.crew as crew_module
 from database import AsyncSessionLocal
 from models import Run, RunCost, RunStatus, Workspace
-from services.run_service import execute_run
 
 # One topic per vertical config — unscoped, plus b2b_sales / marketing / founder
-# — all on the lead_intel format. Carried over from the 20-topic eval set that
-# docs/evaluation held until ff6abcf retired it as completed notes; four is what
-# a test can afford to actually run.
+# — all on the lead_intel format. Four is what a test can afford to actually run.
 BENCHMARK_SUBSET = [
     {"topic": "Kubernetes cost optimization for SaaS", "format": "lead_intel", "vertical": None},
     {"topic": "https://linear.app", "format": "lead_intel", "vertical": "b2b_sales"},
@@ -132,18 +129,15 @@ async def test_benchmark_smoke(redis_pool, monkeypatch, run_driver):
                 assert run.status == RunStatus.complete
                 assert "Final Output" in run.final_output
 
-                # Latency recorded
                 assert "latency_sec" in run.metrics
                 assert run.metrics["latency_sec"] < 60
 
-                # Eval scores written and meet minimum quality bar
                 assert run.metrics.get("eval_scores") is not None
                 assert run.metrics["eval_scores"]["overall"] >= 70
 
-                # Citations stored as a list, not an integer
+                # Citations stored as a list, not an integer.
                 assert isinstance(run.metrics.get("citations"), list)
 
-                # At least one cost row written per run
                 costs_result = await db2.execute(
                     sa_select(RunCost).where(RunCost.run_id == run_id)
                 )

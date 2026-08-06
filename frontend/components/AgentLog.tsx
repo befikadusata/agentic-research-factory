@@ -5,7 +5,7 @@ import type { LogEntry } from "@/lib/types";
 import { normalizeLogEntries } from "@/lib/logs";
 
 // Agent identity hues — fixed per role, independent of state. See
-// docs/design/factotum-design.md §2.6.
+// docs/design/design-language.md.
 const AGENT_COLORS: Record<string, string> = {
   "Senior Research Analyst":    "var(--base-agent-researcher)",
   "Strategic Insights Analyst": "var(--base-agent-analyst)",

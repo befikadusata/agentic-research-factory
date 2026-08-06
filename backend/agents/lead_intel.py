@@ -1,9 +1,11 @@
+from datetime import UTC, datetime
+
 from crewai import Agent, Task
-from tools.search import tavily_search_tool
-from tools.scraper import firecrawl_tool
+
 from configs.prompt_loader import get_prompt
 from services.llm_router import get_llm
-from datetime import datetime, timezone
+from tools.scraper import firecrawl_tool
+from tools.search import tavily_search_tool
 
 
 def lead_intel_agent() -> Agent:
@@ -13,8 +15,8 @@ def lead_intel_agent() -> Agent:
         goal=prompt["goal"],
         backstory=prompt["backstory"],
         tools=[tavily_search_tool, firecrawl_tool],
-        # H3: cap the completion (pipeline-wide token invariant); generous, since
-        # this single agent produces the whole lead dossier deliverable.
+        # Cap the completion (pipeline-wide token invariant); generous, since this
+        # single agent produces the whole lead dossier deliverable.
         llm=get_llm("lead_intel", max_tokens=1800),
         verbose=True,
         max_iter=10,
@@ -54,10 +56,9 @@ def build_lead_intel_description(
     inputs = vertical_inputs or {}
     target_role = str(inputs.get("target_role") or "relevant decision maker")
     our_product = str(inputs.get("our_product") or "not provided; state assumptions explicitly")
-    current_date = current_date or datetime.now(timezone.utc).date().isoformat()
+    current_date = current_date or datetime.now(UTC).date().isoformat()
     current_year = int(current_date[:4])
 
-    # Extract vertical playbook from topic if present
     vertical_section = ""
     if "**Vertical Playbook**:" in execution_brief:
         vertical_section = prompt["vertical_section"]

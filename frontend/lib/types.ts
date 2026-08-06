@@ -131,9 +131,8 @@ export const VERTICALS: VerticalDefinition[] = [
 
 export interface Run {
   id: string;
-  /** Principal who started the run (`<provider>:<email>`). Optional because a
-   *  response cached from before the backend sent it has none — treat "absent"
-   *  as "ownership unknown", never as "not the owner". */
+  /** Principal who started the run (`<provider>:<email>`). Absent means
+   *  "ownership unknown" — never read it as "not the owner". */
   user_id?: string;
   topic: string;
   format: OutputFormat;
@@ -170,9 +169,9 @@ export interface MonitorDiff {
  *
  *  `page` is a URL for web citations and a page number for citations into an
  *  uploaded document. `verified` says whether the run actually retrieved that
- *  URL: false means the model produced it without ever fetching it. It is
- *  absent when no claim can be made — document citations have no URL to check,
- *  and runs from before source-ledgering was added were never checked at all. */
+ *  URL: false means the model produced it without ever fetching it, and absent
+ *  means no claim can be made (a document citation has no URL to check, and
+ *  runs predating source-ledgering were never checked). */
 export interface Citation {
   source: string;
   page: string;
@@ -210,6 +209,10 @@ export interface CreateMonitorInput {
   topic: string;
   format: OutputFormat;
   workspace_id?: string;
+  /** A monitor is a saved run template, so it carries the same playbook fields
+   *  a one-off run does — omitting them schedules generic research. */
+  vertical?: Vertical | null;
+  vertical_inputs?: Record<string, string>;
   interval_minutes: number;
   enabled: boolean;
   notify_channel?: string | null;
@@ -235,16 +238,15 @@ export interface RunDetail extends Run {
   final_output: string | null;
   error_message?: string | null;
   metrics?: RunMetrics;
-  /** Optional because a failed run may have spent nothing, and because a
-   *  response cached from before the UI read this field has no rows. */
+  /** Optional: a failed run may have spent nothing. */
   costs?: RunCost[];
 }
 
 /** Aggregates from `GET /analytics/metrics`.
  *
- *  Counts **completed runs only** — a run that failed has no scores to average,
- *  so it is excluded here even though it still cost money. That is why this
- *  count and the cost totals below are not drawn from the same population. */
+ *  Counts **completed runs only** — a failed run has no scores to average, so it
+ *  is excluded here even though it still cost money. This count and the cost
+ *  totals below therefore cover different populations. */
 export interface AnalyticsMetrics {
   count: number;
   averages: {
@@ -265,9 +267,8 @@ export interface AgentCost {
   output_tokens: number;
 }
 
-/** Aggregates from `GET /analytics/costs`, over **every** run in scope —
- *  including failed ones, whose spend is real and is exactly what someone
- *  looking at a cost page needs to see. */
+/** Aggregates from `GET /analytics/costs`, over **every** run in scope,
+ *  including failed ones. */
 export interface AnalyticsCosts {
   total_cost_usd: number;
   total_input_tokens: number;
@@ -334,7 +335,7 @@ export const RUN_STATUS_MAP: Record<RunStatus, number> = {
   failed:                     -1,
 };
 
-/** Factotum's six-state agent model — see docs/design/factotum-design.md §2.3/§5.1. */
+/** The six-state agent model — see docs/design/design-language.md. */
 export type AgentState = "idle" | "active" | "thinking" | "complete" | "error" | "paused";
 
 export const STATUS_TO_AGENT_STATE: Record<RunStatus, AgentState> = {
@@ -377,19 +378,12 @@ export function statusBadgeClass(status: RunStatus): string {
 }
 
 /**
- * Derives a pipeline node's visual state from the run's overall status.
- * `failedAtStatus` (Run.failed_at_status) pinpoints which stage was active when
- * a "failed" run actually failed — without it, the failure point is unknown
- * (e.g. runs that failed before this field existed) and every node stays idle.
- */
-/**
  * Whether the signed-in user may approve this run's HITL checkpoint.
  *
  * Mirrors `assert_run_access(..., min_role="operator")` in backend/auth.py: a
  * run's own creator always passes, while access granted *via* a workspace needs
  * operator or higher. Anything undeterminable locally — unknown owner, unknown
- * role — resolves to `true` and lets the server decide. Hiding the control on a
- * guess would be a worse failure than the 403 it exists to prevent.
+ * role — resolves to `true` and lets the server decide.
  */
 export function canApproveRun(
   run: Pick<Run, "user_id" | "workspace_id">,
@@ -402,6 +396,12 @@ export function canApproveRun(
   return workspaceRole === "operator" || workspaceRole === "admin";
 }
 
+/**
+ * Derives a pipeline node's visual state from the run's overall status.
+ * `failedAtStatus` (Run.failed_at_status) pinpoints which stage was active when
+ * a "failed" run failed; without it the failure point is unknown and every node
+ * stays idle.
+ */
 export function pipelineNodeState(
   status: RunStatus,
   nodeId: string,

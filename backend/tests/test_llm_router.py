@@ -1,7 +1,7 @@
 import pytest
 
-from config import settings
 import services.llm_router as lr
+from config import settings
 from services.llm_router import get_completion_settings, get_fallbacks, get_model
 
 
@@ -26,15 +26,14 @@ def test_get_model_uses_legacy_override(monkeypatch):
     assert get_model("researcher") == "legacy/model"
 
 
-# ── M2: the judges (reviewer + eval) can differ from the generators they grade ─
-# Otherwise, in legacy mode every agent collapses onto LLM_MODEL and a model
-# grades its own output, surfaced to the human as "AI Confidence."
+# The judges (reviewer + eval) must be able to differ from the generators they
+# grade. Otherwise, in legacy mode every agent collapses onto LLM_MODEL and a
+# model grades its own output, surfaced to the human as "AI Confidence."
 
 def test_judge_model_overrides_generators_in_legacy_mode(monkeypatch):
     monkeypatch.setattr(settings, "LLM_MODEL", "groq/llama-3.3-70b-versatile")
     monkeypatch.setattr(settings, "JUDGE_MODEL", "groq/llama-3.1-8b-instant")
 
-    # Generators stay on the legacy model; the judges diverge.
     assert get_model("researcher") == "groq/llama-3.3-70b-versatile"
     assert get_model("reviewer") == "groq/llama-3.1-8b-instant"
     assert get_model("eval") == "groq/llama-3.1-8b-instant"
@@ -52,14 +51,13 @@ def test_judges_follow_normal_resolution_when_judge_model_unset(monkeypatch):
     monkeypatch.setattr(settings, "LLM_MODEL", "legacy/model")
     monkeypatch.setattr(settings, "JUDGE_MODEL", None)
 
-    # Unset JUDGE_MODEL preserves the pre-M2 behavior: judges follow legacy too.
     assert get_model("reviewer") == "legacy/model"
     assert get_model("eval") == "legacy/model"
 
 
-# ── H1: the cross-provider fallback layer is live in legacy mode too ──────────
-# It used to hard-return [] whenever LLM_MODEL was set — i.e. disabled in the one
-# mode that actually ships — so the resilience layer was dead code in production.
+# The cross-provider fallback layer must stay live in legacy mode. Legacy
+# (LLM_MODEL set) is the mode that actually ships, so returning no fallbacks
+# there makes the whole resilience layer dead code in production.
 
 def test_legacy_mode_derives_fallback_when_peer_key_present(monkeypatch):
     monkeypatch.setattr(settings, "LLM_MODEL", "groq/llama-3.3-70b-versatile")
@@ -137,7 +135,6 @@ def test_get_completion_settings_uses_provider_key(monkeypatch):
 
     llm = get_completion_settings("analyst")
 
-    # An explicit OpenRouter override carries that provider's key.
     assert llm.model == "openrouter/tencent/hy3:free"
     assert llm.api_key == "openrouter-test-key"
 
@@ -153,10 +150,10 @@ def test_get_completion_settings_treats_raw_openrouter_slugs_as_openrouter(monke
     assert llm.api_key == "openrouter-test-key"
 
 
-# ── H4: cost is attributed to the model that actually served the call ─────────
-# litellm reports the served model on each success (the bare provider name, no
-# litellm prefix); resolve_actual_model reconciles it back to a known pricing
-# slug — the primary normally, the fallback slug when a fallback leg ran.
+# Cost must be attributed to the model that actually served the call. litellm
+# reports the served model on each success (the bare provider name, no litellm
+# prefix); resolve_actual_model reconciles it back to a known pricing slug — the
+# primary normally, the fallback slug when a fallback leg ran.
 
 class _Resp:
     def __init__(self, model):
@@ -200,11 +197,10 @@ def test_resolve_actual_model_unknown_served_degrades_to_primary(monkeypatch):
     assert lr.resolve_actual_model("researcher") == "groq/llama-3.3-70b-versatile"
 
 
-# ── Capability-based routing: per-role tiering, single-provider-safe ──────────
-# Routing is keyed by each role's capability (llm_router.ROLE_CAPS) against a
-# model registry, ranked cost-first — replacing the old hardcoded per-agent
-# table that pinned analyst/reviewer/eval to OpenRouter and so failed-then-fell-
-# back on every call when only the Groq key was present.
+# Capability-based routing: per-role tiering that stays correct on a single
+# provider. Routing is keyed by each role's capability (llm_router.ROLE_CAPS)
+# against a model registry, ranked cost-first, so a role never pins a model
+# whose provider key is absent and eats a failing fallback round-trip.
 
 def test_routed_groq_and_openrouter_reproduces_current_mapping(monkeypatch):
     # With both keys (the shipped setup) every role resolves to a Groq model:
@@ -228,9 +224,9 @@ def test_routed_groq_and_openrouter_reproduces_current_mapping(monkeypatch):
 
 
 def test_routed_groq_only_keeps_per_role_tiering(monkeypatch):
-    # The core fix: with only the Groq key, light work still uses 8B and the
-    # reasoning/judge roles resolve to Groq 70B directly instead of pinning an
-    # absent OpenRouter model and eating a failing fallback round-trip.
+    # With only the Groq key, light work still uses 8B and the reasoning/judge
+    # roles must resolve to Groq 70B directly rather than pinning an absent
+    # OpenRouter model and eating a failing fallback round-trip.
     _routed(monkeypatch, groq=True, openrouter=False, gemini=False)
 
     assert get_model("strategist") == "groq/llama-3.1-8b-instant"
@@ -246,8 +242,8 @@ def test_routed_groq_only_keeps_per_role_tiering(monkeypatch):
 def test_reasoning_avoids_unreliable_free_model(monkeypatch):
     # hy3 is $0 (cheaper than Groq 70B) but not a valid crewai primary — it
     # returns empty content — so it carries no primary caps. The reasoning role
-    # therefore resolves to the reliable Groq 70B, and hy3 is only reachable as
-    # the derived cross-provider fallback.
+    # resolves to the reliable Groq 70B, and hy3 is only reachable as the
+    # derived cross-provider fallback.
     _routed(monkeypatch, groq=True, openrouter=True, gemini=False)
 
     assert get_model("analyst") == "groq/llama-3.3-70b-versatile"
@@ -255,11 +251,10 @@ def test_reasoning_avoids_unreliable_free_model(monkeypatch):
 
 
 def test_judge_falls_back_to_generator_model_without_distinct_option(monkeypatch):
-    # The judge PREFERS a model distinct from the generators (M2), but hy3 — the
-    # only other registry model that once carried a judge cap — was dropped as a
-    # primary, so no distinct reliable model qualifies: the judge resolves to the
-    # same Groq 70B the generators use. JUDGE_MODEL is the way to actually
-    # decouple them on a single-provider deployment.
+    # The judge PREFERS a model distinct from the generators, but on this key set
+    # no distinct reliable model carries a judge cap, so it resolves to the same
+    # Groq 70B the generators use. JUDGE_MODEL is the way to actually decouple
+    # them on a single-provider deployment.
     _routed(monkeypatch, groq=True, openrouter=True, gemini=False)
 
     assert get_model("writer") == "groq/llama-3.3-70b-versatile"

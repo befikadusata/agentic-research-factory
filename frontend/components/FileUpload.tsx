@@ -21,9 +21,9 @@ interface Props {
 }
 
 const POLL_INTERVAL_MS = 1500;
-// Ingestion is a PDF parse plus an embedding pass. Two minutes is generous for
-// the single-file limit here; past that, something is wrong and saying so beats
-// a spinner that never resolves.
+// Ingestion is a PDF parse plus an embedding pass; two minutes is generous for
+// the single-file limit here, so past that the UI reports failure rather than
+// spinning forever.
 const POLL_TIMEOUT_MS = 120_000;
 
 export function FileUpload({ workspaceId, onChange }: Props) {

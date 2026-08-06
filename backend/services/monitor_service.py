@@ -1,36 +1,37 @@
-"""Monitor scheduling — the piece that makes saved monitors actually fire.
+"""Saved monitors: scheduling them, and reporting what changed between runs.
 
 `dispatch_due_monitors` is invoked periodically by a Celery-beat task. It finds
 monitors whose `next_run_at` has passed, spawns a fresh Run for each (tagged
 with `monitor_id`), advances the schedule, and queues the pipeline task.
 
-Diffing successive runs and sending change alerts are not implemented here yet —
-this module only handles the scheduling half.
+`finalize_monitored_run` closes the loop from the other end: the run pipeline
+calls it on completion, and it diffs the output against the monitor's previous
+run and delivers an alert on the monitor's `notify_channel` when something
+material changed.
 """
 import asyncio
-import httpx
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
-from typing import Optional
 
+import httpx
+from litellm import acompletion
 from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
-from litellm import acompletion
 
-from database import AsyncSessionLocal
-from models import Monitor, Run, RunStatus
-from services.run_dispatch import build_run
-from services.llm_router import get_completion_settings
-from utils.json_parse import parse_json
-from utils.email import send_email
 from celery_app import execute_run_task
+from database import AsyncSessionLocal
 from logger import logger
+from models import Monitor, Run, RunStatus
+from services.llm_router import get_completion_settings
+from services.run_dispatch import build_run
+from utils.email import send_email
+from utils.json_parse import parse_json
 
 
 async def dispatch_due_monitors() -> list[str]:
     """Spawn a run for every monitor whose schedule is due. Returns the ids of
     the runs that were queued. Safe to call repeatedly (idempotent per tick)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     async with AsyncSessionLocal() as db:
         due_ids = (
@@ -56,7 +57,7 @@ async def dispatch_due_monitors() -> list[str]:
     return dispatched
 
 
-async def _spawn_monitor_run(monitor_id: UUID, now: datetime) -> Optional[str]:
+async def _spawn_monitor_run(monitor_id: UUID, now: datetime) -> str | None:
     """Atomically: lock the monitor, create its run, advance `next_run_at`, and
     commit. Returns the new run id, or None if the monitor was grabbed by a
     concurrent dispatcher / disabled in the meantime."""

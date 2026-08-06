@@ -2,9 +2,8 @@
 
 LLM "return only JSON" output is unreliable in practice: models wrap it in
 ```json code fences, add a prose preamble ("Here is the JSON:"), or append a
-trailing note. The previous call sites hand-stripped a single ``` fence and then
-json.loads()'d, which broke on any of those variants. This centralizes a
-best-effort parse so every judge/rewriter shares the same tolerant behavior.
+trailing note. This centralizes a best-effort parse so every judge/rewriter
+shares the same tolerant behavior.
 """
 import json
 import re

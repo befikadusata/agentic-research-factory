@@ -15,7 +15,15 @@
 [![Redis](https://img.shields.io/badge/Events-Redis-DC382D?logo=redis&logoColor=white)](docker-compose.yml)
 [![Celery](https://img.shields.io/badge/Workers-Celery-37814A?logo=celery&logoColor=white)](backend/celery_app.py)
 
-An AI-assisted market research platform that coordinates specialized agents, pauses for human review, and produces cited, export-ready briefs. It combines a stateful LangGraph workflow, hybrid retrieval, multi-tenant access control, and live Server-Sent Events (SSE) updates in a full-stack application.
+An AI-assisted market research platform that coordinates specialized agents, pauses for human review, and produces cited, export-ready briefs. It combines a stateful LangGraph workflow, hybrid retrieval, multi-tenant access control, and live Server-Sent Events (SSE) updates.
+
+## Why this exists
+
+Most "AI research agent" demos are one model call behind a chat box. They produce confident prose, cite sources that do not say what the text claims, and give you nowhere to intervene before the output is finished.
+
+The prompt was never the interesting part. Everything around it is: keeping a multi-stage pipeline resumable across process boundaries, letting a reviewer redirect it mid-run without holding a worker hostage for the length of a lunch break, gating retrieval so an unanswerable question gets an abstention instead of a fabrication, and keeping the cost and failure mode of every stage visible while it runs.
+
+This is a personal project built to work that problem end to end rather than to demo the happy path. Where a shortcut would have hidden a real constraint, the constraint is written down instead — [design decisions](docs/decisions.md) covers what was chosen and why, and [RAG optimizations](docs/optimizations.md) reports a retrieval pipeline that measurably loses to its own baseline on the current corpus, along with the reason it is kept anyway.
 
 ## Product Walkthrough
 
@@ -30,6 +38,12 @@ From a structured competitor brief to agent execution, human review, and a cited
 The workflow pauses after research so an operator can inspect the evidence, redirect the analysis, or approve the next stage.
 
 ![Human reviewing research findings before analysis](docs/assets/screenshot_readme_hitl-review_20260723.png)
+
+### The deliverable
+
+An approved run ends in a cited brief with its own quality assessment — scored on accuracy, relevance, completeness, and writing — exportable as Markdown or PDF, and savable as a monitor that re-runs the same research on a schedule.
+
+![Completed intelligence brief with AI confidence scores and export controls](docs/assets/screenshot_readme_final-brief_20260723.png)
 
 ## Engineering Highlights
 
@@ -60,6 +74,7 @@ flowchart LR
     API --> AppDB
     API <--> Redis
     API --> Worker
+    Worker -->|"persist segment state"| AppDB
     API -->|"store upload"| Files
     Worker -->|"read to parse"| Files
     Worker --> Graph
@@ -75,8 +90,8 @@ The application database uses SQLAlchemy and Alembic. Document RAG stores its em
 ## Core Capabilities
 
 - Research playbooks for B2B lead intelligence, competitor analysis, and founder strategy
-- Dynamic routing across Strategist, Researcher, Analyst, Reviewer, Writer, Editor, and Lead Intel roles
-- Explicit research and analysis approval checkpoints
+- Strategist, Researcher, Analyst, Reviewer, Writer, Editor, and Lead Intel roles, routed by the playbook's task type
+- Explicit research, analysis, and final-output approval checkpoints
 - Uploaded-document RAG scoped to workspaces and optional vertical tags
 - Live pipeline status and agent-event streaming
 - Reusable monitors for scheduled follow-up research
@@ -108,6 +123,9 @@ npm install
 npm run demo          # http://localhost:3000
 ```
 
+If port 3000 is taken, `npm run demo -- -p 3005` moves it; demo mode calls no
+backend, so nothing else needs to follow the port.
+
 Click **Enter the demo**. You get seeded runs in two workspaces, a completed
 report with quality scores and markdown export, a failed run, a monitor with a
 change diff — and starting a new run plays a scripted pipeline that streams
@@ -121,7 +139,7 @@ For the real thing, keep reading.
 
 ### Core live research
 
-This path starts the web application, API, PostgreSQL, Redis, Celery workers, MinIO for uploaded files, and self-hosted SearXNG. It does not start the heavier self-hosted Firecrawl stack.
+This path starts the web application, API, PostgreSQL, Redis, a Celery worker, the Celery beat scheduler that fires due monitors, MinIO for uploaded files, and self-hosted SearXNG. It does not start the heavier self-hosted Firecrawl stack.
 
 Prerequisites: Docker with Compose and at least one supported LLM provider key. A Groq key is the simplest default.
 
@@ -154,6 +172,12 @@ Prerequisites: Docker with Compose and at least one supported LLM provider key. 
    | Health check | http://localhost:8000/health |
    | MinIO console | http://localhost:9001 (`minioadmin` / `minioadmin`) |
 
+   If port 3000 or 8081 is already taken on your machine, export
+   `FRONTEND_HOST_PORT` or `SEARXNG_HOST_PORT` before `docker compose up` —
+   Compose otherwise fails to bind and leaves that container off the network,
+   where it looks healthy in `docker ps` but nothing can reach it. The backend's
+   allowed CORS origin and `NEXTAUTH_URL` both follow `FRONTEND_HOST_PORT`.
+
 ### Enable the full feature set
 
 Add only the providers required for the features you want:
@@ -167,7 +191,7 @@ Add only the providers required for the features you want:
 | Cloud search instead of SearXNG | `TAVILY_API_KEY` |
 | Cloud scraping | `FIRECRAWL_API_KEY`; when using Compose, remove or override its self-hosted `FIRECRAWL_API_URL` value |
 | LlamaParse PDF fallback | `LLAMA_CLOUD_API_KEY` |
-| LLM tracing | `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` |
+| LLM tracing | `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`; add `LANGFUSE_HOST` for a self-hosted instance, which otherwise defaults to Langfuse Cloud |
 
 Self-hosted Firecrawl is an opt-in five-container profile:
 
@@ -183,7 +207,7 @@ For hosted environments and production configuration, see the [deployment guide]
 
 The CI workflow runs backend tests with PostgreSQL and Redis, frontend linting, mocked Playwright end-to-end flows, and independent frontend/backend Docker builds.
 
-As of 2026-07-23, the backend suite passes **285 tests across 32 test files**, covering:
+The backend suite is roughly **480 tests across 40 test files**; 16 of them skip by default, being the model-eval harnesses that only run under `RUN_MODEL_EVALS=1`. Coverage:
 
 - agent routing, retry behavior, HITL pause/resume, and stuck-run recovery
 - authentication, workspace authorization, and cross-user access denial
@@ -195,6 +219,13 @@ Run the backend suite:
 ```bash
 cd backend
 uv run pytest
+```
+
+Lint the backend (ruff, configured in `backend/pyproject.toml`; CI runs the same command):
+
+```bash
+cd backend
+uv run ruff check .        # add --fix to apply the safe autofixes
 ```
 
 Run the route-intercepted frontend flows:
@@ -234,5 +265,8 @@ See the [reliability guide](docs/reliability.md) for retry, timeout, health-chec
 | [Architecture specification](docs/architecture.md) | Agent graph, retrieval flow, state transitions, and data model |
 | [Deployment guide](docs/deployment.md) | Hosted and local deployment configuration |
 | [Reliability guide](docs/reliability.md) | Failure modes, retries, timeouts, and observability |
-| [RAG optimizations](docs/optimizations.md) | Query expansion, hybrid indexing, and reranking |
-| [Demo readiness checklist](docs/checklists/demo_readiness.md) | Pre-demo verification steps |
+| [RAG optimizations](docs/optimizations.md) | Query expansion, hybrid indexing, reranking, and what the retrieval evaluation does and does not prove |
+| [Design decisions](docs/decisions.md) | Where the system diverges from the obvious choice, and what was left unbuilt |
+| [Design language](docs/design/design-language.md) | Palette, typography, motion, and the signature components |
+| [Design tokens](docs/design/design-tokens.md) | Token architecture, Tailwind wiring, and the light-mode contrast audit |
+| [Demo readiness checklist](docs/checklists/demo_readiness.md) | Pre-deploy and end-to-end verification steps |

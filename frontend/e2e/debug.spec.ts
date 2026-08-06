@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test } from "@playwright/test";
 import { EncryptJWT } from "jose";
 import hkdf from "@panva/hkdf";
 import crypto from "crypto";

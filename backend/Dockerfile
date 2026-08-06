@@ -88,6 +88,34 @@ target = Path(ds.cache_dir) / 'models' / spec.model_repo_folder; \
 snapshot_download(repo_id=spec.repo_id, revision=spec.revision, local_dir=str(target)); \
 print('layout-v2 baked into', target)"
 
+# Bake the retrieval models for the same reason as the docling ones above: left
+# out, the first retrieval that finds candidates downloads the cross-encoder
+# inside the researcher's tool call. That is not merely slow — `retrieve()` has
+# no timeout around the load, so on a host that cannot reach HuggingFace the
+# call blocks until Celery's task_soft_time_limit kills the segment, and the run
+# fails with nothing pointing at a model download as the cause.
+#
+# Both are ~88 MB and both are load-bearing: the cross-encoder produces the
+# scores RAG_MIN_RERANK_SCORE gates on (there is no score fallback — an
+# unrankable pool can only be abstained from), and all-MiniLM-L6-v2 is the
+# embedding fallback for when Gemini is unavailable, i.e. exactly when the
+# network is already degraded.
+RUN HF_HUB_DISABLE_XET=1 HF_HUB_DOWNLOAD_TIMEOUT=60 HF_HUB_ETAG_TIMEOUT=30 \
+    timeout 900 python -c "\
+from sentence_transformers import CrossEncoder, SentenceTransformer; \
+CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
+SentenceTransformer('all-MiniLM-L6-v2'); \
+print('reranker + fallback embedder baked')"
+
+# Backstop for anything that still reaches HuggingFace at runtime (a revision
+# check on an already-cached model, say). Unbounded, huggingface_hub's own retry
+# loop turns an unreachable hub into a multi-minute stall inside whichever
+# request touched it; bounded, the metadata call fails in seconds and falls back
+# to the baked cache. ENV rather than build-only args — the stall these prevent
+# happens at request time.
+ENV HF_HUB_DOWNLOAD_TIMEOUT=60
+ENV HF_HUB_ETAG_TIMEOUT=10
+
 COPY . .
 
 EXPOSE 8000

@@ -1,6 +1,5 @@
 import pytest
 
-
 REG = "/auth/register"
 LOGIN = "/auth/login"
 VERIFY = "/auth/verify-email"
@@ -21,8 +20,6 @@ async def _register_and_verify(client, email, password="hunter2pass", name=None)
     await client.post(VERIFY, json={"token": token})
     return r
 
-
-# --- registration ---------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_register_creates_unverified_account(client):
@@ -50,6 +47,7 @@ async def test_short_password_rejected(client):
 @pytest.mark.asyncio
 async def test_password_hash_is_not_plaintext(client, db_session):
     from sqlalchemy import select
+
     from models import User
 
     await _register(client, "frank@example.com")
@@ -57,8 +55,6 @@ async def test_password_hash_is_not_plaintext(client, db_session):
     assert user.password_hash != "hunter2pass"
     assert user.password_hash.startswith("$2")  # bcrypt marker
 
-
-# --- login gating on verification ----------------------------------------
 
 @pytest.mark.asyncio
 async def test_login_before_verification_is_forbidden(client):
@@ -99,8 +95,6 @@ async def test_unknown_email_and_wrong_password_indistinguishable(client):
     assert unknown.json() == wrong.json()  # no enumeration
 
 
-# --- verify-email endpoint -----------------------------------------------
-
 @pytest.mark.asyncio
 async def test_verify_with_invalid_token_is_400(client):
     r = await client.post(VERIFY, json={"token": "not-a-real-token"})
@@ -116,8 +110,6 @@ async def test_verify_is_idempotent(client):
     assert first.status_code == second.status_code == 200
     assert second.json()["verified"] is True
 
-
-# --- resend ---------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_resend_for_unverified_sends_link(client):

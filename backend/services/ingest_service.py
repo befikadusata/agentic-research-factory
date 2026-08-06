@@ -1,10 +1,11 @@
 from uuid import UUID
+
 from database import AsyncSessionLocal
+from logger import logger
 from models import Document, DocumentStatus
 from services.pdf_service import parse_pdf
 from services.storage_service import ObjectNotFound, materialize
 from tools.rag import ingest_documents
-from logger import logger
 
 
 async def ingest_doc(doc_id: UUID) -> None:
@@ -23,10 +24,10 @@ async def ingest_doc(doc_id: UUID) -> None:
                 logger.info("ingest_complete", doc_id=str(doc_id), chunks=len(chunks))
             else:
                 # parse_pdf swallows every parser failure and returns []. Marking
-                # that `ready` (as this did unconditionally) told the UI the upload
-                # succeeded while nothing was ever embedded, so every later run
-                # silently had no document context. Fail it so the operator — and
-                # _run_start_segment's ingestion check — actually sees it.
+                # that `ready` would tell the UI the upload succeeded while nothing
+                # was embedded, so every later run would silently have no document
+                # context. Fail it so the operator — and _run_start_segment's
+                # ingestion check — sees it.
                 doc.status = DocumentStatus.failed
                 doc.error_message = (
                     "No text could be extracted from this PDF. It may be empty, "
@@ -35,10 +36,9 @@ async def ingest_doc(doc_id: UUID) -> None:
                 logger.warning("ingest_no_chunks", doc_id=str(doc_id))
         except ObjectNotFound:
             # Caught ahead of the blanket handler because the generic parser
-            # message above is actively misleading here: the PDF is fine, we
-            # just cannot see it. This is what a container-local UPLOAD_DIR
-            # produces on every single upload once the API and the worker stop
-            # sharing a filesystem, and it was reported as an unparseable file.
+            # message above is misleading here: the PDF is fine, we just cannot
+            # see it. A container-local UPLOAD_DIR produces this on every upload
+            # once the API and the worker stop sharing a filesystem.
             doc.status = DocumentStatus.failed
             doc.error_message = (
                 "The uploaded file is no longer in storage, so it could not be "

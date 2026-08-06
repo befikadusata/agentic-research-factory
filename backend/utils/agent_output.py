@@ -3,19 +3,13 @@
 CrewAI's parser splits on the literal "Final Answer:" marker and keeps only what
 follows (crewai/agents/parser.py), so a well-formed response arrives clean. When
 a model reproduces the prompt template's "Thought:" preamble but omits the
-marker, that split never happens and the raw text is surfaced instead — landing
-verbatim in the user-facing deliverable. A live run persisted exactly that to
-runs.final_output:
-
-    Thought: I now can give a great answer
-
-    # Impact of Open-Weight LLMs on Enterprise RAG Adoption in 2026
-    ...
+marker, that split never happens and the raw text — preamble included — lands
+verbatim in the user-facing deliverable.
 
 Only a *leading* scaffolding block is removed, and only a few lines of it. The
 preamble sits at the very top when it leaks; an output carrying several
-Thought/Action/Observation cycles is a different failure, and salvaging that by
-deleting lines would disguise it rather than fix it.
+Thought/Action/Observation cycles is a different failure, and deleting lines
+would disguise it rather than fix it.
 """
 
 import re
