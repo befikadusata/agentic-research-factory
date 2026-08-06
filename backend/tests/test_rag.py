@@ -1,6 +1,7 @@
 """Tests for RAGTool vertical filter wiring."""
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 
@@ -285,6 +286,111 @@ def test_embed_raises_instead_of_falling_back_to_local_model():
         rag._embed(["a"])
 
     local.assert_not_called()
+
+
+def _gemini_429(quota_id: str, retry_delay: str | None = None) -> httpx.HTTPStatusError:
+    """A 429 shaped the way the Gemini API actually shapes one."""
+    details: list[dict] = [{
+        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+        "violations": [{"quotaId": quota_id}],
+    }]
+    if retry_delay:
+        details.append({
+            "@type": "type.googleapis.com/google.rpc.RetryInfo",
+            "retryDelay": retry_delay,
+        })
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com")
+    response = httpx.Response(429, json={"error": {"code": 429, "details": details}},
+                              request=request)
+    return httpx.HTTPStatusError("429", request=request, response=response)
+
+
+def _embedding_response() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={"embeddings": [{"values": [0.1] * 4}]},
+        request=httpx.Request("POST", "https://generativelanguage.googleapis.com"),
+    )
+
+
+def test_a_per_minute_rate_limit_waits_as_long_as_the_server_asks():
+    """The free tier's per-minute cap clears on its own, so it must be waited out
+    rather than failed on — and waited out for as long as the 429 body says, not
+    for the few seconds a short exponential backoff would choose."""
+    import tools.rag as rag
+
+    attempts = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise _gemini_429("EmbedContentRequestsPerMinute-FreeTier", "37s")
+        return _embedding_response()
+
+    slept: list[float] = []
+    with patch("tenacity.nap.time.sleep", slept.append), \
+         patch("httpx.post", flaky), \
+         patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
+         patch.object(rag.settings, "EMBEDDING_DIMENSION", 4):
+        result = rag._gemini_embed(["hello"])
+
+    assert attempts["n"] == 3
+    assert slept == [37.0, 37.0]
+    assert result == [[0.1] * 4]
+
+
+def test_the_daily_quota_fails_immediately_instead_of_retrying():
+    """The per-day cap does not clear before tomorrow. Retrying it spends minutes
+    to arrive at the same failure, wrapped in a vaguer exception."""
+    import tools.rag as rag
+
+    attempts = {"n": 0}
+
+    def exhausted(*args, **kwargs):
+        attempts["n"] += 1
+        raise _gemini_429("EmbedContentRequestsPerDayPerUserPerProjectPerModel-FreeTier")
+
+    slept: list[float] = []
+    with patch("tenacity.nap.time.sleep", slept.append), \
+         patch("httpx.post", exhausted), \
+         patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
+         patch.object(rag.settings, "EMBEDDING_DIMENSION", 4), \
+         pytest.raises(httpx.HTTPStatusError):
+        rag._gemini_embed(["hello"])
+
+    assert attempts["n"] == 1
+    assert slept == []
+
+
+def test_a_429_without_a_parseable_body_still_backs_off():
+    """Not every 429 carries the documented details. One that does not is still a
+    rate limit, so it falls back to exponential backoff rather than giving up."""
+    import tools.rag as rag
+
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com")
+    opaque = httpx.HTTPStatusError(
+        "429",
+        request=request,
+        response=httpx.Response(429, text="rate limited", request=request),
+    )
+    attempts = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] < 2:
+            raise opaque
+        return _embedding_response()
+
+    slept: list[float] = []
+    with patch("tenacity.nap.time.sleep", slept.append), \
+         patch("httpx.post", flaky), \
+         patch.object(rag.settings, "GEMINI_API_KEY", "test-key"), \
+         patch.object(rag.settings, "EMBEDDING_DIMENSION", 4):
+        result = rag._gemini_embed(["hello"])
+
+    assert attempts["n"] == 2
+    assert slept and slept[0] >= 4.0
+    assert result == [[0.1] * 4]
 
 
 def test_embed_uses_local_model_when_no_gemini_key():
