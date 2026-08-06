@@ -174,11 +174,20 @@ jobs:
         # made it in, and the suite fails on its recall floors — the exact
         # signature of the regression it is meant to detect. This distinguishes
         # the two, because reading it wrong costs an afternoon.
+        #
+        # There are two different 429s behind that, and saying "daily quota" for
+        # both sends you to the wrong place: the per-minute cap is the suite
+        # riding its own request rate and clears by itself, the per-day cap is
+        # the budget genuinely gone until tomorrow. tools/rag.py reads the
+        # quotaId off the body, so the distinction is in the log — report which
+        # one rather than assuming.
         run: |
           set -o pipefail
           if ! uv run pytest tests/test_retrieval_eval.py tests/test_rerank_calibration.py -v 2>&1 | tee eval-output.txt; then
-            if grep -qE "RESOURCE_EXHAUSTED|429 Too Many Requests" eval-output.txt; then
-              echo "::error::Ran out of Gemini embedding quota, so retrieval quality was never measured. The free tier allows 1000 embed requests per day and one cold run costs roughly 270, shared with local development against the same key. This is NOT a retrieval regression — do not go looking for one."
+            if grep -q "PerDay" eval-output.txt; then
+              echo "::error::Gemini's per-DAY embedding quota is exhausted, so retrieval quality was never measured. The free tier allows 1000 embed requests per day and one cold run costs roughly 270, shared with local development against the same key. It will not clear before tomorrow. This is NOT a retrieval regression — do not go looking for one."
+            elif grep -qE "RESOURCE_EXHAUSTED|429 Too Many Requests" eval-output.txt; then
+              echo "::error::Gemini rate-limited the embed calls and the retries did not outlast it, so retrieval quality was never measured. This is a per-minute cap, not the daily budget — re-running usually works. This is NOT a retrieval regression — do not go looking for one."
             fi
             exit 1
           fi

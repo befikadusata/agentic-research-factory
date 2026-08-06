@@ -1,3 +1,4 @@
+import contextlib
 import re
 import uuid
 from dataclasses import dataclass
@@ -64,7 +65,72 @@ def _reranker():
 _GEMINI_BATCH_LIMIT = 100
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+# A 429 from this API is not one condition but two, and they want opposite
+# handling. The free tier caps requests per minute AND per day; the per-minute
+# cap clears on its own, the per-day one does not clear before tomorrow. The
+# body says which: a QuotaFailure names the `quotaId`, and a RetryInfo says how
+# long the server wants us to wait. Both are read below rather than guessed.
+#
+# This used to back off 2s then 4s and give up — about six seconds against a
+# window that is sixty seconds wide, so a per-minute cap could never clear and
+# surfaced as a hard failure. It broke the nightly evals on 2026-08-06, where
+# it read as daily exhaustion (the day's quota was in fact almost untouched).
+def _quota_failure(exc: BaseException | None) -> tuple[str, float | None]:
+    """`(quota_id, server_advised_delay_seconds)` from a 429 body.
+
+    Returns `("", None)` for anything that is not a parseable 429, which the
+    callers below treat as "no information" rather than as an assertion.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code != 429:
+        return "", None
+    try:
+        details = exc.response.json()["error"]["details"]
+    except Exception:
+        # A 429 whose body is not the documented shape is still a 429; the
+        # caller falls back to plain exponential backoff.
+        return "", None
+
+    quota_id, delay = "", None
+    for detail in details:
+        kind = detail.get("@type", "")
+        if kind.endswith("QuotaFailure"):
+            for violation in detail.get("violations", []):
+                quota_id = violation.get("quotaId") or quota_id
+        elif kind.endswith("RetryInfo"):
+            raw = str(detail.get("retryDelay", ""))
+            if raw.endswith("s"):
+                with contextlib.suppress(ValueError):
+                    delay = float(raw[:-1])
+    return quota_id, delay
+
+
+def _embed_should_retry(retry_state) -> bool:
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    if exc is None:
+        return False
+    quota_id, _ = _quota_failure(exc)
+    if "PerDay" in quota_id:
+        # Waiting cannot help. Fail now, and say so, rather than spending two
+        # more minutes arriving at the same place with a vaguer message.
+        logger.error("gemini_embed_daily_quota_exhausted", quota_id=quota_id)
+        return False
+    if quota_id:
+        logger.warning("gemini_embed_rate_limited", quota_id=quota_id)
+    return True
+
+
+def _embed_wait(retry_state) -> float:
+    """Server-advised delay when there is one, exponential backoff otherwise."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    _, advised = _quota_failure(exc)
+    backoff = wait_exponential(multiplier=2, min=4, max=64)(retry_state)
+    return max(advised or 0.0, backoff)
+
+
+# Five waits of up to 64s span a per-minute window several times over, which is
+# what the eval suite needs: it fires a few hundred single-query embeds
+# back to back, so it rides the rate limit rather than tripping it once.
+@retry(stop=stop_after_attempt(6), wait=_embed_wait, retry=_embed_should_retry)
 def _gemini_embed(texts: list[str]) -> list[list[float]]:
     """Embed up to `_GEMINI_BATCH_LIMIT` texts in one `batchEmbedContents` call.
 
